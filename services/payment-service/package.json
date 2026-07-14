@@ -14,9 +14,13 @@
     "@ride-app/shared-types": "workspace:*",
     "@ride-app/shared-utils": "workspace:*",
     "@ride-app/shared-config": "workspace:*",
-    "fastify": "^4.28.0",
-    "stripe": "^16.8.0",
+    "fastify": "^5.10.0",
+    "stripe": "^22.2.1",
     "kafkajs": "^2.2.4"
   },
-  "devDependencies": { "tsx": "^4.19.0", "typescript": "^5.6.0", "vitest": "^2.0.5" }
+  "devDependencies": {
+    "tsx": "^4.23.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
 }

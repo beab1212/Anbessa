@@ -75,7 +75,7 @@ setup-mobile:
 setup-services:
 	@echo "$(BOLD)→ Services setup$(RESET)"
 	@command -v node >/dev/null || (echo "Node ≥20 required. Install via nvm: nvm install" && exit 1)
-	@command -v pnpm >/dev/null || npm install -g pnpm@9
+	@command -v pnpm >/dev/null || npm install -g pnpm@11
 	pnpm install
 	@$(MAKE) --no-print-directory _copy-env-examples
 	@$(MAKE) --no-print-directory infra-up
