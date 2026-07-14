@@ -1,0 +1,36 @@
+# Minimal local stack for mapping-service — starts ONLY what this service needs.
+#
+# Usage:
+#   docker compose -f docker-compose.dev.yml up -d
+#   pnpm dev
+#
+version: "3.9"
+services:
+  postgres:
+    image: postgis/postgis:16-3.4-alpine
+    environment:
+      POSTGRES_USER: ride
+      POSTGRES_PASSWORD: ride
+    ports: ["5432:5432"]
+    volumes: ["./.dev-data/postgres:/var/lib/postgresql/data"]
+    profiles: [db]   # skip postgres if service doesn't use it
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+
+  redpanda:
+    image: redpandadata/redpanda:v24.2.4
+    command:
+      - redpanda
+      - start
+      - --smp
+      - "1"
+      - --memory
+      - 256M
+      - --overprovisioned
+      - --kafka-addr
+      - 0.0.0.0:9092
+      - --advertise-kafka-addr
+      - localhost:9092
+    ports: ["9092:9092"]

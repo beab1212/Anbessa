@@ -1,0 +1,83 @@
+# Full local dev stack: core infra + every service. `docker compose up`
+# brings up everything except the heavy mapping stack (see ../mapping-stack/),
+# which most developers point at a shared staging instance instead of running
+# locally, since Nominatim needs a large data import.
+version: "3.9"
+
+services:
+  postgres:
+    image: postgis/postgis:16-3.4-alpine
+    environment:
+      POSTGRES_USER: ride
+      POSTGRES_PASSWORD: ride
+      POSTGRES_DB: ride_app
+    ports: ["5432:5432"]
+    volumes: ["pg-data:/var/lib/postgresql/data"]
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+
+  redpanda:
+    image: redpandadata/redpanda:v24.2.4
+    command: ["redpanda", "start", "--smp", "1", "--memory", "512M", "--overprovisioned", "--kafka-addr", "0.0.0.0:9092", "--advertise-kafka-addr", "localhost:9092"]
+    ports: ["9092:9092"]
+
+  kong:
+    image: kong:3.7-alpine
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /kong/kong.yml
+      KONG_PROXY_LISTEN: "0.0.0.0:8000"
+    volumes: ["../kong/kong.yml:/kong/kong.yml:ro"]
+    ports: ["8000:8000"]
+    depends_on: [auth-service, trip-service]
+
+  auth-service:
+    build: ../../services/auth-service
+    env_file: ../../.env
+    environment: { DATABASE_URL: postgresql://ride:ride@postgres:5432/ride_app }
+    depends_on: [postgres, redpanda]
+    ports: ["3001:3001"]
+
+  trip-service:
+    build: ../../services/trip-service
+    env_file: ../../.env
+    depends_on: [postgres, redis, redpanda]
+    ports: ["3002:3002"]
+
+  location-service:
+    build: ../../services/location-service
+    env_file: ../../.env
+    depends_on: [redis, redpanda]
+    ports: ["3003:3003"]
+
+  pricing-service:
+    build: ../../services/pricing-service
+    env_file: ../../.env
+    ports: ["3004:3004"]
+
+  payment-service:
+    build: ../../services/payment-service
+    env_file: ../../.env
+    depends_on: [postgres, redpanda]
+    ports: ["3005:3005"]
+
+  notification-service:
+    build: ../../services/notification-service
+    env_file: ../../.env
+    depends_on: [redpanda]
+
+  mapping-service:
+    build: ../../services/mapping-service
+    env_file: ../../.env
+    ports: ["3007:3007"]
+
+  realtime-gateway:
+    build: ../../services/realtime-gateway
+    env_file: ../../.env
+    depends_on: [redis, redpanda]
+    ports: ["3000:3000"]
+
+volumes:
+  pg-data:

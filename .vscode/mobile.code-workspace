@@ -1,0 +1,20 @@
+{
+  "folders": [
+    { "name": "rider-app",    "path": "../apps/rider-app" },
+    { "name": "driver-app",   "path": "../apps/driver-app" },
+    { "name": "core package", "path": "../packages/core" }
+  ],
+  "settings": {
+    "dart.flutterSdkPath": null,
+    "editor.formatOnSave": true,
+    "[dart]": {
+      "editor.defaultFormatter": "Dart-Code.dart-code"
+    }
+  },
+  "extensions": {
+    "recommendations": [
+      "Dart-Code.flutter",
+      "Dart-Code.dart-code"
+    ]
+  }
+}

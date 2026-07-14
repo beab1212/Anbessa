@@ -1,0 +1,42 @@
+# Declarative Kong config (DB-less mode) — REST routing, JWT auth, and rate
+# limiting live here as config rather than code, so changing a route doesn't
+# require redeploying a service.
+_format_version: "3.0"
+
+services:
+  - name: auth-service
+    url: http://auth-service:3001
+    routes:
+      - name: auth-routes
+        paths: ["/api/auth"]
+    plugins:
+      - name: rate-limiting
+        config: { minute: 30, policy: local }
+
+  - name: trip-service
+    url: http://trip-service:3002
+    routes:
+      - name: trip-routes
+        paths: ["/api/trips"]
+    plugins:
+      - name: jwt
+      - name: rate-limiting
+        config: { minute: 60, policy: local }
+
+  - name: pricing-service
+    url: http://pricing-service:3004
+    routes:
+      - name: pricing-routes
+        paths: ["/api/pricing"]
+    plugins:
+      - name: jwt
+
+  - name: payment-service
+    url: http://payment-service:3005
+    routes:
+      - name: payment-routes
+        paths: ["/api/payments"]
+    plugins:
+      - name: jwt
+      - name: rate-limiting
+        config: { minute: 20, policy: local }

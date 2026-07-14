@@ -1,0 +1,15 @@
+name: ride_app_core
+description: Shared Dart models, API client base, and design tokens used by rider-app and driver-app.
+publish_to: "none"
+version: 1.0.0
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter

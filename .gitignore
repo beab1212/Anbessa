@@ -1,0 +1,38 @@
+# ── node ──────────────────────────────────────────────────────────────────────
+node_modules/
+dist/
+build/
+coverage/
+.turbo/
+*.log
+.env
+.env.local
+
+# ── flutter / dart ────────────────────────────────────────────────────────────
+**/.dart_tool/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/build/
+*.iml
+
+# ── secrets ───────────────────────────────────────────────────────────────────
+secrets/
+*.pem
+*.key
+*.cert
+
+# ── local dev infra data (docker volumes mapped to disk) ─────────────────────
+**/.dev-data/
+
+# ── editor ────────────────────────────────────────────────────────────────────
+.DS_Store
+.idea/
+# (VS Code workspace files are tracked — they're the team's entry point)
+
+# ── terraform ─────────────────────────────────────────────────────────────────
+infra/terraform/.terraform/
+infra/terraform/*.tfstate
+infra/terraform/*.tfstate.backup
+infra/terraform/.terraform.lock.hcl
+
+.github/

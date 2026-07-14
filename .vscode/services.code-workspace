@@ -1,0 +1,28 @@
+{
+  "folders": [
+    { "name": "auth-service",         "path": "../services/auth-service" },
+    { "name": "trip-service",         "path": "../services/trip-service" },
+    { "name": "location-service",     "path": "../services/location-service" },
+    { "name": "pricing-service",      "path": "../services/pricing-service" },
+    { "name": "payment-service",      "path": "../services/payment-service" },
+    { "name": "notification-service", "path": "../services/notification-service" },
+    { "name": "mapping-service",      "path": "../services/mapping-service" },
+    { "name": "realtime-gateway",     "path": "../services/realtime-gateway" },
+    { "name": "shared-types",         "path": "../libs/shared-types" },
+    { "name": "shared-utils",         "path": "../libs/shared-utils" },
+    { "name": "shared-config",        "path": "../libs/shared-config" }
+  ],
+  "settings": {
+    "editor.formatOnSave": true,
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "typescript.tsdk": "auth-service/node_modules/typescript/lib"
+  },
+  "extensions": {
+    "recommendations": [
+      "dbaeumer.vscode-eslint",
+      "esbenp.prettier-vscode",
+      "Prisma.prisma",
+      "ms-azuretools.vscode-docker"
+    ]
+  }
+}

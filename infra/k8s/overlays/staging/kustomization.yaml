@@ -1,0 +1,9 @@
+resources:
+  - ../../base
+namePrefix: staging-
+patches:
+  - target: { kind: Deployment, name: trip-service }
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1

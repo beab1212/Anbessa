@@ -1,0 +1,25 @@
+# Self-hosted, free, open-source mapping stack — run separately from the main
+# stack since Nominatim's import is heavy and region-specific. Most developers
+# point at a shared staging instance of this rather than running it locally.
+version: "3.9"
+
+services:
+  tileserver:
+    image: maptiler/tileserver-gl:latest
+    volumes: ["./data/tiles:/data"]
+    ports: ["8081:8080"]
+
+  nominatim:
+    image: mediagis/nominatim:4.5
+    environment:
+      PBF_URL: https://download.geofabrik.de/africa/ethiopia-latest.osm.pbf
+      REPLICATION_URL: https://download.geofabrik.de/africa/ethiopia-updates/
+    volumes: ["./data/nominatim:/var/lib/postgresql/14/main"]
+    ports: ["8080:8080"]
+    shm_size: 1g
+
+  osrm:
+    image: osrm/osrm-backend:latest
+    volumes: ["./data/osrm:/data"]
+    command: osrm-routed --algorithm mld /data/region.osrm
+    ports: ["5000:5000"]

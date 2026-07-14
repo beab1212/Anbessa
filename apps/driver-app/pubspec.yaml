@@ -1,0 +1,28 @@
+name: ride_app_driver
+description: Driver app for ride-app.
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  ride_app_core:
+    path: ../../packages/core
+  flutter_riverpod: ^2.5.1
+  dio: ^5.6.0
+  socket_io_client: ^2.0.3
+  flutter_map: ^7.0.2
+  latlong2: ^0.9.1
+  flutter_secure_storage: ^9.2.2
+  geolocator: ^13.0.1          # background GPS for sending location pings
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

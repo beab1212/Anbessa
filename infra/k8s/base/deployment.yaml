@@ -1,0 +1,33 @@
+# Template deployment — copy per service, swap name/image/port/env.
+# Shown here for trip-service as the example.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trip-service
+  labels: { app: trip-service }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: trip-service }
+  template:
+    metadata:
+      labels: { app: trip-service }
+    spec:
+      containers:
+        - name: trip-service
+          image: registry.example.com/ride-app/trip-service:latest
+          ports: [{ containerPort: 3002 }]
+          envFrom:
+            - configMapRef: { name: trip-service-config }
+            - secretRef: { name: trip-service-secrets }
+          resources:
+            requests: { cpu: "100m", memory: "128Mi" }
+            limits: { cpu: "500m", memory: "256Mi" }
+          readinessProbe:
+            httpGet: { path: /health, port: 3002 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health, port: 3002 }
+            initialDelaySeconds: 15
+            periodSeconds: 20

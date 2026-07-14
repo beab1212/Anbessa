@@ -1,0 +1,11 @@
+name: ride_app_flutter
+packages:
+  - apps/rider-app
+  - apps/driver-app
+  - packages/core
+
+scripts:
+  analyze:
+    run: melos exec -- flutter analyze
+  test:
+    run: melos exec -- flutter test

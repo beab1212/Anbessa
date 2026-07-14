@@ -1,0 +1,18 @@
+{
+  "folders": [
+    { "name": "infra", "path": "../infra" },
+    { "name": "scripts", "path": "../scripts" },
+    { "name": "workflows", "path": "../.github" }
+  ],
+  "settings": {
+    "editor.formatOnSave": true
+  },
+  "extensions": {
+    "recommendations": [
+      "hashicorp.terraform",
+      "ms-azuretools.vscode-docker",
+      "ms-kubernetes-tools.vscode-kubernetes-tools",
+      "redhat.vscode-yaml"
+    ]
+  }
+}
