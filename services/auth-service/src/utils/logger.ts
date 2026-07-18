@@ -1,7 +1,5 @@
-import pino from "pino";
+import type { Logger } from "@ride-app/shared-utils";
+import { createLogger } from "@ride-app/shared-utils";
 import { config } from "../config/index.js";
 
-export const logger = pino({
-  level: config.NODE_ENV === "production" ? "info" : "debug",
-  transport: config.NODE_ENV === "production" ? undefined : { target: "pino-pretty" },
-});
+export const logger: Logger = createLogger("auth-service", config.NODE_ENV as "production" | "development");
