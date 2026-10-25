@@ -1,22 +1,27 @@
-FROM node:20-alpine AS deps
-WORKDIR /app
-COPY package.json ./
-RUN npm install --omit=dev
+# Build from the repo root so workspace libs (libs/*) are in the context:
+#   docker build -f services/notification-service/Dockerfile -t ride-app/notification-service .
+FROM node:24-alpine AS base
+ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH CI=true
+RUN corepack enable
+WORKDIR /repo
 
-FROM node:20-alpine AS build
-WORKDIR /app
-COPY package.json ./
-RUN npm install
+# --- build stage ---
+FROM base AS build
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm fetch
 COPY . .
-RUN npm run build
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile --offline --filter @ride-app/notification-service...
+RUN pnpm --filter @ride-app/notification-service... build
+RUN pnpm --filter @ride-app/notification-service deploy --prod --legacy /out
 
-FROM node:20-alpine AS runtime
+# --- runtime stage ---
+FROM node:24-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 RUN addgroup -S app && adduser -S app -G app
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=build /app/dist ./dist
-COPY package.json ./
+COPY --from=build /out/node_modules ./node_modules
+COPY --from=build /out/dist ./dist
+COPY --from=build /out/package.json ./
 USER app
 EXPOSE 3006
 HEALTHCHECK --interval=15s --timeout=3s CMD wget -qO- http://localhost:3006/health || exit 1

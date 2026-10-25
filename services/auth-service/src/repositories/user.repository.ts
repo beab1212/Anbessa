@@ -1,6 +1,8 @@
-import { PrismaClient, type User } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { PrismaClient, type User } from "../generated/prisma/client.js";
+import { config } from "../config/index.js";
 
-const prisma = new PrismaClient();
+const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: config.DATABASE_URL }) });
 
 export const userRepository = {
   findByEmail: (email: string): Promise<User | null> =>

@@ -1,5 +1,5 @@
 import type { Server, Socket } from "socket.io";
-import Redis from "ioredis";
+import { Redis } from "ioredis";
 import { Kafka } from "kafkajs";
 import { config } from "../config/index.js";
 

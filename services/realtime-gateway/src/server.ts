@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { Server } from "socket.io";
 import { createAdapter } from "@socket.io/redis-adapter";
-import Redis from "ioredis";
+import { Redis } from "ioredis";
 import { config } from "./config/index.js";
 import { socketAuthMiddleware } from "./middlewares/auth.middleware.js";
 import { registerLocationHandlers } from "./sockets/location.handler.js";

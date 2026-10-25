@@ -15,15 +15,15 @@ warn() { echo -e "${YELLOW}⚠  $1${RESET}"; }
 # ── Node / pnpm ──────────────────────────────────────────────────────────────
 log "Checking Node.js..."
 node_version=$(node -v 2>/dev/null | cut -c2- | cut -d. -f1 || echo 0)
-if [ "$node_version" -lt 20 ]; then
-  warn "Node ≥20 required. Install via nvm: nvm install"
+if [ "$node_version" -lt 24 ]; then
+  warn "Node ≥24 required. Install via nvm: nvm install"
   exit 1
 fi
 ok "Node $(node -v)"
 
 if ! command -v pnpm &>/dev/null; then
-  log "Installing pnpm..."
-  npm install -g pnpm@9
+  log "Enabling pnpm via corepack..."
+  corepack enable
 fi
 ok "pnpm $(pnpm -v)"
 
@@ -34,9 +34,8 @@ ok "Node deps installed"
 
 # ── Flutter / Melos ───────────────────────────────────────────────────────────
 if command -v flutter &>/dev/null; then
-  log "Installing Flutter workspace dependencies (Melos)..."
-  command -v melos &>/dev/null || dart pub global activate melos
-  melos bootstrap
+  log "Installing Flutter workspace dependencies (Dart pub workspace)..."
+  dart pub get
   ok "Flutter deps installed"
 else
   warn "Flutter not found — skipping mobile setup."
@@ -45,8 +44,8 @@ fi
 
 # ── Docker infra ──────────────────────────────────────────────────────────────
 if command -v docker &>/dev/null; then
-  log "Starting local infrastructure (postgres, redis, redpanda, kong)..."
-  docker compose -f infra/docker/docker-compose.yml up -d
+  log "Starting local infrastructure (postgres, redis, redpanda)..."
+  docker compose -f infra/docker/docker-compose.yml up -d postgres redis redpanda
   log "Waiting for Postgres..."
   until docker compose -f infra/docker/docker-compose.yml exec -T postgres \
     pg_isready -U ride -d ride_app >/dev/null 2>&1; do sleep 1; done
@@ -58,6 +57,7 @@ fi
 
 # ── Env files ─────────────────────────────────────────────────────────────────
 log "Copying .env.example → .env for each service..."
+[ -f .env ] || cp .env.example .env
 for svc in services/*/; do
   if [ -f "$svc.env.example" ] && [ ! -f "$svc.env" ]; then
     cp "$svc.env.example" "$svc.env"
@@ -68,14 +68,14 @@ done
   cp -n apps/admin-dashboard/.env.example apps/admin-dashboard/.env 2>/dev/null || true
 ok "Env files ready"
 
+log "Creating local dev JWT keys (skipped if present)..."
+make --no-print-directory secrets
+ok "JWT keys ready"
+
 # ── DB migrations ─────────────────────────────────────────────────────────────
 if command -v docker &>/dev/null; then
   log "Running Prisma migrations..."
-  for svc in auth-service trip-service payment-service; do
-    pnpm --filter @ride-app/"$svc" prisma migrate dev --name init 2>/dev/null || \
-    pnpm --filter @ride-app/"$svc" prisma migrate deploy
-    echo "  migrated $svc"
-  done
+  make --no-print-directory db-migrate
   ok "Migrations complete"
 fi
 

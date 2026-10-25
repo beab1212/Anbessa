@@ -1,2 +1,4 @@
-Same data/domain/presentation pattern as `features/auth` — not fleshed out
-here to avoid duplicating boilerplate across this scaffold.
+Same data/domain/presentation pattern as `lib/features/auth`. Not fleshed out
+yet so the scaffold doesn't duplicate boilerplate. This is rider-mode code: only
+`RiderHomeScreen` should route here, and anything both modes need belongs in
+`lib/core/`.

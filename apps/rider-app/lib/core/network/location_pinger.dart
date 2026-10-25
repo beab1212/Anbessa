@@ -1,6 +1,6 @@
 import 'package:socket_io_client/socket_io_client.dart' as io;
 
-/// Driver-side counterpart to realtime-gateway's location.handler.ts —
+/// Driver-mode counterpart to realtime-gateway's location.handler.ts —
 /// samples GPS every ~4s and emits 'location:update' over the open socket.
 class LocationPinger {
   LocationPinger(this._socket);

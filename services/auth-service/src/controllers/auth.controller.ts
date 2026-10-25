@@ -3,7 +3,7 @@ import { authService } from "../services/auth.service.js";
 
 export const authController = {
   async register(req: FastifyRequest, reply: FastifyReply) {
-    const user = await authService.register(req.body as any);
+    const user = await authService.register(req.body as Parameters<typeof authService.register>[0]);
     return reply.status(201).send({ id: user.id, email: user.email, role: user.role });
   },
 

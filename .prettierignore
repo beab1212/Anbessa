@@ -1,0 +1,10 @@
+node_modules
+dist
+coverage
+.turbo
+pnpm-lock.yaml
+**/src/generated
+apps/rider-app
+packages
+infra/terraform/.terraform
+learned

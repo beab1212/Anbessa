@@ -2,6 +2,8 @@
 
 ## Quick start — standalone, no other services needed
 
+Requires Node 24 (`nvm use`) and pnpm via `corepack enable` (see the root README's Toolchain table).
+
 ```bash
 # 1. Start only the infra this service requires
 docker compose -f docker-compose.dev.yml up -d
@@ -12,10 +14,7 @@ pnpm install
 # 3. Copy the env file
 cp .env.example .env
 
-# 4. Run database migrations
-pnpm prisma migrate dev --name init
-
-# Start with hot reload
+# Start with hot reload (tsx watch — loads libs/* TypeScript source directly)
 pnpm dev
 ```
 
@@ -54,27 +53,44 @@ src/
 | Command | What it does |
 |---------|-------------|
 | `pnpm dev` | Start with hot reload (tsx watch) |
-| `pnpm build` | Compile TypeScript → dist/ |
+| `pnpm build` | Compile TypeScript → dist/ (build libs first: `pnpm turbo run build --filter=@ride-app/payment-service...`) |
 | `pnpm start` | Run compiled output (production) |
 | `pnpm test` | Run all tests |
-| `pnpm test -- --watch` | Tests in watch mode |
+| `pnpm vitest` | Tests in watch mode |
 | `pnpm lint` | ESLint |
-| `pnpm typecheck` | Type-check only, no emit |
-| `pnpm prisma studio` | Open Prisma DB browser |
+| `pnpm typecheck` | Type-check only, no emit (against lib source, no build needed) |
+
+---
+
+## Database
+
+`prisma/` is an empty placeholder. When this service gets a schema, copy auth-service's setup: `prisma.config.ts`, the `prisma-client` generator, `@prisma/adapter-pg`, and the `prisma generate` scripts. Then add the service to `PRISMA_SERVICES` in the root `Makefile` so `make db-migrate` picks it up.
 
 ---
 
 ## Running tests
 
 ```bash
-pnpm test            # all tests once
-pnpm test -- --watch # watch mode during development
+pnpm test            # all tests once (passes when no test files exist yet)
+pnpm vitest          # watch mode during development
 ```
 
 - **Unit tests** (`tests/unit/`): mock the repository and Kafka boundaries,
   assert on pure business logic only.
 - **Integration tests** (`tests/integration/`): spin up a real DB via
   Testcontainers so migrations and queries run against an actual Postgres.
+
+---
+
+## Docker image
+
+Build from the **repo root** so the workspace libs are in the build context:
+
+```bash
+docker build -f services/payment-service/Dockerfile -t ride-app/payment-service .
+```
+
+The image is `node:24-alpine`. The build stage uses pnpm (`pnpm deploy --prod`) and the runtime stage ships only `dist/` and production `node_modules`.
 
 ---
 

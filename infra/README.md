@@ -16,11 +16,31 @@ Everything the DevOps / platform team owns.
 
 ```bash
 # From repo root
-make infra-up          # starts postgres, redis, redpanda, kong
+make infra-up          # starts postgres, redis, redpanda
+make stack-up          # full containerized stack: every service image + kong on :8000
 
 # Or the mapping stack separately (heavy — needs a regional OSM data import)
 docker compose -f mapping-stack/docker-compose.mapping.yml up -d
 ```
+
+### Local image versions
+
+| Service | Image |
+|---------|-------|
+| Postgres + PostGIS | `postgis/postgis:18-3.6-alpine` |
+| Redis | `redis:8-alpine` |
+| Kafka API | `redpandadata/redpanda:v26.2.6` |
+| Gateway | `kong:3.9` (Kong no longer publishes alpine tags) |
+| Mapping stack | `maptiler/tileserver-gl:v5.7.0`, `mediagis/nominatim:5.3`, `osrm/osrm-backend:v5.25.0` |
+
+> **Upgrading from the old Postgres 16 volume?** Postgres 18 images keep data
+> under `/var/lib/postgresql` (not `.../data`), and a 16 data directory won't
+> start on 18. Run `make infra-reset` (wipes local volumes, re-migrates and
+> re-seeds), or delete `services/*/.dev-data/postgres` for the per-service stacks.
+
+Service images build from the **repo root** (`docker build -f services/<svc>/Dockerfile .`)
+so the pnpm workspace libs are in the build context. `docker/docker-compose.yml` and
+`.github/workflows/deploy.yml` are already set up that way.
 
 ## Deploying to staging
 
@@ -42,6 +62,9 @@ kubectl apply -k k8s/overlays/production
 ```
 
 ## Terraform
+
+Pins the AWS provider to `~> 6.0`. See [`terraform/README.md`](terraform/README.md)
+for open version decisions (RDS major version, state locking).
 
 ```bash
 cd terraform

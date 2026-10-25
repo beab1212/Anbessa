@@ -1,7 +1,6 @@
 {
   "folders": [
-    { "name": "rider-app",    "path": "../apps/rider-app" },
-    { "name": "driver-app",   "path": "../apps/driver-app" },
+    { "name": "rider-app (rider + driver)", "path": "../apps/rider-app" },
     { "name": "core package", "path": "../packages/core" }
   ],
   "settings": {

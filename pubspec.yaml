@@ -1,0 +1,21 @@
+# Dart pub workspace root for the Flutter side of the monorepo.
+# `dart pub get` here resolves every package below in one lockfile.
+name: ride_app_flutter
+publish_to: "none"
+
+environment:
+  sdk: ^3.12.0
+
+workspace:
+  - apps/rider-app
+  - packages/core
+
+dev_dependencies:
+  melos: ^8.9.0
+
+melos:
+  scripts:
+    analyze:
+      run: melos exec -- flutter analyze
+    test:
+      run: melos exec --dir-exists=test -- flutter test

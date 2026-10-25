@@ -1,5 +1,11 @@
 terraform {
   required_version = ">= 1.8"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 6.0"
+    }
+  }
   backend "s3" {
     # Remote state with a lock table — never commit local .tfstate for a
     # production system multiple people deploy to.

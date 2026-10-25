@@ -1,10 +1,13 @@
 # Contributing — team guide
 
+Detailed guides: [development](docs/development/README.md) ·
+[testing](docs/testing/README.md) · [production](docs/production/README.md).
+
 ## Who works on what
 
 | Team | Folder(s) | Their workspace file |
 |------|-----------|---------------------|
-| **Mobile** | `apps/rider-app`, `apps/driver-app`, `packages/core` | `.vscode/mobile.code-workspace` |
+| **Mobile** | `apps/rider-app` (rider + driver modes), `packages/core` | `.vscode/mobile.code-workspace` |
 | **Backend** | `services/*`, `libs/*` | `.vscode/services.code-workspace` |
 | **Admin dashboard** | `apps/admin-dashboard` | `.vscode/admin.code-workspace` |
 | **Infra / DevOps** | `infra/`, `.github/workflows/` | `.vscode/infra.code-workspace` |
@@ -20,7 +23,10 @@ Open your workspace file instead of the repo root: it limits the file tree, sear
 make setup-mobile
 # Then: make dev-mobile
 ```
-Requires Flutter ≥3.24. Install at https://docs.flutter.dev/get-started/install.
+Requires Flutter ≥3.44 (Dart ≥3.12). Install at https://docs.flutter.dev/get-started/install.
+The repo root `pubspec.yaml` is a Dart pub workspace: one `dart pub get` resolves
+the app and `packages/core` together, and Melos 8 runs from it via `dart run melos`.
+For Android builds, accept the SDK licenses once: `flutter doctor --android-licenses`.
 
 ### Backend (services) team
 ```bash
@@ -28,20 +34,33 @@ make setup-services
 # Then: make dev-services          (all services)
 # Or:   make dev-svc SVC=auth-service  (one service)
 ```
-Requires Node ≥20 + Docker Desktop.
+Requires Node ≥24 (`nvm use` reads `.nvmrc`) + Docker. pnpm comes from `corepack enable`.
 
 ### Admin dashboard team
 ```bash
 make setup-admin
 # Then: make dev-admin
 ```
-Requires Node ≥20.
+Requires Node ≥24.
 
 ### Infra / DevOps team
 ```bash
 make setup-infra
 ```
 Requires Terraform ≥1.8, kubectl, Docker.
+
+---
+
+## Quality gates
+
+CI runs exactly these; run them before pushing:
+
+```bash
+pnpm lint && pnpm typecheck && pnpm test && pnpm build   # Node workspace (Turborepo)
+dart run melos run analyze && dart run melos run test   # Flutter workspace
+```
+
+`pnpm format` applies Prettier (`.prettierrc.json`); it isn't enforced in CI.
 
 ---
 
@@ -56,9 +75,9 @@ cd services/auth-service
 docker compose -f docker-compose.dev.yml up -d
 
 # Install deps and run
-pnpm install
+pnpm install          # auth-service also runs `prisma generate` here
 cp .env.example .env
-pnpm prisma migrate dev --name init
+pnpm prisma migrate dev   # applies prisma/migrations; only services with a schema (auth-service today)
 pnpm dev
 ```
 

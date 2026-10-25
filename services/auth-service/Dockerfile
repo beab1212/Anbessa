@@ -1,26 +1,28 @@
-# --- deps stage ---
-FROM node:20-alpine AS deps
-WORKDIR /app
-COPY package.json ./
-RUN npm install --omit=dev
+# Build from the repo root so workspace libs (libs/*) are in the context:
+#   docker build -f services/auth-service/Dockerfile -t ride-app/auth-service .
+FROM node:24-alpine AS base
+ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH CI=true
+RUN corepack enable
+WORKDIR /repo
 
 # --- build stage ---
-FROM node:20-alpine AS build
-WORKDIR /app
-COPY package.json ./
-RUN npm install
+FROM base AS build
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm fetch
 COPY . .
-RUN npx prisma generate && npm run build
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile --offline --filter @ride-app/auth-service...
+RUN pnpm --filter @ride-app/auth-service... build
+RUN pnpm --filter @ride-app/auth-service deploy --prod --legacy /out
 
 # --- runtime stage ---
-FROM node:20-alpine AS runtime
+FROM node:24-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 RUN addgroup -S app && adduser -S app -G app
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=build /app/dist ./dist
-COPY --from=build /app/prisma ./prisma
-COPY package.json ./
+COPY --from=build /out/node_modules ./node_modules
+COPY --from=build /out/dist ./dist
+COPY --from=build /out/prisma ./prisma
+COPY --from=build /out/package.json ./
 USER app
 EXPOSE 3001
 HEALTHCHECK --interval=15s --timeout=3s CMD wget -qO- http://localhost:3001/health || exit 1

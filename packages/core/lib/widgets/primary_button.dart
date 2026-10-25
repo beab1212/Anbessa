@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// Shared button so rider-app and driver-app don't drift visually.
+/// Shared button so rider and driver screens don't drift visually.
 class PrimaryButton extends StatelessWidget {
   const PrimaryButton({super.key, required this.label, required this.onPressed});
   final String label;

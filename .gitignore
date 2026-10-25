@@ -36,3 +36,9 @@ infra/terraform/*.tfstate.backup
 infra/terraform/.terraform.lock.hcl
 
 .github/
+
+# ── generated ─────────────────────────────────────────────────────────────────
+**/src/generated/
+
+learned
+learned/*
