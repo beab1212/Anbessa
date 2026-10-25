@@ -1,0 +1,7 @@
+{
+  // Suggested when the repo root is opened. Mermaid diagrams in docs/ and README
+  // files need this to render in VS Code's Markdown preview.
+  "recommendations": [
+    "bierner.markdown-mermaid"
+  ]
+}

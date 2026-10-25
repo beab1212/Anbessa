@@ -13,7 +13,7 @@
   "extensions": {
     "recommendations": [
       "Dart-Code.flutter",
-      "Dart-Code.dart-code"
+      "Dart-Code.dart-code",      "bierner.markdown-mermaid"
     ]
   }
 }

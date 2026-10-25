@@ -23,6 +23,7 @@ Four teams. Four entry points. Zero friction.
 
 | Guide | For |
 |-------|-----|
+| [Architecture](docs/architecture/overview.md) | System diagrams, services, flows, data, events, security, deployment, known gaps |
 | [Development](docs/development/README.md) | Setup, JWT keys, ports, daily loop per team, troubleshooting |
 | [Testing](docs/testing/README.md) | CI gates, running and writing unit / widget / integration tests |
 | [Production](docs/production/README.md) | Images, Terraform, Kubernetes, config, migrations, releases, readiness checklist |
