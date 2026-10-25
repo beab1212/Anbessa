@@ -21,6 +21,7 @@ ENV NODE_ENV=production
 RUN addgroup -S app && adduser -S app -G app
 COPY --from=build /out/node_modules ./node_modules
 COPY --from=build /out/dist ./dist
+COPY --from=build /out/prisma ./prisma
 COPY --from=build /out/package.json ./
 USER app
 EXPOSE 3006

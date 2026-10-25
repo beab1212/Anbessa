@@ -105,6 +105,11 @@ Production values that differ from dev:
 | `OTP_DELIVERY` / `NOTIFICATION_INTERNAL_URL` | auth-service: `notification` / in-cluster notification-service URL. `console` is refused in production |
 | `INTERNAL_SERVICE_TOKEN` | auth-service and its internal callers. Required in production |
 | `AUTH_RATE_LIMIT` | leave unset (`on`). `off` is refused in production |
+| `PHONE_HASH_KEY` / `OTP_ENCRYPTION_KEY` | notification-service only, 32 random bytes as hex each, from Secrets Manager. Rotating `PHONE_HASH_KEY` only breaks the resend lookup for codes in flight; rotating `OTP_ENCRYPTION_KEY` drops codes in flight (users request a new one) |
+| `OTP_CHANNELS` / `OTP_FALLBACK_SECONDS` | notification-service: `telegram,sms` / `20` |
+| `TELEGRAM_CALLBACK_URL` | notification-service: `https://api.anbessa.et/api/webhooks/telegram-gateway` (required, https) |
+| `SMS_PROVIDER` + `TWILIO_*` | notification-service: `twilio` (console is refused in production) |
+| `PUSH_PROVIDER` + `FCM_PROJECT_ID`, `FCM_CLIENT_EMAIL`, `FCM_PRIVATE_KEY` | notification-service: `fcm`, a Firebase service account with the *Firebase Cloud Messaging API* role only (console is refused) |
 | `TELEGRAM_GATEWAY_TOKEN` | notification-service only. Telegram Gateway API token for login codes. Its SHA256 also verifies delivery-report signatures. The Gateway account is **prepaid**: finance tops it up, and an alert fires when the balance drops below 7 days of spend |
 | `DATABASE_URL` | RDS endpoint, one database per service (`auth_service`, `trip_service`, …), TLS on |
 | `REDIS_URL` | ElastiCache endpoint (`rediss://` for TLS) |
@@ -172,7 +177,8 @@ These are known gaps in the current scaffold. Each one blocks or weakens a real 
 - [ ] **Migration step** before rollout (section 6).
 - [ ] **Terraform modules** in `infra/terraform/modules/` (section 3), and the RDS 16-vs-18 decision.
 - [x] **Authentication on Better Auth** ([Auth.md §17](../design/Auth.md#17-implementation-notes-v1)): phone OTP, staff password + TOTP, JWKS, Kong `jwt` plugin removed, error handler fixed.
-- [ ] **notification-service OTP delivery** (`POST /internal/otp-deliveries`, Telegram Gateway + SMS fallback). Without it, production auth-service can't send login codes.
+- [x] **notification-service OTP delivery** (Telegram Gateway + SMS fallback, signed delivery reports).
+- [ ] **Provider accounts:** a funded Telegram Gateway account and verified sender channel, an SMS provider for Ethiopian numbers ([Auth.md Q3](../design/Auth.md#16-open-questions); Twilio is wired), and a Firebase project for push. Alert on the `telegram gateway balance is low` log line.
 - [ ] **Bootstrap two super admins** after the first deploy (section 4).
 - [ ] **Verify tokens in every service** with `libs/shared-authz` as each one gets real routes (only realtime-gateway does today).
 - [ ] **`.github/` is gitignored** (section 1).

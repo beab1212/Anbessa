@@ -28,6 +28,24 @@ services:
       - name: request-size-limiting
         config: { allowed_payload_size: 64, size_unit: kilobytes }
 
+  - name: notification-service
+    url: http://notification-service:3006
+    routes:
+      - name: notification-device-routes
+        paths: ["/api/notifications"]
+        strip_path: false
+      # Telegram Gateway delivery reports: no auth plugin, the HMAC signature is the
+      # authentication (notification-service verifies it). /internal/* is never routed.
+      - name: telegram-gateway-webhook
+        paths: ["/api/webhooks/telegram-gateway"]
+        methods: ["POST"]
+        strip_path: false
+    plugins:
+      - name: rate-limiting
+        config: { minute: 120, policy: local }
+      - name: request-size-limiting
+        config: { allowed_payload_size: 16, size_unit: kilobytes }
+
   - name: trip-service
     url: http://trip-service:3002
     routes:

@@ -123,6 +123,7 @@ export function createAppAuth(deps: AuthDeps) {
         signUpOnVerification: { getTempEmail: phoneToEmail, getTempName: (p) => p },
         callbackOnVerification: async ({ user, phoneNumber: phone }) => {
           const u = user as { id: string; email: string; emailVerified: boolean; accountStatus?: string };
+          void deps.otp.verified(phone); // best effort, never blocks sign-in
           // a call-center guest becomes a full account by verifying the same phone (workflow 10)
           const claim = u.accountStatus === "GUEST";
           // the placeholder email is derived from the phone just verified, so it's verified too

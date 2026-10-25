@@ -2,8 +2,9 @@
 # Local development secrets (`make secrets`). Never overwrites a value that is set.
 #
 #   - creates services/*/.env from .env.example where missing
-#   - adds keys that are new in auth-service/.env.example to an existing .env
-#   - fills BETTER_AUTH_SECRET and INTERNAL_SERVICE_TOKEN with fresh random values when blank
+#   - adds keys that are new in the auth/notification .env.example to an existing .env
+#   - fills BETTER_AUTH_SECRET, INTERNAL_SERVICE_TOKEN, PHONE_HASH_KEY and OTP_ENCRYPTION_KEY
+#     with fresh random values when blank, and copies INTERNAL_SERVICE_TOKEN to notification-service
 #
 # Staging and production secrets come from the secrets manager (docs/production/README.md).
 set -euo pipefail
@@ -23,35 +24,60 @@ for example in services/*/.env.example; do
   fi
 done
 
-# keys added to the template after the .env was created
-while IFS= read -r line; do
-  key="${line%%=*}"
-  if ! grep -q "^${key}=" "$AUTH_ENV"; then
-    printf '%s\n' "$line" >> "$AUTH_ENV"
-    echo "  added $key to $AUTH_ENV"
-  fi
-done < <(grep -E '^[A-Z_]+=' services/auth-service/.env.example)
+NOTIF_ENV=services/notification-service/.env
+git check-ignore -q "$NOTIF_ENV" || { echo "Refusing: $NOTIF_ENV is not gitignored"; exit 1; }
 
-# set KEY to a random value if it is empty; the value never reaches the terminal
-fill_secret() {
-  local key="$1" file="$2" value tmp
-  if grep -qE "^${key}=.+" "$file"; then return; fi
-  value="$(openssl rand -hex 32)"
+# keys added to a template after the .env was created
+sync_keys() {
+  local env_file="$1" line key
+  while IFS= read -r line; do
+    key="${line%%=*}"
+    if ! grep -q "^${key}=" "$env_file"; then
+      printf '%s\n' "$line" >> "$env_file"
+      echo "  added $key to $env_file"
+    fi
+  done < <(grep -E '^[A-Z_]+=' "$env_file.example")
+}
+
+# set KEY in FILE to VALUE; the value never reaches the terminal
+set_value() {
+  local key="$1" file="$2" value="$3" tmp
   tmp="$(mktemp)"
   awk -v k="$key" -v v="$value" 'BEGIN { FS = OFS = "=" } $1 == k { print k "=" v; next } { print }' "$file" > "$tmp"
   cat "$tmp" > "$file" # keep the file's inode and permissions
   rm -f "$tmp"
+}
+
+# set KEY to a random value if it is empty
+fill_secret() {
+  local key="$1" file="$2"
+  if grep -qE "^${key}=.+" "$file"; then return; fi
+  set_value "$key" "$file" "$(openssl rand -hex 32)"
   echo "  generated $key in $file"
 }
 
+sync_keys "$AUTH_ENV"
+sync_keys "$NOTIF_ENV"
+
 fill_secret BETTER_AUTH_SECRET "$AUTH_ENV"
 fill_secret INTERNAL_SERVICE_TOKEN "$AUTH_ENV"
+fill_secret PHONE_HASH_KEY "$NOTIF_ENV"
+fill_secret OTP_ENCRYPTION_KEY "$NOTIF_ENV"
 
-chmod 600 "$AUTH_ENV" 2>/dev/null || true
-if [ "$(stat -c %a "$AUTH_ENV")" != "600" ]; then
-  echo "  ⚠  this filesystem ignores Unix permissions: $AUTH_ENV is readable by other local users."
-  echo "     Fine for throwaway dev secrets; never put real secrets on this disk."
+# auth-service and notification-service share INTERNAL_SERVICE_TOKEN (auth → /internal/otp-deliveries)
+auth_token="$(grep -E '^INTERNAL_SERVICE_TOKEN=' "$AUTH_ENV" | cut -d= -f2-)"
+if ! grep -qE "^INTERNAL_SERVICE_TOKEN=${auth_token}$" "$NOTIF_ENV"; then
+  set_value INTERNAL_SERVICE_TOKEN "$NOTIF_ENV" "$auth_token"
+  echo "  copied INTERNAL_SERVICE_TOKEN from $AUTH_ENV to $NOTIF_ENV"
 fi
+
+for f in "$AUTH_ENV" "$NOTIF_ENV"; do
+  chmod 600 "$f" 2>/dev/null || true
+  if [ "$(stat -c %a "$f")" != "600" ]; then
+    echo "  ⚠  this filesystem ignores Unix permissions: $f is readable by other local users."
+    echo "     Fine for throwaway dev secrets; never put real secrets on this disk."
+  fi
+done
 
 if grep -qE '^JWT_(PRIVATE|PUBLIC)_KEY_PATH=' services/*/.env 2>/dev/null; then
   echo "  note: JWT_*_KEY_PATH in your .env files is no longer used (keys now live in the auth database); you can delete those lines and secrets/*.pem"

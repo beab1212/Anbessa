@@ -14,7 +14,7 @@ export type IdentityEvent =
   | { topic: "org.created"; key: string; payload: { orgId: string; kind: string; cityId: string } }
   | { topic: "org.verified"; key: string; payload: { orgId: string; kind: string; cityId: string; byUserId: string } }
   | { topic: "org.suspended"; key: string; payload: { orgId: string; kind: string; byUserId: string } }
-  | { topic: "org.member_invited"; key: string; payload: { invitationId: string; orgId: string; role: string; phoneNumber?: string } }
+  | { topic: "org.member_invited"; key: string; payload: { invitationId: string; orgId: string; orgName: string; role: string; phoneNumber?: string } }
   | { topic: "audit.recorded"; key: string; payload: AuditPayload };
 
 export interface AuditPayload {

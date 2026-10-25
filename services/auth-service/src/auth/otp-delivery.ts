@@ -13,24 +13,28 @@ export interface OtpRequest {
 
 export interface OtpSender {
   send(req: OtpRequest): Promise<void>;
+  /** Best effort: the code was verified, so notification-service can close the delivery (Auth.md §9.7, step 8). */
+  verified(phoneNumber: string): Promise<void>;
 }
 
 export function notificationOtpSender(baseUrl: string, internalToken: string, logger: Logger): OtpSender {
+  const post = async (path: string, body: unknown, phone: string) => {
+    try {
+      const res = await fetch(new URL(path, baseUrl), {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${internalToken}` },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(2000),
+      });
+      if (!res.ok) logger.error({ status: res.status, path }, "request rejected by notification-service");
+    } catch (err) {
+      // never log the code or the full number
+      logger.error({ err: (err as Error).message, path, phone: maskPhone(phone) }, "notification-service request failed");
+    }
+  };
   return {
-    async send(req) {
-      try {
-        const res = await fetch(new URL("/internal/otp-deliveries", baseUrl), {
-          method: "POST",
-          headers: { "content-type": "application/json", authorization: `Bearer ${internalToken}` },
-          body: JSON.stringify(req),
-          signal: AbortSignal.timeout(2000),
-        });
-        if (!res.ok) logger.error({ status: res.status }, "otp delivery request rejected by notification-service");
-      } catch (err) {
-        // never log the code or the full number
-        logger.error({ err: (err as Error).message, phone: maskPhone(req.phoneNumber) }, "otp delivery request failed");
-      }
-    },
+    send: (req) => post("/internal/otp-deliveries", req, req.phoneNumber),
+    verified: (phoneNumber) => post("/internal/otp-deliveries/verified", { phoneNumber }, phoneNumber),
   };
 }
 
@@ -41,6 +45,7 @@ export function consoleOtpSender(logger: Logger, sink?: (req: OtpRequest) => voi
       sink?.(req);
       logger.warn({ phone: maskPhone(req.phoneNumber), code: req.code }, "DEV OTP (console delivery, never enabled in production)");
     },
+    async verified() {},
   };
 }
 

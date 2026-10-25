@@ -39,6 +39,8 @@ Turbo caches results. To re-run everything anyway: `pnpm test --force`.
 | `libs/shared-authz/tests` | 18 | Unit: scope checks (`authorize`, `citiesWith`), token verification (alg pinning, audience, denylist, `pv`) |
 | `services/auth-service/tests/unit` | 39 | Unit: role decoding, claims gating per surface, endpoint allowlist, config rules |
 | `services/auth-service/tests/integration` | 31 | Integration: the real app on a throwaway Postgres database (section 5) |
+| `services/notification-service/tests/unit` | 11 | Unit: Telegram report signatures (forged, stale), AES-GCM sealing, phone HMAC, templates, config rules |
+| `services/notification-service/tests/integration` | 20 | Integration: OTP delivery with a fake Telegram Gateway and a movable clock (fallbacks, reports, resend, verify, nothing secret in Postgres), deduplicated event SMS/push, device tokens |
 | `apps/phone-app/test/widget_test.dart` | 3 | Widget: boots to login; rider → sign out → driver flow; provider override straight into driver mode |
 | `packages/core/test/primary_button_test.dart` | 1 | Widget: shared button |
 | other `services/*/tests` | — | Empty, ready for tests |

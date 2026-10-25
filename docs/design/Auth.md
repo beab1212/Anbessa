@@ -514,6 +514,8 @@ Tokens live 15 minutes, so the 30-day grace period is generous. Private keys are
 
 ### 9.7 OTP delivery: Telegram Gateway first, SMS fallback
 
+> **Implemented** in `services/notification-service` (see its README). Differences from this section are listed in [§17, notification-service](#notification-service-otp-delivery).
+
 The user enters their phone number. **Telegram delivers the verification code to that number's Telegram account**, in the "Verification Codes" chat, and **our backend checks the code** (Better Auth). If the number can't receive Telegram codes, or the code isn't delivered quickly, the same code goes by SMS.
 
 ```mermaid
@@ -912,13 +914,29 @@ Errors are JSON `{ error, message }`: 400 `validation_error`, 401 `invalid_token
 
 - **City scope of suspensions is caller-asserted.** Riders have no home city in the identity database, so `cityId` on suspend/reinstate is the city where the case is handled. The check proves the officer holds `user:suspend` *in that city*, and the city goes into the audit event, but it can't prove the user belongs to it. To tighten it, take the city from the safety case or trip (support-service / trip-service) instead of the request body.
 
-- **notification-service `POST /internal/otp-deliveries`** (Telegram Gateway + SMS fallback, §9.7). Until it exists, use `OTP_DELIVERY=console` locally.
 - `act` claim for call-center actions on behalf of a rider.
 - Sign-in success/failure `audit.recorded` events, CAPTCHA after repeated OTP sends.
 - Staff password reset (v1: a super admin creates a new account, or resets it in the database with an audited script).
 - Phone app OTP screens and dashboard password + TOTP screens.
 
+### notification-service (OTP delivery)
+
+§9.7 is implemented in `services/notification-service`. auth-service sends the code with `OTP_DELIVERY=notification` and reports successful verifications (`POST /internal/otp-deliveries/verified`, best effort, from `callbackOnVerification`). What was decided while building it:
+
+| # | Decision | Why |
+|---|---|---|
+| N1 | **The SMS-fallback schedule is a Redis sorted set**, polled every second. The entry is written *before* the first Telegram call, and `ZREM` decides which replica sends | A restart, a crash mid-delivery or several replicas can't lose or duplicate the fallback |
+| N2 | The Redis copy of the code is **AES-256-GCM sealed** (`OTP_ENCRYPTION_KEY`), bound to the phone hash, and expires with the code. A fallback only fires if its attempt still belongs to the active code | An old attempt can never send a stale code after a resend |
+| N3 | `otp_delivery.phone_hash` is an HMAC-SHA256 (`PHONE_HASH_KEY`), enforced 32 bytes by a check constraint. An `error` column records the provider's reason (no secrets) | No phone numbers or codes in Postgres |
+| N4 | A **resend while a Telegram attempt is unread** goes straight to SMS and revokes the Telegram message (step 7) | The user asked again because Telegram didn't work for them |
+| N5 | A failed `sendVerificationMessage` also falls back to SMS immediately, not only a failed `checkSendAbility` | Telegram outages don't delay logins by 20 s |
+| N6 | Channel order and the fallback delay are **global env settings** (`OTP_CHANNELS`, `OTP_FALLBACK_SECONDS`) in v1, not per city. Without `TELEGRAM_GATEWAY_TOKEN` (local development) codes go by SMS | Per-city config arrives with the city settings store |
+| N7 | `remaining_balance` below `TELEGRAM_BALANCE_ALERT_USD` logs a warning (alert on the log line) | Until the service exports metrics |
+| N8 | SMS goes through a provider interface with **Twilio** implemented. The Ethiopian provider choice is still open ([Q3](#16-open-questions)) | Adding a provider is one `SmsSender` |
+| N9 | Same interim service auth as I7: `INTERNAL_SERVICE_TOKEN`, shared by both services (`make secrets` copies it) | Until mTLS |
+
 ### Tests
 
 - `pnpm --filter @ride-app/auth-service test`: unit tests (role decoding, claims gating, allowlist, config rules).
+- `pnpm --filter @ride-app/notification-service test:integration`: Telegram first, the not-reachable and send-failed fallbacks, the 20 s fallback (and only once), signed/forged/stale reports, forward-only statuses, resend by SMS, verify closing the delivery, no code or number in Postgres, 30-day purge, deduplicated event SMS, push with retries and dead-token removal, device-token ownership.
 - `pnpm --filter @ride-app/auth-service test:integration`: the real app against a throwaway `auth_service_test` database. Covers OTP sign-up and lockout, ES256 claims without PII, blocked endpoints, the staff-org guard, the 2FA/password gate, maker ≠ checker, `pv` invalidation, guest claim, city scoping, suspension (sessions and tokens die), the fleet invite-by-phone flow, and the internal driver role.

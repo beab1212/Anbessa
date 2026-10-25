@@ -148,12 +148,12 @@ Each service owns one business capability **and its data**. No service reads ano
 
 | Service | Port | Responsibility | Owns | Status |
 |---|---|---|---|---|
-| **auth-service** | 3001 | Identity on **Better Auth** ([Auth.md](../design/Auth.md)): phone OTP and staff password + TOTP, sessions, organisations, ES256 JWTs + JWKS, `/api/identity` (guests, maker–checker staff roles, suspension) | `auth_service` DB: users, sessions, organisations, members, signing keys, approvals, outbox | ✅ implemented, unit + integration tests. OTP delivery via notification-service still to build |
+| **auth-service** | 3001 | Identity on **Better Auth** ([Auth.md](../design/Auth.md)): phone OTP and staff password + TOTP, sessions, organisations, ES256 JWTs + JWKS, `/api/identity` (guests, maker–checker staff roles, suspension) | `auth_service` DB: users, sessions, organisations, members, signing keys, approvals, outbox | ✅ implemented, unit + integration tests |
 | **trip-service** | 3002 | Trip lifecycle state machine, driver–rider matching | `trip_service` DB: trips | 📐 `/health` only |
 | **location-service** | 3003 | Nearby-driver queries, ETA lookups | Redis geo index (read side) | 📐 `/health` only |
 | **pricing-service** | 3004 | Fare estimates, surge multipliers | Pricing rules (stateless today) | 📐 `/health` only |
 | **payment-service** | 3005 | Fare capture and driver payouts (Stripe Connect), idempotent charges | `payment_service` DB: charges, payouts | 📐 `/health` only |
-| **notification-service** | 3006 | Push (FCM) and SMS from events. **Login codes via the Telegram Gateway API, SMS fallback** (internal API from auth-service, never Kafka: [Auth.md §9.7](../design/Auth.md#97-otp-delivery-telegram-gateway-first-sms-fallback)) | Notification log, `otp_delivery` | 📐 `/health` only |
+| **notification-service** | 3006 | Push (FCM) and SMS from events. **Login codes via the Telegram Gateway API, SMS fallback** (internal API from auth-service, never Kafka: [Auth.md §9.7](../design/Auth.md#97-otp-delivery-telegram-gateway-first-sms-fallback)) | `notification_service` DB: `otp_delivery`, `notification` (dedupe log), `device_token` | ✅ OTP delivery (Telegram + SMS fallback), invite SMS and driver-activated push from Kafka, device tokens. Trip/payment notifications wait for those events |
 | **mapping-service** | 3007 | The only gateway to OSRM / Nominatim / tiles | Route cache | 📐 `/health` only |
 | **realtime-gateway** | 3000 | WebSocket connections, live location fan-out | Socket rooms (in Redis) | 🟡 auth + location relay work; crashes on Kafka publish |
 
@@ -438,7 +438,9 @@ Contracts live in `libs/shared-types/src/events.ts`. Producer and consumer impor
 
 | Topic | Key | Producer | Payload | Consumers | Status |
 |---|---|---|---|---|---|
-| `user.created` | `userId` | auth-service | `{ userId, role, at }` | notification, trip (rider cache) | 🟡 produced; no consumers yet |
+| `user.created` | `userId` | auth-service | `{ userId, guest }` | trip (rider cache) | 🟡 produced; no consumers yet |
+| `org.member_invited` | `orgId` | auth-service | `{ invitationId, orgId, orgName, role, phoneNumber? }` | notification (invite SMS) | ✅ |
+| `role.granted` / `role.revoked` | `userId` | auth-service | `{ userId, role, orgId?, cityId?, byUserId }` | notification (driver activated push), audit | ✅ produced, notification consumes `DRIVER` grants |
 | `driver.location` | `driverId` | realtime-gateway | `{ driverId, tripId, lat, lng, heading?, at }` | ETA, trip audit, analytics | 🟡 publish crashes (producer not connected) |
 | `trip.requested` / `matched` / `driver_en_route` / `started` / `completed` / `cancelled` | `tripId` | trip-service | trip snapshot + transition | payment, notification, analytics | 📐 |
 | `payment.captured` / `payment.failed` | `tripId` | payment-service | `{ tripId, amountCents, … }` | trip, notification | 📐 |
@@ -709,6 +711,6 @@ Issues found while running the system, listed so nobody builds on false assumpti
 | Compose stack mode | Redpanda advertises `localhost:9092`; root `.env` points containers at `localhost` | Containerized services can't reach Kafka or Redis |
 | Delivery | Kubernetes manifests use `:latest`; deploy jobs lack cluster credentials; only trip-service has manifests; `.github/` is gitignored | CD doesn't deploy new code yet |
 | Infra | `infra/terraform/modules/` is empty; RDS pinned to Postgres 16 vs 18 locally | `terraform init` fails; dev/prod parity gap |
-| Services | trip, location, pricing, payment, notification and mapping expose `/health` only | The flows in [§5.2](#52-request-a-trip-target-design) and [§5.4](#54-trip-completion-and-payment-target-design) are designs, not code |
+| Services | trip, location, pricing, payment and mapping expose `/health` only | The flows in [§5.2](#52-request-a-trip-target-design) and [§5.4](#54-trip-completion-and-payment-target-design) are designs, not code |
 
 When you close a gap, update this table and the status markers in [§3](#3-services-and-ownership) and [§8](#8-event-catalog).

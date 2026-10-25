@@ -127,7 +127,13 @@ export function createOrganizationHooks(db: Db) {
       await writeOutbox(db, {
         topic: "org.member_invited",
         key: String(organization.id),
-        payload: { invitationId: invitation.id, orgId: String(organization.id), role: invitation.role ?? "", phoneNumber: emailToPhone(invitation.email) },
+        payload: {
+          invitationId: invitation.id,
+          orgId: String(organization.id),
+          orgName: String(organization.name ?? ""), // a company name, shown in the invitation SMS
+          role: invitation.role ?? "",
+          phoneNumber: emailToPhone(invitation.email),
+        },
       });
     },
 

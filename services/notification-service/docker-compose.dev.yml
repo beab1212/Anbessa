@@ -12,7 +12,6 @@ services:
       POSTGRES_PASSWORD: ride
     ports: ["5432:5432"]
     volumes: ["./.dev-data/postgres:/var/lib/postgresql"]
-    profiles: [db]   # skip postgres if service doesn't use it
 
   redis:
     image: redis:8-alpine

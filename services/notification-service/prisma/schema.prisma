@@ -1,0 +1,65 @@
+// Notification database (docs/design/Database.md §7.5, Auth.md §9.7).
+// No OTP code and no phone number is ever stored here: phones are HMACs, codes live
+// only in Redis (encrypted) for their TTL. Tables and columns are snake_case via @map.
+
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+/// One delivery attempt of a login code on one channel. An SMS fallback is a new row
+/// pointing at the Telegram attempt it replaced (fallbackOf).
+model OtpDelivery {
+  id                String        @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  phoneHash         Bytes         @map("phone_hash")
+  purpose           String
+  channel           String
+  telegramRequestId String?       @unique @map("telegram_request_id")
+  status            String        @default("REQUESTED")
+  costUsd           Decimal?      @map("cost_usd") @db.Decimal(10, 4)
+  isRefunded        Boolean?      @map("is_refunded")
+  error             String?
+  fallbackOfId      String?       @map("fallback_of") @db.Uuid
+  fallbackOf        OtpDelivery?  @relation("Fallback", fields: [fallbackOfId], references: [id], onDelete: SetNull)
+  fallbacks         OtpDelivery[] @relation("Fallback")
+  createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@index([phoneHash, createdAt(sort: Desc)], map: "ix_otp_delivery_phone_recent")
+  @@map("otp_delivery")
+}
+
+/// Push tokens registered by signed-in apps.
+model DeviceToken {
+  id         String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  token      String   @unique
+  platform   String
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+  lastSeenAt DateTime @default(now()) @map("last_seen_at") @db.Timestamptz
+
+  @@index([userId])
+  @@map("device_token")
+}
+
+/// Every notification sent from an event. dedupeKey = eventId:channel, so a replayed
+/// event never sends twice. Message bodies and phone numbers are not stored.
+model Notification {
+  id        String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  dedupeKey String   @unique @map("dedupe_key")
+  userId    String?  @map("user_id") @db.Uuid
+  channel   String
+  template  String
+  status    String   @default("PENDING")
+  attempts  Int      @default(0)
+  error     String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("notification")
+}

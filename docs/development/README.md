@@ -48,9 +48,10 @@ make secrets
 
 `make setup-services`, `make dev-services` and `make dev-svc` run this for you (`scripts/dev-secrets.sh`). It:
 
-- creates `services/*/.env` from `.env.example` where missing, and adds keys that are new in `services/auth-service/.env.example` to an existing `.env`;
-- fills **`BETTER_AUTH_SECRET`** (encrypts the JWT signing keys stored in the database and signs cookies) and **`INTERNAL_SERVICE_TOKEN`** (service-to-service calls to `/internal/*`) with fresh random values, **only when they're blank**. Values are never printed;
-- refuses to run if `services/auth-service/.env` isn't gitignored;
+- creates `services/*/.env` from `.env.example` where missing, and adds keys that are new in the auth-service or notification-service `.env.example` to an existing `.env`;
+- fills **`BETTER_AUTH_SECRET`** (encrypts the JWT signing keys stored in the database and signs cookies), **`INTERNAL_SERVICE_TOKEN`** (service-to-service calls to `/internal/*`), and notification-service's **`PHONE_HASH_KEY`** and **`OTP_ENCRYPTION_KEY`** with fresh random values, **only when they're blank**. Values are never printed;
+- copies auth-service's `INTERNAL_SERVICE_TOKEN` into notification-service's `.env` (the two must match);
+- refuses to run if either `.env` isn't gitignored;
 - warns if the disk ignores Unix permissions (NTFS/exFAT mounts, like this repo's): fine for throwaway dev secrets, never for real ones.
 
 There are no key files any more: Better Auth generates the ES256 signing keys on first use, stores them encrypted in the `jwks` table and rotates them. Other services verify tokens with the public keys at `AUTH_JWKS_URL` (`http://localhost:3001/api/auth/jwks`). If you still have `secrets/*.pem` or `JWT_*_KEY_PATH` lines from before, you can delete them.
@@ -83,6 +84,14 @@ curl localhost:3001/api/auth/token -H 'authorization: Bearer <session token>'   
 ```
 
 Only Ethiopian mobile numbers (`+2519…` / `+2517…`) are accepted. Configuration refuses `console` delivery when `NODE_ENV=production`.
+
+**Through notification-service** (the production path): set `OTP_DELIVERY=notification` in `services/auth-service/.env` and run both services (`make dev-svc SVC=notification-service`, with `make db-migrate` once). Without a `TELEGRAM_GATEWAY_TOKEN` the code goes by SMS, and with `SMS_PROVIDER=console` notification-service prints it:
+
+```
+WARN DEV SMS (console provider, never enabled in production)  to: "+2519••••344"  body: "Anbessa: your code is 892513. …"
+```
+
+To try Telegram, put a Gateway token in `services/notification-service/.env`. Codes sent to your own number are free. Delivery reports need a public `TELEGRAM_CALLBACK_URL`, so without one the 20-second SMS fallback also fires.
 
 ---
 
