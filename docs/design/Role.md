@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Accepted design, not implemented yet |
+| **Status** | Accepted. Implemented: role catalog, permission matrix, scope checks and token claims (`libs/shared-authz`), staff maker–checker grants (auth-service, [Auth.md §17](Auth.md#17-implementation-notes-v1)). Not yet: vehicles, other approvals, audit service |
 | **Scope** | Who can do what in Anbessa: identity, roles, permissions, scopes, organisations (fleet companies and corporate accounts), vehicle ownership, approvals and audit |
 | **Replaces** | The single `role` column (`RIDER` / `DRIVER` / `ADMIN`) in `services/auth-service/prisma/schema.prisma` |
 | **Related** | [← Design home](README.md) · [Auth.md (Better Auth implementation)](Auth.md) · [Architecture overview](../architecture/overview.md) · [Production guide](../production/README.md) |
@@ -156,6 +156,8 @@ A **vehicle is owned either by its driver or by a company, never both.** Ownersh
 | `AUDITOR` | Read-only: audit log, aggregated reports. Internal audit or the regulator (Transport Bureau) | `GLOBAL` (aggregates only for the regulator) |
 | `SERVICE` | Non-human: a microservice or partner integration with fixed, minimal API scopes | Per client |
 
+In code the regulator is its own role code, **`REGULATOR`** (`report:read_regulatory`, aggregates only), separate from the internal `AUDITOR`. It matches the "Auditor (regulator)" column of [§8](#8-role--permission-matrix).
+
 ### Attributes, not roles
 
 | Looks like a role | Actually modelled as | Why |
@@ -164,6 +166,8 @@ A **vehicle is owned either by its driver or by a company, never both.** Ownersh
 | Fleet driver | `DRIVER` + a `Membership` in a `FLEET` org + `VehicleAuthorization`s | Same driver app. Only vehicle access and earnings routing differ |
 | Owner-driver | `DRIVER` + a vehicle with `ownerType = INDIVIDUAL` owned by them | Ownership is a property of the vehicle |
 | Guest rider | `User` with `status = GUEST` (phone number only) + `RIDER` | Can later "claim" the account by verifying the phone |
+
+**In code** (`libs/shared-authz`), the two memberships travel in the token as role codes **`FLEET_DRIVER`** (`member.role = fleet_driver`) and **`CORPORATE_EMPLOYEE`** (`member.role = employee`), so services see `{ "r": "FLEET_DRIVER", "org": "…" }` without a database lookup. They're still attributes in the sense above: `FLEET_DRIVER` grants no permissions of its own, and `CORPORATE_EMPLOYEE` grants only `trip:bill_corporate` in its organisation.
 
 ### Which surface each role uses
 
@@ -330,7 +334,7 @@ Format: `resource:action`. A permission alone isn't enough: it's always combined
 
 | Area | Permissions |
 |---|---|
-| **Trips** | `trip:create` · `trip:create_on_behalf` · `trip:read` · `trip:cancel` · `trip:accept` · `trip:update_status` · `trip:assign` · `trip:reassign` · `trip:read_gps_trace` |
+| **Trips** | `trip:create` · `trip:create_on_behalf` · `trip:read` · `trip:cancel` · `trip:accept` · `trip:update_status` · `trip:assign` · `trip:reassign` · `trip:read_gps_trace` · `trip:bill_corporate` (charge a ride to the employee's company) |
 | **Live location** | `location:stream` · `location:read_live` |
 | **Users** | `user:read_masked` · `user:read_pii` · `user:create_guest` · `user:suspend` · `user:reinstate` |
 | **Drivers** | `driver:apply` · `driver:read` · `driver:verify` · `driver:activate` · `driver:suspend` · `driver:reinstate` |
@@ -423,7 +427,7 @@ Scope legend: **S** = own data (`SELF`) · **O** = own organisation (`ORG`) · *
 | Service-specific scopes | — | — | Per client, e.g. trip-service: `location:read_live`, `driver:read` |
 
 > [!NOTE]
-> The matrix lives in code as **one shared definition** (proposed `libs/shared-authz`), so services, the admin dashboard and tests use the same source of truth. Changing a role's bundle is a reviewed code change plus a permission-version bump ([§10](#10-tokens)).
+> The matrix lives in code as **one shared definition** (`libs/shared-authz/src/matrix.ts`), so services, the admin dashboard and tests use the same source of truth. `CORPORATE_EMPLOYEE` has `trip:bill_corporate` (O), and `FLEET_DRIVER` has nothing of its own (§4, attributes). Changing a role's bundle is a reviewed code change plus a permission-version bump ([§10](#10-tokens)).
 
 ---
 
@@ -462,16 +466,23 @@ flowchart TD
 | **Each service** (`libs/shared-authz`) | Token signature (JWKS), `iss`, **audience** (`ride-app` vs `ride-admin` per route group), expiry, `pv`, suspension denylist, then permission + scope + ownership + domain rules + approval | Only the owning service knows the resource (which org owns this vehicle, which city this trip is in) |
 | **Clients** | Hide what the user can't do | UX only, **never** a security boundary |
 
-### The service-side helper (proposed `libs/shared-authz`)
+### The service-side helper (`libs/shared-authz`)
 
 ```ts
-// One call per protected action. Throws ForbiddenError (403) or NotFoundError (404).
-await authz.require(principal, "vehicle:authorize_driver", {
-  type: "vehicle",
-  orgId: vehicle.ownerOrgId,   // scope attributes of the resource
+import { authorize, can, citiesWith } from "@ride-app/shared-authz";
+
+// One call per protected action. Throws AuthorizationError (403).
+authorize(principal, "vehicle:authorize_driver", {
+  orgId: vehicle.ownerOrgId,      // scope attributes of the resource
   cityId: vehicle.cityId,
+  ownerUserIds: [vehicle.ownerUserId],
 });
+
+can(principal, "trip:assign", { cityId });     // boolean version
+citiesWith(principal, "trip:read");            // "*" (everywhere) or the cities to filter a list query by
 ```
+
+A `SELF` grant covers the resource only if the user is one of `ownerUserIds`. `ORG` needs a matching `orgId`, `CITY` a matching `cityId`, and `GLOBAL` covers everything.
 
 - **404 instead of 403** when revealing that the resource exists would leak information (e.g. another rider's trip).
 - Every *deny* on a staff route and every *allow* on a sensitive permission (`user:read_pii`, `trip:read_gps_trace`, all money actions) is written to the audit log.
@@ -507,7 +518,8 @@ A user with both customer and staff roles gets **separate sessions** per audienc
   "pv": 7,
   "roles": [
     { "r": "DISPATCHER", "city": "addis-ababa" },
-    { "r": "SUPPORT_AGENT", "city": "addis-ababa" }
+    { "r": "SUPPORT_AGENT", "city": "addis-ababa" },
+    { "r": "FINANCE_OFFICER", "g": true }
   ]
 }
 ```
@@ -530,9 +542,10 @@ A user with both customer and staff roles gets **separate sessions** per audienc
 | Claim | Purpose |
 |---|---|
 | `iss`, `aud` | Every service verifies both (fixes the current gap where tokens have neither). Set by Better Auth's `jwt.issuer` / `jwt.audience` per surface |
-| `roles` | Role **codes with scopes**, not expanded permissions. Services expand them from the shared matrix, which keeps tokens small |
+| `roles` | Role **codes with scopes**, not expanded permissions. Services expand them from the shared matrix, which keeps tokens small. `org` = `ORG` scope, `city` = `CITY` scope, `g: true` = `GLOBAL`, none of them = `SELF`. Unknown codes, and codes of the other audience, are dropped by the verifier |
 | `pv` | Permission-matrix version. A token with an old `pv` is refused, so the client refreshes and gets the current roles |
 | `amr` | Authentication methods. Staff routes require `otp` (MFA) |
+| `setup` | Admin tokens only, while the account still has to enrol TOTP or change its initial password. Such tokens carry `roles: []` |
 | `act` | Only on "on behalf" actions (see the phone booking flow). Records the agent acting for a rider |
 
 ### Role changes take effect fast

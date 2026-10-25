@@ -81,12 +81,12 @@ Each Deployment expects two objects that aren't in the repo, by design:
 
 | Name | Contents | Source |
 |------|----------|--------|
-| `<svc>-config` (ConfigMap) | non-secret env: `PORT`, `NODE_ENV=production`, `LOG_LEVEL`, `KAFKA_BROKERS`, `REDIS_URL`, mapping URLs, `JWT_*_TTL` | Kustomize `configMapGenerator` per overlay |
-| `<svc>-secrets` (Secret) | `DATABASE_URL`, `STRIPE_*`, `FCM_SERVER_KEY`, `TWILIO_*` | Cloud secrets manager → External Secrets / CSI driver |
+| `<svc>-config` (ConfigMap) | non-secret env: `PORT`, `NODE_ENV=production`, `LOG_LEVEL`, `KAFKA_BROKERS`, `REDIS_URL`, mapping URLs, `AUTH_ISSUER`, `AUTH_JWKS_URL` | Kustomize `configMapGenerator` per overlay |
+| `<svc>-secrets` (Secret) | `DATABASE_URL`, `STRIPE_*`, `FCM_SERVER_KEY`, `TWILIO_*`. auth-service also: `BETTER_AUTH_SECRET`, `INTERNAL_SERVICE_TOKEN` | Cloud secrets manager → External Secrets / CSI driver |
 
-**Auth secrets.** With Better Auth ([Auth.md](../design/Auth.md)), JWT signing keys live **encrypted in the identity database** (`jwks` table) and rotate automatically, so there are no key files to mount. The one secret is `BETTER_AUTH_SECRET` (32+ random bytes, different per environment), and only auth-service gets it. Every other service only needs `AUTH_INTERNAL_URL` to fetch the public JWKS.
+**Auth secrets.** With Better Auth ([Auth.md](../design/Auth.md)), JWT signing keys live **encrypted in the identity database** (`jwks` table) and rotate automatically, so there are no key files to mount. The signing secret is `BETTER_AUTH_SECRET` (32+ random bytes, different per environment), and only auth-service gets it. `INTERNAL_SERVICE_TOKEN` (32+ random bytes) authenticates service-to-service calls to `/internal/*` until mTLS replaces it; auth-service and the services that call it (notification-service, onboarding) share it. Every other service only needs `AUTH_ISSUER` and `AUTH_JWKS_URL` to verify tokens.
 
-*Until the Better Auth migration ships*, the current code reads JWT keys from **files** (`JWT_PRIVATE_KEY_PATH`, `JWT_PUBLIC_KEY_PATH`). Mount them from a Secret as a volume: only auth-service gets the private key, and verifiers get only the public key.
+**First super admins.** After the first deploy, run the bootstrap once from a trusted machine with the production `DATABASE_URL`: `pnpm --filter @ride-app/auth-service bootstrap:super-admin -- --email … --name …`, twice, for two different people. It refuses once two super admins exist. Hand over each temporary password in person or through the password manager, never by chat.
 
 ---
 
@@ -99,14 +99,19 @@ Production values that differ from dev:
 |----------|------------------|
 | `NODE_ENV` | `production` |
 | `BETTER_AUTH_SECRET` | auth-service only. From Secrets Manager, unique per environment. Never rotate it without a key-migration plan |
-| `AUTH_BASE_URL` / `AUTH_INTERNAL_URL` | Public auth URL (cookies, links) / in-cluster URL that services use to fetch the JWKS |
+| `AUTH_BASE_URL` | auth-service: public URL, must be `https://` (e.g. `https://api.anbessa.et`). Also the default JWT issuer |
+| `AUTH_ISSUER` / `AUTH_JWKS_URL` | verifiers: the issuer above / in-cluster JWKS URL (`http://auth-service:3001/api/auth/jwks`) |
+| `APP_TRUSTED_ORIGINS` / `ADMIN_TRUSTED_ORIGINS` | auth-service: the exact web origins (comma separated). The admin dashboard origin only in `ADMIN_TRUSTED_ORIGINS` |
+| `OTP_DELIVERY` / `NOTIFICATION_INTERNAL_URL` | auth-service: `notification` / in-cluster notification-service URL. `console` is refused in production |
+| `INTERNAL_SERVICE_TOKEN` | auth-service and its internal callers. Required in production |
+| `AUTH_RATE_LIMIT` | leave unset (`on`). `off` is refused in production |
+| `TELEGRAM_GATEWAY_TOKEN` | notification-service only. Telegram Gateway API token for login codes. Its SHA256 also verifies delivery-report signatures. The Gateway account is **prepaid**: finance tops it up, and an alert fires when the balance drops below 7 days of spend |
 | `DATABASE_URL` | RDS endpoint, one database per service (`auth_service`, `trip_service`, …), TLS on |
 | `REDIS_URL` | ElastiCache endpoint (`rediss://` for TLS) |
 | `KAFKA_BROKERS` | MSK bootstrap brokers, comma-separated |
-| `JWT_ACCESS_TTL` / `JWT_REFRESH_TTL` | `15m` / `30d` unless security review says otherwise |
 | `STRIPE_SECRET_KEY` | live key `sk_live_…`, never the test key |
 
-Config is validated with Zod at process start, so a missing or invalid variable crash-loops the pod immediately.
+Config is validated with Zod at process start, so a missing or invalid variable crash-loops the pod immediately. auth-service also refuses to start in production without `REDIS_URL` (shared sessions cache, rate limits and the suspension denylist), `KAFKA_BROKERS` (outbox relay) and `INTERNAL_SERVICE_TOKEN`. Token lifetimes are fixed in code (app 15 min / 30-day session, admin 10 min / 12 h), not env vars.
 
 ---
 
@@ -121,7 +126,8 @@ Config is validated with Zod at process start, so a missing or invalid variable 
 
 ## 7. Edge: Kong and realtime-gateway
 
-- Kong runs DB-less from `infra/kong/kong.yml`. **Target:** routing, rate limits (stricter on `/api/auth/phone-number/*` against SMS abuse) and request limits. JWTs are verified by the services against Better Auth's JWKS, not by Kong ([Auth.md AU5](../design/Auth.md#3-decisions)). **Today:** `/api/trips`, `/api/pricing` and `/api/payments` sit behind Kong's `jwt` plugin, which is misconfigured (see the checklist).
+- Kong runs DB-less from `infra/kong/kong.yml`. It does routing (`/api/auth`, `/api/admin-auth` and `/api/identity` with `strip_path: false`), rate limits and request-size limits. JWTs are verified by the services against Better Auth's JWKS, not by Kong ([Auth.md AU5](../design/Auth.md#3-decisions)). `/internal/*` must never get a Kong route.
+- **Telegram Gateway delivery reports** arrive at `POST /api/webhooks/telegram-gateway` (a Kong route without auth plugins: notification-service verifies the `X-Request-Signature` HMAC and the timestamp). It must be reachable over public HTTPS ([Auth.md §9.7](../design/Auth.md#97-otp-delivery-telegram-gateway-first-sms-fallback)).
 - realtime-gateway (Socket.io) verifies the JWT once at handshake and uses the Redis adapter, so it scales horizontally. The load balancer needs WebSocket support. Sticky sessions are only needed if long-polling is enabled (the mobile app uses websocket-only transport).
 
 ---
@@ -165,8 +171,10 @@ These are known gaps in the current scaffold. Each one blocks or weakens a real 
 - [ ] **ConfigMaps / Secrets** per service (section 4).
 - [ ] **Migration step** before rollout (section 6).
 - [ ] **Terraform modules** in `infra/terraform/modules/` (section 3), and the RDS 16-vs-18 decision.
-- [ ] **Authentication on Better Auth** ([Auth.md §14](../design/Auth.md#14-migration-from-the-current-auth-service)): replaces today's broken register/login, adds phone OTP, staff 2FA and JWKS. Then **remove Kong's `jwt` plugin** (today it has no consumers and rejects every request) and verify tokens in services.
-- [ ] **auth-service error handler** is registered after the routes, so `AppError`s use Fastify's default error format instead of `{ error, message }`. Register it before `authRoutes` in `src/app.ts`.
+- [x] **Authentication on Better Auth** ([Auth.md §17](../design/Auth.md#17-implementation-notes-v1)): phone OTP, staff password + TOTP, JWKS, Kong `jwt` plugin removed, error handler fixed.
+- [ ] **notification-service OTP delivery** (`POST /internal/otp-deliveries`, Telegram Gateway + SMS fallback). Without it, production auth-service can't send login codes.
+- [ ] **Bootstrap two super admins** after the first deploy (section 4).
+- [ ] **Verify tokens in every service** with `libs/shared-authz` as each one gets real routes (only realtime-gateway does today).
 - [ ] **`.github/` is gitignored** (section 1).
 - [ ] **Android release signing** (section 8).
 - [ ] **Observability:** no metrics, tracing or alerting yet. Logs are JSON on stdout; ship them with the cluster's log agent.

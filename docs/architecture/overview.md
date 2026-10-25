@@ -51,7 +51,8 @@ flowchart TB
 
   Stripe[(Stripe Connect<br/>charges + payouts)]
   FCM[(Firebase Cloud Messaging<br/>push)]
-  Twilio[(Twilio<br/>SMS)]
+  Twilio[(Twilio<br/>SMS fallback)]
+  TG[(Telegram Gateway API<br/>login codes)]
   OSM[(OpenStreetMap data<br/>Geofabrik extracts)]
 
   Rider -->|book, track, pay| Core
@@ -60,6 +61,7 @@ flowchart TB
   Core -->|charge riders, pay drivers| Stripe
   Core -->|push notifications| FCM
   Core -->|SMS| Twilio
+  Core -->|verification codes| TG
   OSM -->|imported into self-hosted mapping| Core
 ```
 
@@ -84,7 +86,7 @@ flowchart LR
   end
 
   subgraph Edge
-    Kong["Kong API gateway :8000<br/>routing · JWT · rate limits"]
+    Kong["Kong API gateway :8000<br/>routing · rate limits"]
     RT["realtime-gateway :3000<br/>Socket.io over WebSocket"]
   end
 
@@ -146,12 +148,12 @@ Each service owns one business capability **and its data**. No service reads ano
 
 | Service | Port | Responsibility | Owns | Status |
 |---|---|---|---|---|
-| **auth-service** | 3001 | Identity: phone OTP and staff login, sessions, organisations, JWT issuing. **Planned on Better Auth** ([Auth.md](../design/Auth.md)) | `auth_service` DB: users, sessions, organisations, members, signing keys | 🟡 today: hand-written register/login (RS256), both currently fail (see [§16](#16-known-gaps)) |
+| **auth-service** | 3001 | Identity on **Better Auth** ([Auth.md](../design/Auth.md)): phone OTP and staff password + TOTP, sessions, organisations, ES256 JWTs + JWKS, `/api/identity` (guests, maker–checker staff roles, suspension) | `auth_service` DB: users, sessions, organisations, members, signing keys, approvals, outbox | ✅ implemented, unit + integration tests. OTP delivery via notification-service still to build |
 | **trip-service** | 3002 | Trip lifecycle state machine, driver–rider matching | `trip_service` DB: trips | 📐 `/health` only |
 | **location-service** | 3003 | Nearby-driver queries, ETA lookups | Redis geo index (read side) | 📐 `/health` only |
 | **pricing-service** | 3004 | Fare estimates, surge multipliers | Pricing rules (stateless today) | 📐 `/health` only |
 | **payment-service** | 3005 | Fare capture and driver payouts (Stripe Connect), idempotent charges | `payment_service` DB: charges, payouts | 📐 `/health` only |
-| **notification-service** | 3006 | Push (FCM) and SMS (Twilio) from events | Notification log | 📐 `/health` only |
+| **notification-service** | 3006 | Push (FCM) and SMS from events. **Login codes via the Telegram Gateway API, SMS fallback** (internal API from auth-service, never Kafka: [Auth.md §9.7](../design/Auth.md#97-otp-delivery-telegram-gateway-first-sms-fallback)) | Notification log, `otp_delivery` | 📐 `/health` only |
 | **mapping-service** | 3007 | The only gateway to OSRM / Nominatim / tiles | Route cache | 📐 `/health` only |
 | **realtime-gateway** | 3000 | WebSocket connections, live location fan-out | Socket rooms (in Redis) | 🟡 auth + location relay work; crashes on Kafka publish |
 
@@ -223,6 +225,8 @@ The realtime gateway is reached directly (through the load balancer), not throug
 
 ## 5. Key flows
 
+The flows below are summaries. Each business process is designed end to end, with steps, timeouts, failures and events, in **[docs/design/workflows](../design/workflows/README.md)**.
+
 ### 5.1 Login and session (target design: Better Auth)
 
 ```mermaid
@@ -236,7 +240,7 @@ sequenceDiagram
 
   App->>Kong: POST /api/auth/phone-number/send-otp {+2519…}
   Kong->>BA: (rate limited at edge and in Better Auth)
-  BA-->>N: enqueue SMS code
+  BA-->>N: deliver the code (internal mTLS): Telegram first, SMS fallback
   App->>BA: POST /api/auth/phone-number/verify {phone, code}
   BA->>BA: first time → create user (role rider)
   BA-->>App: session token (bearer, 30 days)
@@ -268,7 +272,7 @@ sequenceDiagram
   participant D as Driver app
 
   R->>Kong: POST /api/pricing/estimate {pickup, dropoff}
-  Kong->>P: (JWT verified)
+  Kong->>P: forward (P verifies the JWT)
   P->>M: GET /route?from&to
   M->>O: GET /route/v1/driving (pickup → dropoff)
   O-->>M: distance, duration
@@ -276,7 +280,7 @@ sequenceDiagram
   P-->>R: fare estimate (+ surge)
 
   R->>Kong: POST /api/trips {pickup, dropoff, estimateId}
-  Kong->>T: (JWT verified)
+  Kong->>T: forward (T verifies the JWT)
   T->>T: create Trip{status: requested} in own DB
   T->>K: trip.requested
   T->>L: nearby drivers (pickup, radius)
@@ -491,11 +495,11 @@ flowchart LR
 | Concern | Approach |
 |---|---|
 | Passwords | argon2id hashes. Plaintext is never stored or logged |
-| Roles | Today: one `role` per user (`RIDER` / `DRIVER` / `ADMIN`). **Accepted design:** 18 scoped roles with a permission matrix and maker–checker approvals. See [docs/design/Role.md](../design/Role.md) |
-| Authentication | Today: hand-written register/login with RS256 key files. **Planned:** Better Auth (phone OTP, staff 2FA, organisations, JWT + JWKS with ES256 and rotation), verified in each service. See [docs/design/Auth.md](../design/Auth.md) |
-| Tokens | **Planned:** Better Auth sessions (app 30 days via bearer, admin 12 h cookie) + short-lived ES256 JWTs (app 15 min, admin 10 min). **Today:** RS256 JWT, 15 min (`JWT_ACCESS_TTL`) |
-| Signing key | **Planned:** keys generated, encrypted and rotated by Better Auth (`jwks` table), published as a JWKS. Only auth-service can sign. **Today:** only auth-service has `JWT_PRIVATE_KEY_PATH`, others get `JWT_PUBLIC_KEY_PATH` |
-| Edge auth | **Planned:** Kong does routing and rate limits only. Every service and realtime-gateway verify JWTs with the JWKS (`libs/shared-authz`). **Today:** Kong `jwt` plugin on `/api/trips`, `/api/pricing`, `/api/payments` (misconfigured, [§16](#16-known-gaps)) |
+| Roles | Scoped roles with one permission matrix (`libs/shared-authz`) and maker–checker staff grants. See [docs/design/Role.md](../design/Role.md) |
+| Authentication | Better Auth in auth-service: phone OTP for the app, password + TOTP for staff, organisations, JWT + JWKS (ES256, rotated), verified in each service. See [docs/design/Auth.md](../design/Auth.md) |
+| Tokens | Better Auth sessions (app 30 days via bearer, admin 12 h cookie) + short-lived ES256 JWTs (app 15 min, admin 10 min) with `pv` and a Redis denylist for suspensions |
+| Signing key | Generated, encrypted (with `BETTER_AUTH_SECRET`) and rotated by Better Auth in the `jwks` table, published at `/api/auth/jwks`. Only auth-service can sign. No key files |
+| Edge auth | Kong does routing, rate limits and request-size limits only. realtime-gateway (and every service, as it gets routes) verifies JWTs with the JWKS through `libs/shared-authz` |
 | Authorization | In the owning service (e.g. only the trip's rider or driver may read it). Never "the gateway checked" |
 | Rate limiting | Kong per route (stricter on `/api/auth` and `/api/payments`) |
 | Payments | Idempotency keys per trip. Card data never touches our systems (Stripe) |
@@ -505,7 +509,7 @@ flowchart LR
 
 | Environment | Source | Delivery |
 |---|---|---|
-| Local dev | `make secrets` (today: RSA-3072 JWT keys, `umask 077`, never overwrites, gitignored. Planned: generates `BETTER_AUTH_SECRET`), `.env` files | Files + env vars |
+| Local dev | `make secrets` (creates `.env` files, generates `BETTER_AUTH_SECRET` and `INTERNAL_SERVICE_TOKEN`, `umask 077`, never overwrites, gitignored) | Env vars |
 | CI | GitHub environment secrets, OIDC to AWS (no static keys) | Masked env vars |
 | Staging / production | AWS Secrets Manager → External Secrets → Kubernetes Secrets | `envFrom` + read-only key-file mounts |
 
@@ -663,7 +667,6 @@ Anbessa/
 │   ├── k8s/                Kustomize base + overlays
 │   └── terraform/          AWS: EKS · RDS · ElastiCache · MSK
 ├── docs/                   architecture · development · testing · production · api
-├── secrets/                local dev secrets (gitignored, `make secrets`: JWT keys today, BETTER_AUTH_SECRET planned)
 ├── learned/                Obsidian learning notes per technology
 └── Makefile                team entry points (`make help`)
 ```
@@ -683,7 +686,7 @@ Anbessa/
 | 1 | Microservices in a **monorepo** | Atomic changes to shared contracts; one toolchain | Needs task caching and affected-only CI to stay fast |
 | 2 | **One phone app** with rider and driver modes | One codebase, release and set of shared widgets | The app bundle contains both experiences |
 | 3 | **Kafka** for inter-service events, **Redis pub/sub** only for socket fan-out | Durable, replayable and ordered vs instant and ephemeral | Two messaging systems to operate |
-| 4 | **Asymmetric JWTs verified by each service** (ES256 via Better Auth's JWKS, with rotation. RS256 files today) | Stateless verification; only auth-service can sign; keys rotate without redeploys | Revocation needs short TTLs plus the suspension denylist |
+| 4 | **Asymmetric JWTs verified by each service** (ES256 via Better Auth's JWKS, with rotation) | Stateless verification; only auth-service can sign; keys rotate without redeploys | Revocation needs short TTLs plus the suspension denylist |
 | 5 | **Self-hosted OSM** mapping behind mapping-service | No per-request fees; engines are swappable | You operate OSRM, Nominatim and tile servers |
 | 6 | **Database per service** on shared Postgres instances | Isolation without one server per service | No cross-service joins; eventual consistency |
 | 7 | **Redis GEO** for live positions, **PostGIS** for durable geo | Write-heavy hot path vs queryable history | Two geo stores to keep consistent |
@@ -700,13 +703,9 @@ Issues found while running the system, listed so nobody builds on false assumpti
 
 | Area | Gap | Impact |
 |---|---|---|
-| auth-service | `register` spreads the plaintext `password` into the Prisma `create` call | Every registration returns 500. Replaced by Better Auth ([Auth.md §14](../design/Auth.md#14-migration-from-the-current-auth-service)) |
-| auth-service | `login` signs with a raw PEM `Buffer`; jose 6 requires an imported key | Login returns 500. Replaced by Better Auth |
-| auth-service | Error handler registered after the routes | Internal error details leak to clients |
 | realtime-gateway | Kafka producer is never connected | The first `location:update` crashes the process |
 | realtime-gateway | `EXPIRE` on the whole `drivers:geo` key | Stale drivers don't expire individually |
-| Kong | Routes strip `/api/<svc>` (services receive `/login`, not `/auth/login`); `jwt` plugin has no consumers and tokens have no `iss` | Auth routes 404; protected routes always 401. **Planned fix:** remove the `jwt` plugin and verify in services ([Auth.md §10](../design/Auth.md#10-verifying-tokens-in-other-services)) |
-| Events | No outbox | Events can be lost if Kafka is down after a commit |
+| Events | Only auth-service has an outbox (and relay) so far | Other services can lose events if Kafka is down after a commit |
 | Compose stack mode | Redpanda advertises `localhost:9092`; root `.env` points containers at `localhost` | Containerized services can't reach Kafka or Redis |
 | Delivery | Kubernetes manifests use `:latest`; deploy jobs lack cluster credentials; only trip-service has manifests; `.github/` is gitignored | CD doesn't deploy new code yet |
 | Infra | `infra/terraform/modules/` is empty; RDS pinned to Postgres 16 vs 18 locally | `terraform init` fails; dev/prod parity gap |

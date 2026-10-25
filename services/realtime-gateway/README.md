@@ -90,7 +90,7 @@ The image is `node:24-alpine`. The build stage uses pnpm (`pnpm deploy --prod`) 
 
 ## Authentication
 
-Sockets authenticate once, at the handshake (`auth.token`). Today the gateway verifies RS256 JWTs with the public key file at `JWT_PUBLIC_KEY_PATH`. **Planned:** verify Better Auth JWTs against the JWKS through `libs/shared-authz` (`verifyAccessToken(token, "ride-app")`), so `JWT_PUBLIC_KEY_PATH` goes away ([Auth.md §10](../../docs/design/Auth.md#10-verifying-tokens-in-other-services)).
+Sockets authenticate once, at the handshake (`auth.token` = the app's access JWT from `GET /api/auth/token`). The gateway verifies it with `createTokenVerifier` from `libs/shared-authz`: ES256 only, `iss = AUTH_ISSUER`, `aud = ride-app`, keys from `AUTH_JWKS_URL` (cached, refetched on an unknown `kid`). It also refuses suspended users (Redis `deny:{userId}`) and tokens older than the user's permission version (`pv:{userId}`). The verified principal is in `socket.data.principal` ([Auth.md §10](../../docs/design/Auth.md#10-verifying-tokens-in-other-services)).
 
 ---
 

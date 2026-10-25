@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit --customConditions development"
   },
   "dependencies": {
+    "@ride-app/shared-authz": "workspace:*",
     "@ride-app/shared-config": "workspace:*",
     "@ride-app/shared-types": "workspace:*",
     "@ride-app/shared-utils": "workspace:*",

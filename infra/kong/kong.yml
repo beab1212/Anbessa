@@ -1,17 +1,32 @@
-# Declarative Kong config (DB-less mode) — REST routing, JWT auth, and rate
-# limiting live here as config rather than code, so changing a route doesn't
+# Declarative Kong config (DB-less mode): routing, rate limiting and request
+# size limits live here as config rather than code, so changing a route doesn't
 # require redeploying a service.
+#
+# Kong does NOT verify JWTs (Auth.md AU5): every service verifies access tokens
+# itself with libs/shared-authz against auth-service's JWKS, because Kong's
+# open-source jwt plugin needs static per-consumer keys and can't follow key rotation.
+# /internal/* routes are never exposed here.
 _format_version: "3.0"
 
 services:
   - name: auth-service
     url: http://auth-service:3001
     routes:
-      - name: auth-routes
+      # strip_path false: Better Auth and the identity API expect their full paths
+      - name: app-auth-routes
         paths: ["/api/auth"]
+        strip_path: false
+      - name: admin-auth-routes
+        paths: ["/api/admin-auth"]
+        strip_path: false
+      - name: identity-routes
+        paths: ["/api/identity"]
+        strip_path: false
     plugins:
       - name: rate-limiting
-        config: { minute: 30, policy: local }
+        config: { minute: 60, policy: local }
+      - name: request-size-limiting
+        config: { allowed_payload_size: 64, size_unit: kilobytes }
 
   - name: trip-service
     url: http://trip-service:3002
@@ -19,7 +34,6 @@ services:
       - name: trip-routes
         paths: ["/api/trips"]
     plugins:
-      - name: jwt
       - name: rate-limiting
         config: { minute: 60, policy: local }
 
@@ -28,8 +42,6 @@ services:
     routes:
       - name: pricing-routes
         paths: ["/api/pricing"]
-    plugins:
-      - name: jwt
 
   - name: payment-service
     url: http://payment-service:3005
@@ -37,6 +49,5 @@ services:
       - name: payment-routes
         paths: ["/api/payments"]
     plugins:
-      - name: jwt
       - name: rate-limiting
         config: { minute: 20, policy: local }

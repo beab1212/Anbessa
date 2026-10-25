@@ -1,5 +1,8 @@
 import type { Logger } from "@ride-app/shared-utils";
 import { createLogger } from "@ride-app/shared-utils";
-import { config } from "../config/index.js";
 
-export const logger: Logger = createLogger("auth-service", config.NODE_ENV as "production" | "development");
+export function serviceLogger(nodeEnv: string, level?: string): Logger {
+  const logger = createLogger("auth-service", nodeEnv);
+  if (level) logger.level = level;
+  return logger;
+}

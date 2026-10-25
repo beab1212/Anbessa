@@ -36,10 +36,12 @@ Turbo caches results. To re-run everything anyway: `pnpm test --force`.
 
 | Where | Tests | Kind |
 |-------|-------|------|
-| `services/auth-service/tests/unit/auth.service.test.ts` | 4 | Unit: login/register business rules with all boundaries mocked |
+| `libs/shared-authz/tests` | 18 | Unit: scope checks (`authorize`, `citiesWith`), token verification (alg pinning, audience, denylist, `pv`) |
+| `services/auth-service/tests/unit` | 39 | Unit: role decoding, claims gating per surface, endpoint allowlist, config rules |
+| `services/auth-service/tests/integration` | 31 | Integration: the real app on a throwaway Postgres database (section 5) |
 | `apps/rider-app/test/widget_test.dart` | 3 | Widget: boots to login; rider → sign out → driver flow; provider override straight into driver mode |
 | `packages/core/test/primary_button_test.dart` | 1 | Widget: shared button |
-| `services/*/tests/unit`, `services/*/tests/integration` | — | Empty, ready for tests |
+| other `services/*/tests` | — | Empty, ready for tests |
 | `apps/admin-dashboard` | — | None yet (see section 7) |
 
 ---
@@ -49,7 +51,7 @@ Turbo caches results. To re-run everything anyway: `pnpm test --force`.
 ```bash
 pnpm --filter @ride-app/auth-service test                 # one service
 cd services/auth-service && pnpm vitest                    # watch mode
-pnpm vitest tests/unit/auth.service.test.ts -t "login"    # one file / one test name
+pnpm vitest tests/unit/claims.test.ts -t "two-factor"      # one file / one test name
 
 cd apps/rider-app && flutter test                          # one Flutter package
 flutter test test/widget_test.dart --plain-name "boots"   # one Flutter test
@@ -62,60 +64,60 @@ flutter test test/widget_test.dart --plain-name "boots"   # one Flutter test
 Put them in `services/<svc>/tests/unit/*.test.ts`. Vitest's default include
 pattern picks them up, so no config file is needed.
 
-**Rule: mock the module boundaries, assert on business logic.** Many modules
-do work at import time. `config/index.ts` validates `process.env`, and
-`auth.service.ts` reads the private key file. Mock those modules *before*
-importing the code under test:
+**Rule: keep logic in pure functions, and test those without mocks.** In
+auth-service, config is parsed by `loadConfig(env)` (no import-time side
+effects) and the decision logic lives in plain modules: `auth/roles-codec.ts`,
+`auth/claims.ts`, `auth/allowlist.ts`. Their tests need no database:
 
 ```ts
-import { vi } from "vitest";
+import { selectRolesForSurface } from "../../src/auth/claims.js";
 
-vi.mock("../../src/config/index.js", () => ({ config: { JWT_PRIVATE_KEY_PATH: "x", JWT_ACCESS_TTL: "15m" } }));
-vi.mock("node:fs", () => ({ readFileSync: vi.fn(() => "test-key") }));
-vi.mock("../../src/repositories/user.repository.js", () => ({ userRepository: { findByEmail: vi.fn(), create: vi.fn() } }));
-
-const { authService } = await import("../../src/services/auth.service.js");
+it("admin tokens carry no roles without two-factor", () => {
+  expect(selectRolesForSurface(roles, "admin", { id: "u1", twoFactorEnabled: false })).toEqual([]);
+});
 ```
 
-`tests/unit/auth.service.test.ts` is the worked example: copy its shape.
+When a function needs the database only for a lookup, pass a stub with just that method
+(`{ member: { findMany: vi.fn().mockResolvedValue([]) } } as unknown as Db`), as
+`tests/unit/claims.test.ts` does.
 
 ### HTTP-level tests
 
-`src/app.ts` builds the Fastify instance without calling `listen()`, so routes
-can be exercised in-process with `app.inject`. Mock the same boundaries as above:
-
-```ts
-const { buildApp } = await import("../../src/app.js");
-const app = await buildApp();
-const res = await app.inject({ method: "POST", url: "/auth/login", payload: { email: "a@b.c", password: "x" } });
-expect(res.statusCode).toBe(401);
-```
+`buildApp(deps)` builds the Fastify instance from its dependencies without calling
+`listen()`, so routes can be exercised in-process with `app.inject`. `createContainer(config, logger, opts)`
+builds those dependencies; tests pass `otpSink` (to capture OTP codes) and `signals` (an
+in-memory replacement for Redis). See `tests/integration/harness.ts`.
 
 ---
 
-## 5. Auth tests (planned with Better Auth)
+## 5. Auth tests
 
-When auth-service moves to Better Auth ([Auth.md](../design/Auth.md)), add an **auth suite** that runs on every Better Auth upgrade ([Auth.md R6](../design/Auth.md#15-risks-and-spikes)):
-- **OTP:** send → verify, the 3-attempt limit, expiry, the rate limit on `send-otp`.
-- **Tokens:** `/token` claims match `definePayload` (no PII), `aud` per surface, ES256 `kid` resolvable from the JWKS.
-- **Surfaces:** an app session can't mint a `ride-admin` token. Staff without 2FA get no staff roles.
-- **Grants:** `addMember` into a `STAFF_CITY` org without an approved request is refused.
-- **Ban:** sessions revoked, `/token` refused, `user.suspended` written to the outbox.
-- **Rotation:** tokens signed with the previous key still verify during the grace period.
+The auth suite runs on every change to auth-service, and **must** pass before any Better Auth upgrade ([Auth.md R6](../design/Auth.md#15-risks-and-spikes)).
 
-## 6. Integration tests (not set up yet)
+```bash
+make infra-up                                              # Postgres on :5432
+pnpm --filter @ride-app/auth-service test:integration      # ~30 s
+```
 
-`services/*/tests/integration/` is reserved for tests against real
-Postgres, Redis and Kafka. No tooling is installed yet. The recommended setup:
+`tests/integration/global-setup.ts` drops and recreates `auth_service_test` (it refuses any name that doesn't end in `_test`), then runs `prisma migrate deploy`. So every run starts from the real migrations, seed rows included. Override the URL with `TEST_DATABASE_URL`.
 
-1. Add `testcontainers` + `@testcontainers/postgresql` as devDependencies of the service.
-2. In a Vitest `globalSetup`, start `postgis/postgis:18-3.6-alpine` (the same image as dev), then run
-   `prisma migrate deploy` against it with `DATABASE_URL` pointing at the container.
-3. Keep integration tests in a separate Vitest project or script (`test:integration`), so `pnpm test` stays fast and Docker-free.
-   Run them in CI as their own job.
+What it covers (`tests/integration/auth.test.ts`):
+- **OTP:** send → verify → session, the 3-attempt lockout, non-Ethiopian numbers refused, no self-service phone change.
+- **Tokens:** ES256 header, claims without PII, `aud` per surface, app tokens refused by staff APIs, app sessions can't mint admin tokens.
+- **Lockdown:** admin-plugin endpoints, email sign-up and `two-factor/disable` return 404. App users get 404 for any staff organisation.
+- **Staff:** no roles until the password is changed and TOTP enrolled. Maker ≠ checker, non-grantable roles, the two-super-admin floor, `pv` invalidation of older tokens.
+- **Call center:** a guest is created in the agent's city only, then claimed by OTP (same user id).
+- **Suspension:** sessions deleted, existing JWTs refused (`token_revoked`), `/token` refused, reinstatement works. Only super admins suspend staff.
+- **Partners:** fleet create (pending) → verification → invite by phone → accept → `FLEET_DRIVER` claim, no role smuggling, protected fields, no staff-org creation.
+- **Internal API:** service token required. Driver role on/off.
 
-Quick manual alternative: `make infra-up`, then point `DATABASE_URL` at a
-throwaway database (e.g. `auth_service_test`) and run `prisma migrate dev`.
+Not covered yet: key rotation with the grace period, Redis-backed rate limits (tests run with `AUTH_RATE_LIMIT=off` and no Redis), the outbox relay against Redpanda.
+
+## 6. Integration tests for other services
+
+Follow auth-service: a `vitest.integration.config.ts` with a `globalSetup` that recreates a `<svc>_test` database and runs migrations, a `test:integration` script, and `pnpm test` excluding `tests/integration/**`, so `pnpm test` stays fast and needs no Docker.
+
+For CI without a shared Postgres, the same `globalSetup` can start `postgis/postgis:18-3.6-alpine` with `testcontainers` instead.
 
 ---
 

@@ -14,7 +14,7 @@ for shipping see [`../production/README.md`](../production/README.md).
 | pnpm | 11 (pinned in `package.json` → `packageManager`) | `corepack enable`. Don't `npm i -g pnpm` |
 | Docker | Engine + Compose v2 | Runs Postgres, Redis, Redpanda (and optionally every service) |
 | Flutter | 3.44+ (Dart 3.12+) | Mobile team only. Android SDK with licenses accepted: `flutter doctor --android-licenses` |
-| OpenSSL | any | Generating the local JWT key pair |
+| OpenSSL | any | Generating local dev secrets (`make secrets`) |
 | Terraform, kubectl | ≥ 1.8 / any | Infra team only |
 
 ---
@@ -26,7 +26,7 @@ git clone <repo> && cd Anbessa
 nvm use && corepack enable
 
 make setup            # everything; or pick one:
-make setup-services   # backend: pnpm install, .env files, JWT keys, infra-up, db-migrate
+make setup-services   # backend: pnpm install, .env files + dev secrets, infra-up, db-migrate
 make setup-admin      # admin dashboard
 make setup-mobile     # Flutter: dart pub get for the whole workspace
 ```
@@ -40,31 +40,49 @@ make setup-mobile     # Flutter: dart pub get for the whole workspace
 3. `make infra-up`: starts Postgres 18 + PostGIS, Redis 8 and Redpanda in Docker.
 4. `make db-migrate`: `prisma migrate dev` for every service in `PRISMA_SERVICES` (auth-service today). It creates the database if it's missing and applies `prisma/migrations`.
 
-### JWT keys (required once)
-
-> **Planned change:** when auth-service moves to Better Auth ([docs/design/Auth.md](../design/Auth.md)), signing keys are generated and rotated by Better Auth inside the database, and `make secrets` will create `BETTER_AUTH_SECRET` instead of key files. The steps below describe the code as it is today.
-
-auth-service signs tokens with a private key. realtime-gateway (and later Kong)
-verifies them with the public key. The paths in the `.env.example` files point at
-`secrets/` in the repo root:
+### Dev secrets (required once)
 
 ```bash
 make secrets
 ```
 
-`make setup-services`, `make dev-services` and `make dev-svc` run this for you. It:
+`make setup-services`, `make dev-services` and `make dev-svc` run this for you (`scripts/dev-secrets.sh`). It:
 
-- generates an RSA-3072 pair **only if missing**, so existing keys (and the tokens signed with them) survive. To rotate, delete `secrets/` and run it again.
-- creates files under `umask 077`, then sets `secrets/` to `700`, the private key to `600` and the public key to `644`.
-- refuses to run if `secrets/jwt-private.pem` isn't gitignored, and `.dockerignore` keeps `secrets/` out of every image.
-- warns if the disk ignores Unix permissions (NTFS/exFAT mounts, like this repo's). There the private key is readable by other local users: acceptable for throwaway dev keys, never for real ones.
+- creates `services/*/.env` from `.env.example` where missing, and adds keys that are new in `services/auth-service/.env.example` to an existing `.env`;
+- fills **`BETTER_AUTH_SECRET`** (encrypts the JWT signing keys stored in the database and signs cookies) and **`INTERNAL_SERVICE_TOKEN`** (service-to-service calls to `/internal/*`) with fresh random values, **only when they're blank**. Values are never printed;
+- refuses to run if `services/auth-service/.env` isn't gitignored;
+- warns if the disk ignores Unix permissions (NTFS/exFAT mounts, like this repo's): fine for throwaway dev secrets, never for real ones.
 
-Only `services/auth-service/.env` references the private key. Every other service gets `JWT_PUBLIC_KEY_PATH` only.
+There are no key files any more: Better Auth generates the ES256 signing keys on first use, stores them encrypted in the `jwks` table and rotates them. Other services verify tokens with the public keys at `AUTH_JWKS_URL` (`http://localhost:3001/api/auth/jwks`). If you still have `secrets/*.pem` or `JWT_*_KEY_PATH` lines from before, you can delete them.
 
-If a key file is missing, the service stops at boot with a config error naming the variable:
-``JWT_PUBLIC_KEY_PATH: file not found. Run `make secrets` from the repo root…``
+> Changing `BETTER_AUTH_SECRET` makes the stored signing keys unreadable. Locally, delete them after changing it (`docker exec -it docker-postgres-1 psql -U ride auth_service -c 'DELETE FROM jwks'`); new keys are created on the next `/token`.
 
-> These are **development keys**. Staging and production keys come from the secrets manager. See `docs/production/README.md`.
+### First staff login (super admin)
+
+The admin dashboard has no sign-up. Create the first two super admins with the bootstrap command (it refuses once two exist):
+
+```bash
+pnpm --filter @ride-app/auth-service bootstrap:super-admin -- --email you@anbessa.et --name "Your Name"
+```
+
+It prints a one-time temporary password. Sign in at `/api/admin-auth/sign-in/email`, change the password and enrol TOTP. Until both are done, your access token carries no roles. After that, every other staff role goes through maker–checker: one super admin requests (`POST /api/identity/staff-role-requests`), the other approves.
+
+### Phone sign-in during development
+
+`OTP_DELIVERY=console` (the default in `.env.example`) logs the code instead of sending it:
+
+```
+WARN DEV OTP (console delivery, never enabled in production)  phone: "+2519••••344"  code: "892513"
+```
+
+```bash
+curl -XPOST localhost:3001/api/auth/phone-number/send-otp -H 'content-type: application/json' -d '{"phoneNumber":"+251911223344"}'
+curl -i -XPOST localhost:3001/api/auth/phone-number/verify -H 'content-type: application/json' -d '{"phoneNumber":"+251911223344","code":"<code from the log>"}'
+# the session token is in the `set-auth-token` response header
+curl localhost:3001/api/auth/token -H 'authorization: Bearer <session token>'   # → { "token": "<15-min JWT>" }
+```
+
+Only Ethiopian mobile numbers (`+2519…` / `+2517…`) are accepted. Configuration refuses `console` delivery when `NODE_ENV=production`.
 
 ---
 
@@ -173,7 +191,7 @@ make setup-mobile                 # dart pub get (root pub workspace)
 make dev-mobile                   # flutter run in apps/rider-app
 ```
 
-- There is one app, `apps/rider-app`. The login screen offers **Continue as rider** / **Continue as driver** until auth is wired to the API. After that, the JWT's `role` claim picks the mode.
+- There is one app, `apps/rider-app`. The login screen offers **Continue as rider** / **Continue as driver** until the OTP screens are wired to the API. After that, the JWT's `roles` claim (`RIDER`, `DRIVER`) picks the mode.
 - Backend URLs come from `--dart-define` (`lib/core/config/env.dart`):
   ```bash
   flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8000 --dart-define=WS_URL=ws://10.0.2.2:3000
@@ -217,4 +235,8 @@ Formatting: `.editorconfig` everywhere; Prettier (`pnpm format`) for TS/JSON/MD;
 | `pnpm start` / `node dist/server.js` can't find `@ride-app/shared-*` | The libs aren't built. Run `pnpm build` at the root (turbo builds the libs first). |
 | `typescript-eslint does not support TS 7.0` | The root `typescript` must stay aliased to `@typescript/typescript6` (see root `package.json`). Don't replace it with plain `typescript@7`. |
 | Every file shows as modified in git (NTFS / WSL / USB drives) | `git config core.fileMode false` |
-| `JWT_*_KEY_PATH: file not found` on boot | Run `make secrets` (section 2). |
+| `TimeoutNegativeWarning: -17929… is a negative number` | A kafkajs 2.2.4 bug on Node 24 (it schedules `-1 - Date.now()` ms). Fixed by `patches/kafkajs@2.2.4.patch` (`patchedDependencies` in `pnpm-workspace.yaml`). If you see it, run `pnpm install`. Remove the patch when upgrading kafkajs |
+| `GET /` on a service returns 404 | Expected: services only serve their API and `/health`. auth-service: `/health`, `/health/ready`, `/api/auth/*`, `/api/admin-auth/*`, `/api/identity/*` |
+| auth-service exits with a ZodError naming `BETTER_AUTH_SECRET` | Run `make secrets` (section 2). |
+| `/api/auth/token` fails after changing `BETTER_AUTH_SECRET` | The stored signing keys can't be decrypted. Locally, `DELETE FROM jwks;` in `auth_service` (section 2) |
+| Every `/api/auth/...` you try returns 404 | Only allowlisted Better Auth endpoints are served ([Auth.md §5](../design/Auth.md#5-plugins)). Admin-plugin endpoints are replaced by `/api/identity` |

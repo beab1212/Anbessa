@@ -1,11 +1,10 @@
 import { z } from "zod";
-import { existingFile } from "@ride-app/shared-config";
-
-const keyHint = "Run `make secrets` from the repo root to create local dev JWT keys.";
 
 export const config = z.object({
   PORT: z.coerce.number().default(3000),
   REDIS_URL: z.string().url(),
   KAFKA_BROKERS: z.string(),
-  JWT_PUBLIC_KEY_PATH: existingFile(keyHint),
+  // Access tokens are verified locally against auth-service's public keys (Auth.md §10)
+  AUTH_ISSUER: z.string().url().default("http://localhost:3001"),
+  AUTH_JWKS_URL: z.string().url().default("http://localhost:3001/api/auth/jwks"),
 }).parse(process.env);

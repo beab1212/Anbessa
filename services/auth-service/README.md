@@ -1,6 +1,10 @@
 # auth-service
 
-## Quick start — standalone, no other services needed
+Identity for Anbessa on **[Better Auth](https://better-auth.com)**: phone OTP sign-in for the app, password + TOTP for staff, sessions, partner organisations, and short-lived **ES256 JWTs** published as a JWKS. Plus `/api/identity`, the operations Better Auth doesn't do: call-center guests, staff accounts, maker–checker staff roles, suspension, organisation verification.
+
+Design: [docs/design/Auth.md](../../docs/design/Auth.md) (what was built: [§17](../../docs/design/Auth.md#17-implementation-notes-v1)) · roles and permissions: [docs/design/Role.md](../../docs/design/Role.md).
+
+## Quick start (standalone, no other services needed)
 
 Requires Node 24 (`nvm use`) and pnpm via `corepack enable` (see the root README's Toolchain table).
 
@@ -11,24 +15,47 @@ docker compose -f docker-compose.dev.yml up -d
 # 2. Install dependencies (once)
 pnpm install
 
-# 3. Copy the env file and create the local dev JWT key pair (paths match .env.example)
-cp .env.example .env
-make -C ../.. secrets      # never overwrites existing keys; see docs/development/README.md
+# 3. Create .env and generate BETTER_AUTH_SECRET + INTERNAL_SERVICE_TOKEN (never overwrites)
+make -C ../.. secrets
 
 # 4. Apply migrations (creates the auth_service database if missing).
 #    After editing schema.prisma: pnpm prisma migrate dev --name <change>
 pnpm prisma migrate dev
 
-# Start with hot reload (tsx watch — loads libs/* TypeScript source directly)
+# 5. Start with hot reload (tsx watch, loads libs/* TypeScript source directly)
 pnpm dev
+
+# 6. First staff login: create a super admin (works until two exist)
+pnpm bootstrap:super-admin --email you@anbessa.et --name "Your Name"
 ```
 
-Service URL  : http://localhost:3001
-Health check : http://localhost:3001/health
+Service URL: http://localhost:3001 · health: `/health`, `/health/ready` (checks the database).
 
-> **Working across the full stack?**
-> From the repo root, run `make dev-services` instead —
-> it starts all services together.
+With `OTP_DELIVERY=console` (the default), login codes are printed in the log. See [docs/development/README.md](../../docs/development/README.md#phone-sign-in-during-development) for a curl walkthrough.
+
+> **Working across the full stack?** From the repo root, run `make dev-services` instead. It starts all services together.
+
+---
+
+## HTTP surface
+
+| Prefix | Who | What |
+|---|---|---|
+| `/api/auth/*` | Phone app (bearer session) | Better Auth **app surface**: `phone-number/send-otp`, `phone-number/verify`, `token` (15-min JWT, `aud=ride-app`), `jwks`, sessions, self-service fleet/corporate organisations and invitations |
+| `/api/admin-auth/*` | Admin dashboard (cookie) | Better Auth **admin surface**: `sign-in/email`, `change-password`, `two-factor/*`, `token` (10-min JWT, `aud=ride-admin`) |
+| `/api/identity/*` | Admin dashboard (staff JWT) | Guests, staff accounts, role requests/approvals/revocation, suspension, organisation verification |
+| `/internal/*` | Other services (`INTERNAL_SERVICE_TOKEN`) | Driver role on activation. Never routed by Kong |
+
+Only allowlisted Better Auth endpoints are served (`src/auth/allowlist.ts`). Everything else is 404, including every admin-plugin endpoint. The full route table is in [Auth.md §17](../../docs/design/Auth.md#identity-api).
+
+### How access is secured
+
+- **Two surfaces, two audiences.** A session belongs to one surface. App tokens never work on staff APIs, and app sessions can't mint admin tokens.
+- **Staff roles need 2FA and a changed initial password.** Until then, the admin token has `roles: []` and a `setup` claim.
+- **Every staff role is maker–checker.** One super admin requests, another approves, and the identity service executes the grant in one transaction (state + `permissionVersion` + outbox + audit). Better Auth can't change staff organisations at all.
+- **Authorization uses `libs/shared-authz`** with scopes (`SELF` / `ORG` / `CITY` / `GLOBAL`). Super admin manages people. It isn't "can do everything".
+- **Revocation is fast.** Role changes bump `pv`, and older tokens are refused. Suspension deletes all sessions and sets the Redis denylist, so existing JWTs are refused at once.
+- **Minimal tokens.** `sub`, `roles`, `pv`, `amr` only. No name, phone or email.
 
 ---
 
@@ -36,20 +63,19 @@ Health check : http://localhost:3001/health
 
 ```
 src/
-├── config/         env → typed config object (Zod, fails fast at boot)
-├── routes/         HTTP route wiring → controller (no logic here)
-├── controllers/    parse request · call service · shape response
-├── services/       business logic lives here
-├── repositories/   the only layer that talks to Prisma / Redis
-├── models/         domain types (DB schema comes from prisma/schema.prisma)
-├── generated/      Prisma client output — gitignored, created by `prisma generate`
-├── middlewares/    error handler, auth guard
-├── events/
-│   ├── producers/  Kafka publish
-│   └── consumers/  Kafka subscribe
-├── utils/          logger, small helpers
-├── app.ts          builds Fastify instance — no listen() call, fully testable
-└── server.ts       calls app.ts, listens, wires graceful shutdown
+├── auth/           Better Auth: instances (two surfaces), allowlist, claims, org hooks,
+│                   access control from shared-authz, OTP delivery, password hashing
+├── identity/       identity domain operations (service.ts), all authorised with shared-authz
+├── http/           Better Auth mount + guards, /api/identity and /internal routes, JWT principal
+├── outbox/         outbox writes and the Kafka relay (FOR UPDATE SKIP LOCKED)
+├── lib/            errors, Redis secondary storage, deny/pv security signals
+├── cli/            bootstrap-super-admin
+├── config/         env → typed config (Zod). Refuses insecure settings in production
+├── middlewares/    error handler (registered before routes)
+├── generated/      Prisma client output (gitignored, created by `prisma generate`)
+├── container.ts    composition root: builds every dependency from config
+├── app.ts          builds the Fastify instance from dependencies, no listen() (testable)
+└── server.ts       loads config, starts the outbox relay, listens, graceful shutdown
 ```
 
 ---
@@ -61,40 +87,20 @@ src/
 | `pnpm dev` | Start with hot reload (tsx watch) |
 | `pnpm build` | Compile TypeScript → dist/ (build libs first: `pnpm turbo run build --filter=@ride-app/auth-service...`) |
 | `pnpm start` | Run compiled output (production) |
-| `pnpm test` | Run all tests |
-| `pnpm vitest` | Tests in watch mode |
-| `pnpm lint` | ESLint |
-| `pnpm typecheck` | Type-check only, no emit (against lib source, no build needed) |
+| `pnpm test` | Unit tests (no database needed) |
+| `pnpm test:integration` | Integration tests against a throwaway `auth_service_test` database (needs Postgres: `make infra-up`) |
+| `pnpm lint` / `pnpm typecheck` | ESLint / type-check only |
+| `pnpm bootstrap:super-admin --email … --name …` | Create one of the first two super admins |
+| `pnpm prisma migrate dev --name <change>` | New migration after editing `schema.prisma` |
 | `pnpm prisma studio` | Open Prisma DB browser |
-| `pnpm prisma generate` | Regenerate the client (also runs on install, build and typecheck) |
 
 ---
 
-## Planned: Better Auth
+## Data and migrations
 
-This service is planned to move to **Better Auth** ([docs/design/Auth.md](../../docs/design/Auth.md)): phone OTP and staff 2FA login, sessions, organisations, and JWTs signed with rotating ES256 keys published at `/api/auth/jwks`. It replaces the hand-written `register`/`login` routes (both currently broken) and the RSA key files. Until then, the sections below describe the current code.
-
----
-
-## Prisma 7 notes
-
-- `prisma.config.ts` holds the schema path, the migrations path and the connection URL (`DATABASE_URL` from `.env`). `schema.prisma` no longer has a `url`.
-- The `prisma-client` generator writes the client to `src/generated/prisma`. Import it from `../generated/prisma/client.js`, not `@prisma/client`.
-- Queries go through the `@prisma/adapter-pg` driver adapter (see `src/repositories/user.repository.ts`).
-
----
-
-## Running tests
-
-```bash
-pnpm test            # all tests once (passes when no test files exist yet)
-pnpm vitest          # watch mode during development
-```
-
-- **Unit tests** (`tests/unit/`): mock the repository and Kafka boundaries,
-  assert on pure business logic only.
-- **Integration tests** (`tests/integration/`): spin up a real DB via
-  Testcontainers so migrations and queries run against an actual Postgres.
+- Tables follow Better Auth's core and plugin models (`app_user`, `session`, `account`, `verification`, `jwks`, `two_factor`, `organization`, `member`, `invitation`) plus ours: `city`, `approval_request`, `outbox`. Snake_case via `@map`, UUIDv7 ids.
+- `20261025120000_better_auth_identity` migrates the old `User` table (roles `RIDER → rider`, `DRIVER → driver`, `ADMIN → super_admin`, password hashes → credential accounts), adds check constraints and partial unique indexes, and seeds the city `addis-ababa` with its staff organisation.
+- Prisma 7: `prisma.config.ts` holds the paths and `DATABASE_URL`. The client is generated to `src/generated/prisma` and used through `@prisma/adapter-pg` (`src/db.ts`).
 
 ---
 
@@ -106,11 +112,11 @@ Build from the **repo root** so the workspace libs are in the build context:
 docker build -f services/auth-service/Dockerfile -t ride-app/auth-service .
 ```
 
-The image is `node:24-alpine`. The build stage uses pnpm (`pnpm deploy --prod`) and the runtime stage ships only `dist/` and production `node_modules`.
+The image is `node:24-alpine`. The build stage uses pnpm (`pnpm deploy --prod`), and the runtime stage ships only `dist/` and production `node_modules`.
 
 ---
 
 ## Environment variables
 
-See `.env.example` — every variable is documented there.
+See `.env.example`: every variable is documented there. Production rules (https base URL, Redis, Kafka, service token, real OTP delivery, rate limits on) are enforced at start-up. See [docs/production/README.md](../../docs/production/README.md#5-configuration-reference).
 Never commit a `.env` file with real secrets.

@@ -1,20 +1,61 @@
-import Fastify from "fastify";
+import Fastify, { type FastifyServerOptions } from "fastify";
 import helmet from "@fastify/helmet";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
-import { authRoutes } from "./routes/auth.routes.js";
+import type { Config } from "./config/index.js";
+import type { Db } from "./db.js";
+import type { AdminAuth, AppAuth } from "./auth/instances.js";
+import { mountBetterAuth } from "./http/better-auth.routes.js";
+import { registerIdentityRoutes } from "./http/identity.routes.js";
+import type { RequirePrincipal } from "./http/principal.js";
+import type { IdentityService } from "./identity/service.js";
 import { registerErrorHandler } from "./middlewares/error-handler.js";
 
-export async function buildApp() {
-  const app = Fastify({ logger: true });
+export interface AppDeps {
+  config: Config;
+  db: Db;
+  appAuth: AppAuth;
+  adminAuth: AdminAuth;
+  identity: IdentityService;
+  requirePrincipal: RequirePrincipal;
+  logger?: FastifyServerOptions["loggerInstance"];
+}
+
+export async function buildApp(deps: AppDeps) {
+  const app = Fastify({
+    ...(deps.logger ? { loggerInstance: deps.logger } : { logger: false }),
+    trustProxy: true, // behind Kong / the load balancer
+    bodyLimit: 64 * 1024,
+  });
+
+  // error handling first, so every route below uses it
+  registerErrorHandler(app);
 
   await app.register(helmet);
-  await app.register(cors, { origin: true });
-  await app.register(rateLimit, { max: 100, timeWindow: "1 minute" });
+  await app.register(cors, {
+    origin: [...deps.config.APP_TRUSTED_ORIGINS, ...deps.config.ADMIN_TRUSTED_ORIGINS],
+    credentials: true,
+  });
+  await app.register(rateLimit, { max: 300, timeWindow: "1 minute" });
 
   app.get("/health", async () => ({ status: "ok" }));
-  await app.register(authRoutes);
+  app.get("/health/live", async () => ({ status: "ok" }));
+  app.get("/health/ready", async (_req, reply) => {
+    try {
+      await deps.db.$queryRaw`SELECT 1`;
+      return { status: "ok" };
+    } catch {
+      return reply.status(503).send({ status: "unavailable" });
+    }
+  });
 
-  registerErrorHandler(app);
+  mountBetterAuth(app, deps.appAuth, { prefix: "/api/auth", surface: "app", db: deps.db });
+  mountBetterAuth(app, deps.adminAuth, { prefix: "/api/admin-auth", surface: "admin", db: deps.db });
+  registerIdentityRoutes(app, {
+    identity: deps.identity,
+    requirePrincipal: deps.requirePrincipal,
+    internalToken: deps.config.INTERNAL_SERVICE_TOKEN,
+  });
+
   return app;
 }

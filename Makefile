@@ -19,12 +19,6 @@ SERVICES := auth-service trip-service location-service pricing-service \
             payment-service notification-service mapping-service realtime-gateway
 PRISMA_SERVICES := auth-service
 
-# Local-dev JWT key pair. Paths match JWT_*_KEY_PATH in services/*/.env.example.
-# Production keys never come from here — see docs/production/README.md.
-SECRETS_DIR := secrets
-JWT_PRIVATE := $(SECRETS_DIR)/jwt-private.pem
-JWT_PUBLIC  := $(SECRETS_DIR)/jwt-public.pem
-
 # ── colours ────────────────────────────────────────────────────────────────────
 BOLD  := \033[1m
 CYAN  := \033[36m
@@ -43,7 +37,7 @@ help:
 	@echo "  make setup-admin      Install Node deps for the admin dashboard"
 	@echo "  make setup-infra      Bootstrap Terraform + Kubernetes tooling"
 	@echo "  make setup            Everything above in one shot"
-	@echo "  make secrets          Create the local dev JWT key pair (never overwrites)"
+	@echo "  make secrets          Create .env files + local dev auth secrets (never overwrites)"
 	@echo ""
 	@echo "$(CYAN)Day-to-day dev:$(RESET)"
 	@echo "  make dev-services     Start all services in watch mode (hot reload)"
@@ -116,23 +110,7 @@ _copy-env-examples:
 # signed with them) survive. umask 077 means the private key is never readable
 # by other users, even for the instant between creation and chmod.
 secrets:
-	@command -v openssl >/dev/null || (echo "openssl is required to create dev JWT keys" && exit 1)
-	@git check-ignore -q $(JWT_PRIVATE) || (echo "Refusing: $(JWT_PRIVATE) is not gitignored" && exit 1)
-	@umask 077; mkdir -p $(SECRETS_DIR); chmod 700 $(SECRETS_DIR); \
-	if [ ! -f $(JWT_PRIVATE) ]; then \
-	  openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out $(JWT_PRIVATE) 2>/dev/null || exit 1; \
-	  rm -f $(JWT_PUBLIC); \
-	  echo "  created $(JWT_PRIVATE) (local dev only)"; \
-	fi; \
-	if [ ! -f $(JWT_PUBLIC) ]; then \
-	  openssl pkey -in $(JWT_PRIVATE) -pubout -out $(JWT_PUBLIC) || exit 1; \
-	  echo "  created $(JWT_PUBLIC)"; \
-	fi; \
-	chmod 600 $(JWT_PRIVATE); chmod 644 $(JWT_PUBLIC); \
-	if [ "$$(stat -c %a $(JWT_PRIVATE))" != "600" ]; then \
-	  echo "  ⚠  this filesystem ignores Unix permissions: $(JWT_PRIVATE) is readable by other local users."; \
-	  echo "     Fine for throwaway dev keys; never put real keys on this disk."; \
-	fi
+	@bash scripts/dev-secrets.sh
 
 # ── dev ────────────────────────────────────────────────────────────────────────
 dev-services: secrets

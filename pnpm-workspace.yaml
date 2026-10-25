@@ -7,3 +7,14 @@ allowBuilds:
   argon2: true
   esbuild: true
   prisma: true
+minimumReleaseAgeExclude:
+  - '@better-auth/core@1.7.13'
+  - '@better-auth/drizzle-adapter@1.7.13'
+  - '@better-auth/kysely-adapter@1.7.13'
+  - '@better-auth/memory-adapter@1.7.13'
+  - '@better-auth/mongo-adapter@1.7.13'
+  - '@better-auth/prisma-adapter@1.7.13'
+  - '@better-auth/telemetry@1.7.13'
+  - better-auth@1.7.13
+patchedDependencies:
+  kafkajs@2.2.4: patches/kafkajs@2.2.4.patch

@@ -14,10 +14,11 @@ This folder holds Anbessa's **design documents**: one file per design topic, eac
 
 | Design | Status | Summary |
 |---|---|---|
-| [Roles, permissions and vehicle ownership](Role.md) | ✅ Accepted · not implemented | 18 scoped roles, permission matrix, owner-driver vs company-owned vehicles, tokens, maker–checker approvals, audit log, migration plan |
-| [Authentication with Better Auth](Auth.md) | 👀 In review | Better Auth in auth-service: phone OTP, bearer, staff 2FA, organisations (fleet / corporate / city staff), JWT + JWKS (ES256), two surfaces, role/scope mapping, verification in services, migration |
+| [Roles, permissions and vehicle ownership](Role.md) | ✅ Accepted · roles, matrix, tokens and staff maker–checker implemented (`libs/shared-authz`, auth-service). Vehicles and other approvals not yet | 18 scoped roles, permission matrix, owner-driver vs company-owned vehicles, tokens, maker–checker approvals, audit log, migration plan |
+| [Authentication with Better Auth](Auth.md) | ✅ Implemented (v1) · app/dashboard screens and Telegram delivery pending | Better Auth in auth-service: phone OTP, bearer, staff 2FA, organisations (fleet / corporate / city staff), JWT + JWKS (ES256), two surfaces, role/scope mapping, verification in services, migration |
 | [Earnings, commission and the driver balance](Payment.md) | 👀 In review | How commission is collected on cash trips: one balance per driver or fleet, netting, cash-first blocking, top-ups, payouts, commission models (percent / fixed / subscription), taxes |
 | [Database architecture](Database.md) | 👀 In review | Store per data type, clusters, schemas (verified on PG 18), consistency (outbox/inbox, sagas), concurrency control, Redis hot path, ledger, scaling stages, lifecycle, DR, security |
+| [**Workflows** (16 end-to-end designs)](workflows/README.md) | 👀 In review | How the system works from start to finish: sign-up, driver and fleet onboarding, driver shift, booking and matching, trip, cancellations, payment and rating, driver balance, phone and corporate bookings, scheduled rides, support and refunds, SOS, pricing and promos, account lifecycle |
 
 ### Roles, permissions and vehicle ownership — [`Role.md`](Role.md)
 
@@ -47,6 +48,10 @@ This folder holds Anbessa's **design documents**: one file per design topic, eac
 9. [Concurrency control](Database.md#9-concurrency-control) · 10. [Live location in Redis](Database.md#10-hot-path-live-location-in-redis) · 11. [Kafka topics](Database.md#11-kafka-topics-as-data) · 12. [Read models and analytics](Database.md#12-read-models-search-and-analytics)
 13. [Performance](Database.md#13-performance) · 14. [Scaling path](Database.md#14-scaling-path) · 15. [Data lifecycle](Database.md#15-data-lifecycle-partitions-retention-archiving-deletion) · 16. [Backup and DR](Database.md#16-backup-and-disaster-recovery)
 17. [Security](Database.md#17-security) · 18. [Migrations](Database.md#18-schema-migrations) · 19. [Observability](Database.md#19-observability) · 20. [Decisions](Database.md#20-decisions-and-alternatives-considered) · 21. [Rollout](Database.md#21-rollout-plan) · 22. [Open questions](Database.md#22-open-questions)
+
+### Workflows — [`workflows/`](workflows/README.md)
+
+[01 Sign-up](workflows/01-rider-signup-signin.md) · [02 Driver onboarding](workflows/02-driver-onboarding.md) · [03 Fleet onboarding](workflows/03-fleet-onboarding.md) · [04 Driver shift](workflows/04-driver-shift.md) · [05 Booking + matching](workflows/05-ride-booking-matching.md) · [06 Trip execution](workflows/06-trip-execution.md) · [07 Cancellations](workflows/07-cancellations.md) · [08 Payment + rating](workflows/08-payment-receipt-rating.md) · [09 Driver balance](workflows/09-driver-balance.md) · [10 Phone booking](workflows/10-phone-booking.md) · [11 Corporate](workflows/11-corporate-rides.md) · [12 Scheduled](workflows/12-scheduled-rides.md) · [13 Support + refunds](workflows/13-support-refunds.md) · [14 SOS](workflows/14-safety-sos.md) · [15 Pricing + promos](workflows/15-pricing-promotions.md) · [16 Account lifecycle](workflows/16-account-lifecycle.md)
 
 ### Planned design topics
 

@@ -1,21 +1,30 @@
-import type { FastifyInstance, FastifyError } from "fastify";
+import type { FastifyError, FastifyInstance } from "fastify";
+import { ZodError } from "zod";
+import { AuthorizationError, TokenError } from "@ride-app/shared-authz";
+import { AppError } from "@ride-app/shared-utils";
 
-export class AppError extends Error {
-  constructor(
-    public statusCode: number,
-    message: string,
-    public code: string,
-  ) {
-    super(message);
-  }
-}
-
+// Registered BEFORE any route, so every route uses it (it used to be registered
+// after the routes and was ignored, leaking raw errors). Internal details never
+// reach the client; they're logged with the request id.
 export function registerErrorHandler(app: FastifyInstance) {
-  app.setErrorHandler((err: FastifyError | AppError, _req, reply) => {
-    if (err instanceof AppError) {
-      return reply.status(err.statusCode).send({ error: err.code, message: err.message });
+  app.setErrorHandler((err: FastifyError | Error, req, reply) => {
+    if (err instanceof AppError) return reply.status(err.statusCode).send({ error: err.code, message: err.message });
+    if (err instanceof AuthorizationError) return reply.status(403).send({ error: "forbidden", message: err.message });
+    if (err instanceof TokenError) return reply.status(401).send({ error: err.code, message: err.message });
+    if (err instanceof ZodError) {
+      return reply.status(400).send({
+        error: "validation_error",
+        message: "invalid request",
+        issues: err.issues.map((i) => ({ path: i.path.join("."), message: i.message })),
+      });
     }
-    app.log.error(err);
+    const status = (err as FastifyError).statusCode;
+    if (status && status >= 400 && status < 500) {
+      return reply.status(status).send({ error: (err as FastifyError).code ?? "bad_request", message: err.message });
+    }
+    req.log.error({ err }, "unhandled error");
     return reply.status(500).send({ error: "internal_error", message: "Something went wrong" });
   });
+
+  app.setNotFoundHandler((_req, reply) => reply.status(404).send({ error: "not_found", message: "Not found" }));
 }

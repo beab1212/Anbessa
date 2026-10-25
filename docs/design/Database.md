@@ -512,7 +512,7 @@ Cash trips, limits, top-ups, commission rules and fleet settlement are designed 
 |---|---|---|
 | **pricing** | `zone (id, city_id, area geography(Polygon), surge_cap)`, `fare_rule (city_id, vehicle_type, base_minor, per_km_minor, per_min_minor, min_fare_minor, valid_from, valid_to)`, `pricing_change_request` | Rules are **versioned by validity range**: a fare change is a new row with `valid_from` in the future, never an edit. An exclusion constraint prevents overlapping validity for the same city and vehicle type. Heavily cached in Redis |
 | **support** | `ticket`, `ticket_message`, `incident`, `sos_alert`, `lost_item` | `city_id` + status partial indexes for the work queues. SOS rows are never deleted |
-| **notification** | `device_token`, `notification (dedupe_key UNIQUE)`, `template` | `dedupe_key = eventId + channel`, so a replayed event never re-sends an SMS |
+| **notification** | `device_token`, `notification (dedupe_key UNIQUE)`, `template`, `otp_delivery` | `dedupe_key = eventId + channel`, so a replayed event never re-sends an SMS. `otp_delivery` tracks Telegram Gateway / SMS delivery of login codes **without storing the code** ([Auth.md §9.7](Auth.md#97-otp-delivery-telegram-gateway-first-sms-fallback)) |
 | **audit** | `audit_entry` partitioned monthly by `at` | Insert-only role. Older partitions exported to S3 with Object Lock, then detached ([§15](#15-data-lifecycle-partitions-retention-archiving-deletion)) |
 
 Versioned fare rules, with an exclusion constraint for non-overlapping validity (needs `btree_gist`):

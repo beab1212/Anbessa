@@ -1,0 +1,13 @@
+diff --git a/src/network/requestQueue/index.js b/src/network/requestQueue/index.js
+index eee14d66c3869d90f7bac0ac755ecbad3f2a2741..a13f1cdcbcd19d67b98ff737a56dedfcb4ab4881 100755
+--- a/src/network/requestQueue/index.js
++++ b/src/network/requestQueue/index.js
+@@ -317,7 +317,7 @@ module.exports = class RequestQueue extends EventEmitter {
+       this.throttleCheckTimeoutId = setTimeout(() => {
+         this.throttleCheckTimeoutId = null
+         this.checkPendingRequests()
+-      }, scheduleAt)
++      }, Math.max(scheduleAt, 0))
+     }
+   }
+ }

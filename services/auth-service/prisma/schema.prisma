@@ -1,3 +1,8 @@
+// Identity database for auth-service.
+// Better Auth owns user/session/account/verification/jwks/organization/member/
+// invitation/twoFactor (field names must match Better Auth, see docs/design/Auth.md §11);
+// city/approval_request/outbox are ours. Tables and columns are snake_case via @map.
+
 datasource db {
   provider = "postgresql"
 }
@@ -7,18 +12,214 @@ generator client {
   output   = "../src/generated/prisma"
 }
 
+// ── Better Auth core + admin, phoneNumber, twoFactor plugins ──────────────────
+
 model User {
-  id           String   @id @default(uuid())
-  email        String   @unique
-  phone        String   @unique
-  passwordHash String
-  role         Role     @default(RIDER)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                  String    @id @db.Uuid
+  name                String
+  email               String    @unique
+  emailVerified       Boolean   @default(false) @map("email_verified")
+  image               String?
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  phoneNumber         String?   @unique @map("phone_number")
+  phoneNumberVerified Boolean?  @map("phone_number_verified")
+  role                String?   // comma-separated global roles (shared-authz USER_ROLE_CODES, stored form)
+  banned              Boolean?  @default(false)
+  banReason           String?   @map("ban_reason")
+  banExpires          DateTime? @map("ban_expires") @db.Timestamptz
+  twoFactorEnabled    Boolean?  @default(false) @map("two_factor_enabled")
+  // ours
+  accountStatus       String    @default("ACTIVE") @map("account_status")
+  permissionVersion   Int       @default(0) @map("permission_version")
+  mustChangePassword  Boolean   @default(false) @map("must_change_password")
+
+  sessions    Session[]
+  accounts    Account[]
+  members     Member[]
+  invitations Invitation[]
+  twoFactors  TwoFactor[]
+
+  @@map("app_user")
 }
 
-enum Role {
-  RIDER
-  DRIVER
-  ADMIN
+model Session {
+  id                   String   @id @db.Uuid
+  expiresAt            DateTime @map("expires_at") @db.Timestamptz
+  token                String   @unique
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  ipAddress            String?  @map("ip_address")
+  userAgent            String?  @map("user_agent")
+  userId               String   @map("user_id") @db.Uuid
+  activeOrganizationId String?  @map("active_organization_id")
+  impersonatedBy       String?  @map("impersonated_by")
+  // ours: which Better Auth instance created the session ("app" | "admin")
+  surface              String   @default("app")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id @db.Uuid
+  accountId             String    @map("account_id")
+  providerId            String    @map("provider_id")
+  userId                String    @map("user_id") @db.Uuid
+  accessToken           String?   @map("access_token")
+  refreshToken          String?   @map("refresh_token")
+  idToken               String?   @map("id_token")
+  accessTokenExpiresAt  DateTime? @map("access_token_expires_at") @db.Timestamptz
+  refreshTokenExpiresAt DateTime? @map("refresh_token_expires_at") @db.Timestamptz
+  scope                 String?
+  password              String?   // argon2id hash (staff credential accounts)
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt             DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id @db.Uuid
+  identifier String
+  value      String
+  expiresAt  DateTime @map("expires_at") @db.Timestamptz
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@index([identifier])
+  @@map("verification")
+}
+
+model Jwks {
+  id         String    @id @db.Uuid
+  publicKey  String    @map("public_key")
+  privateKey String    @map("private_key") // AES-256-GCM encrypted with BETTER_AUTH_SECRET
+  createdAt  DateTime  @map("created_at") @db.Timestamptz
+  expiresAt  DateTime? @map("expires_at") @db.Timestamptz
+  alg        String?
+  crv        String?
+
+  @@map("jwks")
+}
+
+model TwoFactor {
+  id                      String    @id @db.Uuid
+  secret                  String
+  backupCodes             String    @map("backup_codes")
+  userId                  String    @map("user_id") @db.Uuid
+  verified                Boolean?  @default(true)
+  failedVerificationCount Int?      @default(0) @map("failed_verification_count")
+  lockedUntil             DateTime? @map("locked_until") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("two_factor")
+}
+
+// ── Better Auth organization plugin (+ our additional fields) ─────────────────
+
+model Organization {
+  id        String   @id @db.Uuid
+  name      String
+  slug      String   @unique
+  logo      String?
+  createdAt DateTime @map("created_at") @db.Timestamptz
+  metadata  String?
+  // ours
+  kind      String   // FLEET | CORPORATE | STAFF_CITY | STAFF_HQ
+  cityId    String   @map("city_id")
+  legalName String?  @map("legal_name")
+  tin       String?
+  status    String   @default("PENDING") // PENDING | VERIFIED | SUSPENDED
+
+  city        City         @relation(fields: [cityId], references: [id])
+  members     Member[]
+  invitations Invitation[]
+
+  @@index([kind, cityId])
+  @@map("organization")
+}
+
+model Member {
+  id             String    @id @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  userId         String    @map("user_id") @db.Uuid
+  role           String    @default("member") // comma-separated org roles
+  createdAt      DateTime  @map("created_at") @db.Timestamptz
+  // ours
+  validUntil     DateTime? @map("valid_until") @db.Timestamptz
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@index([userId])
+  @@map("member")
+}
+
+model Invitation {
+  id             String   @id @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  email          String
+  role           String?
+  status         String   @default("pending")
+  expiresAt      DateTime @map("expires_at") @db.Timestamptz
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  inviterId      String   @map("inviter_id") @db.Uuid
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  inviter      User         @relation(fields: [inviterId], references: [id], onDelete: Cascade)
+
+  @@index([email])
+  @@map("invitation")
+}
+
+// ── ours ──────────────────────────────────────────────────────────────────────
+
+model City {
+  id            String         @id // "addis-ababa"
+  name          String
+  timezone      String         @default("Africa/Addis_Ababa")
+  organizations Organization[]
+
+  @@map("city")
+}
+
+/// Maker–checker requests for staff role grants (Role.md §11).
+model ApprovalRequest {
+  id         String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  action     String    // "role:grant"
+  payload    Json      // { userId, role, cityId? }
+  reason     String
+  makerId    String    @map("maker_id") @db.Uuid
+  checkerId  String?   @map("checker_id") @db.Uuid
+  status     String    @default("PENDING") // PENDING | APPROVED | REJECTED | EXECUTED | EXPIRED
+  decisionReason String? @map("decision_reason")
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  decidedAt  DateTime? @map("decided_at") @db.Timestamptz
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz
+
+  @@index([status, createdAt])
+  @@map("approval_request")
+}
+
+/// Transactional outbox (Database.md §8). Published to Kafka by the relay.
+model Outbox {
+  id          String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  topic       String
+  key         String
+  payload     Json
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  publishedAt DateTime? @map("published_at") @db.Timestamptz
+  attempts    Int       @default(0)
+
+  @@index([createdAt], map: "ix_outbox_unpublished")
+  @@map("outbox")
 }
