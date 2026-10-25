@@ -1,6 +1,6 @@
 # Contributing — team guide
 
-Detailed guides: [architecture](docs/architecture/overview.md) · [development](docs/development/README.md) ·
+Detailed guides: [architecture](docs/architecture/overview.md) · [design docs](docs/design/README.md) ([roles & permissions](docs/design/Role.md)) · [development](docs/development/README.md) ·
 [testing](docs/testing/README.md) · [production](docs/production/README.md).
 
 ## Who works on what

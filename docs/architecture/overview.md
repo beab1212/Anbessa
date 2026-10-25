@@ -10,7 +10,7 @@ This document describes the target architecture **and** where the code is today,
 | 🟡 | Partly implemented, or implemented with known defects |
 | 📐 | Designed and scaffolded, not implemented yet |
 
-Related docs: [development](../development/README.md) · [testing](../testing/README.md) · [production](../production/README.md) · [API conventions](../api/README.md)
+Related docs: [design docs](../design/README.md) · [roles & permissions design](../design/Role.md) · [development](../development/README.md) · [testing](../testing/README.md) · [production](../production/README.md) · [API conventions](../api/README.md)
 
 ---
 
@@ -488,6 +488,7 @@ flowchart LR
 | Concern | Approach |
 |---|---|
 | Passwords | argon2id hashes. Plaintext is never stored or logged |
+| Roles | Today: one `role` per user (`RIDER` / `DRIVER` / `ADMIN`). **Accepted design:** 18 scoped roles with a permission matrix and maker–checker approvals. See [docs/design/Role.md](../design/Role.md) |
 | Tokens | RS256 JWT. 15-minute access token (`JWT_ACCESS_TTL`), 30-day refresh token (`JWT_REFRESH_TTL`, 📐) |
 | Signing key | **Only auth-service** has `JWT_PRIVATE_KEY_PATH`. Every other service gets `JWT_PUBLIC_KEY_PATH` only |
 | Edge auth | Kong `jwt` plugin on `/api/trips`, `/api/pricing`, `/api/payments`. realtime-gateway verifies at handshake |
