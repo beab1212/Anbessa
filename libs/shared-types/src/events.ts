@@ -58,11 +58,72 @@ export interface TripMatchedEvent extends EventEnvelope {
   vehicleType: string;
 }
 
+export type PaymentMethod = "CASH" | "MOBILE_MONEY" | "CARD" | "CORPORATE";
+
+/** Who earns the trip (Payment.md D1): the fleet company for ORGANIZATION vehicles, else the driver. */
+export interface Beneficiary {
+  type: "INDIVIDUAL" | "ORGANIZATION";
+  id: string;
+}
+
+/** trip-service → `trip.requested` (key tripId). */
+export interface TripRequestedEvent extends EventEnvelope {
+  tripId: string;
+  riderId: string;
+  bookedById: string;
+  cityId: string;
+  vehicleType: string;
+  channel: "APP" | "PHONE" | "CORPORATE_PORTAL";
+  paymentMethod: PaymentMethod;
+  fareEstimateMinor: number;
+}
+
+/** trip-service → `trip.driver_en_route` / `trip.driver_arrived` / `trip.started` (key tripId). */
+export interface TripProgressEvent extends EventEnvelope {
+  tripId: string;
+  riderId: string;
+  driverId: string;
+  cityId: string;
+}
+
 /** trip-service → `trip.completed` / `trip.cancelled` (key tripId). */
 export interface TripEndedEvent extends EventEnvelope {
   tripId: string;
   riderId: string;
   driverId?: string;
+}
+
+/** trip-service → `trip.completed`: everything payment-service needs to settle (Payment.md §6). */
+export interface TripCompletedEvent extends TripEndedEvent {
+  driverId: string;
+  cityId: string;
+  vehicleType: string;
+  vehicleId: string;
+  beneficiary: Beneficiary;
+  paymentMethod: PaymentMethod;
+  billingType: "PERSONAL" | "CORPORATE";
+  billingOrgId?: string;
+  /** final fare in minor units (santim), waiting fee included */
+  fareMinor: number;
+  waitingFeeMinor: number;
+  currency: string;
+  distanceMeters: number;
+  durationSeconds: number;
+  completedAt: string;
+}
+
+/** trip-service → `trip.cancelled` (workflow 07). */
+export interface TripCancelledEvent extends TripEndedEvent {
+  cityId: string;
+  by: "RIDER" | "DRIVER" | "SYSTEM" | "STAFF";
+  reason: string;
+  paymentMethod: PaymentMethod;
+  /** charged to the rider; 0 when free */
+  feeMinor: number;
+  /** credited to the beneficiary out of the fee */
+  driverCompensationMinor: number;
+  beneficiary?: Beneficiary;
+  currency: string;
 }
 
 /** auth-service → `user.created` (key userId). */

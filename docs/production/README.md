@@ -111,7 +111,10 @@ Production values that differ from dev:
 | `SMS_PROVIDER` + `TWILIO_*` | notification-service: `twilio` (console is refused in production) |
 | `PUSH_PROVIDER` + `FCM_PROJECT_ID`, `FCM_CLIENT_EMAIL`, `FCM_PRIVATE_KEY` | notification-service: `fcm`, a Firebase service account with the *Firebase Cloud Messaging API* role only (console is refused) |
 | `OSRM_URL` / `NOMINATIM_URL` | mapping-service only: the in-cluster engine URLs. Nothing else may reach the engines (network policy) |
-| `MAPPING_INTERNAL_URL` | location-service: in-cluster mapping-service URL |
+| `MAPPING_INTERNAL_URL` | location-service and trip-service: in-cluster mapping-service URL |
+| `LOCATION_INTERNAL_URL` | trip-service: in-cluster location-service URL |
+| `PRICING` / `PRICING_INTERNAL_URL` | trip-service: `service` / in-cluster pricing-service URL. `builtin` (the dev quote stand-in) is refused in production |
+| `REDIS_URL` (trip-service) | must be the **same** Redis as realtime-gateway: trip-service pushes offers and status through Socket.io's Redis emitter |
 | `TELEGRAM_GATEWAY_TOKEN` | notification-service only. Telegram Gateway API token for login codes. Its SHA256 also verifies delivery-report signatures. The Gateway account is **prepaid**: finance tops it up, and an alert fires when the balance drops below 7 days of spend |
 | `DATABASE_URL` | RDS endpoint, one database per service (`auth_service`, `trip_service`, …), TLS on |
 | `REDIS_URL` | ElastiCache endpoint (`rediss://` for TLS) |

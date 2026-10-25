@@ -36,11 +36,19 @@ export function selectRolesForSurface(
 }
 
 export function createClaimsBuilder(db: Db, surface: Surface) {
-  return async function definePayload({ user, session }: { user: ClaimsUser; session: ClaimsSession }) {
+  return async function definePayload({ user: sessionUser, session }: { user: ClaimsUser; session: ClaimsSession }) {
     // A session belongs to exactly one surface: an app session can never mint admin tokens.
     if ((session.surface ?? "app") !== surface) {
       throw new APIError("FORBIDDEN", { message: "session does not belong to this surface" });
     }
+    // Read the user fresh. With secondary storage (Redis) Better Auth hands us the copy cached
+    // with the session, which still has the roles and permission version from sign-in: a granted
+    // role would never reach the token, and its stale `pv` would be refused by every verifier.
+    const user = await db.user.findUnique({
+      where: { id: sessionUser.id },
+      select: { id: true, role: true, permissionVersion: true, twoFactorEnabled: true, mustChangePassword: true, banned: true },
+    });
+    if (!user) throw new APIError("UNAUTHORIZED", { message: "account not found" });
     if (user.banned) throw new APIError("FORBIDDEN", { message: "account suspended" });
 
     const memberships = await db.member.findMany({

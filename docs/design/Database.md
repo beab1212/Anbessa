@@ -431,6 +431,15 @@ CREATE INDEX ix_trip_event_trip ON trip_event (trip_id, at);
 -- partitions created ahead by pg_partman (or a cron job): trip_event_2026_11, trip_event_2026_12, …
 ```
 
+**Implemented** (trip-service, database `trip_service`). Additions to the DDL above:
+- `payment_method` (with `ck_trip_corporate_payment`: `CORPORATE` exactly when billing is corporate);
+- pickup and dropoff as `lat`/`lng` columns, with the `geography` columns **generated** from them, so the ORM writes plain numbers and PostGIS still gets indexed points;
+- `quote_id` and `waiting_per_min_minor` from the quote; `matched_at`, `arrived_at`, `started_at` and `completed_at`; the cancellation columns (`cancelled_by`, `cancel_reason`, `cancel_fee_minor`, `driver_compensation_minor`); the 4-digit `pin`; and `flags` (e.g. `FAR_FROM_DROPOFF`);
+- `beneficiary_id`: the fleet organisation or the driver's user id, with `vehicle_owner_type` saying which. payment-service maps it to its ledger account;
+- **`ux_trip_rider_active`**: one active trip per rider, by partial unique index;
+- **`trip_offer`**, with `ux_trip_offer_open` (one open offer per trip), and **`trip_rating`**;
+- `trip_event` partitions are created by `ensure_trip_event_partitions()` (start-up and daily) instead of pg_partman, with a default partition as a safety net.
+
 **Why `trip` isn't partitioned yet:** about 55 M rows a year is comfortable for one indexed table. Partitioning it would force `created_at` into every unique key, and break simple lookups by ID. Partition it when retention or vacuum time demands it (around year 2). Because the IDs are UUIDv7, `uuid_extract_timestamp(id)` lets a lookup by ID add a partition-pruning time bound without an extra index.
 
 ### 7.4 Payment ledger (payment-service)

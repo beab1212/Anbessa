@@ -8,6 +8,8 @@
 | **Outcome** | The trip is `completed` with the final fare, distance, duration and route polyline, ready for payment ([08](08-payment-receipt-rating.md)) |
 | **Related** | [← Workflows](README.md) · [Architecture §5.3 (live tracking)](../../architecture/overview.md#53-live-location-tracking) · [WebSocket learning note](../../../learned/Edge%20&%20Networking/WebSocket.md) |
 
+> **Implemented** in trip-service: en route, arrive (150 m geofence on the last ping), start (optional PIN), complete (quote + paid waiting, a far-from-drop-off flag), ratings. Not yet: GPS-trace distance (OSRM `/match`), ETA refresh, route-deviation alerts, destination change, share links, masked calls.
+
 ## 1. Summary
 
 The driver drives to the pickup while the rider watches the car move live. On arrival the driver taps "Arrived" (the rider is notified and a free waiting period starts). The driver may call the rider through a masked number to find them. When the rider is in the car, the driver taps "Start". During the ride both sides see the route and the live position. At the destination the driver taps "Complete". trip-service computes the final fare, writes the route summary, frees the driver and publishes `trip.completed`.

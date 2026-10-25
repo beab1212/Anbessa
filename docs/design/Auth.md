@@ -908,6 +908,7 @@ Errors are JSON `{ error, message }`: 400 `validation_error`, 401 `invalid_token
 | I7 | **Interim service authentication**: `/internal/*` needs `Authorization: Bearer $INTERNAL_SERVICE_TOKEN` (timing-safe compare). Kong never routes `/internal/*` | Until workload identity / mTLS ([Q5](#16-open-questions)) |
 | I8 | **Bootstrap**: `pnpm --filter @ride-app/auth-service bootstrap:super-admin -- --email … --name …` works only while fewer than two super admins exist (advisory lock), and prints a one-time temporary password | No backdoor once the maker–checker pair exists |
 | I9 | Partner roles other than owner/admin count only once the organisation is `VERIFIED` | An unverified company can't bill or dispatch |
+| I11 | **Token claims come from a fresh database read of the user**, not from the user object Better Auth cached with the session | With Redis secondary storage the cached copy keeps the roles and `pv` from sign-in: a granted role never reached the token, and its stale `pv` was refused by every verifier. Found by the end-to-end run, fixed in `claims.ts`, covered by a unit test |
 | I10 | **Redis is optional in development, required in production** (config refuses to start otherwise), like Kafka, the service token and real OTP delivery | Fast local setup without weakening production |
 
 ### Not done yet

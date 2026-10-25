@@ -43,6 +43,9 @@ io.adapter(createAdapter(pubClient, subClient));
 io.use(createSocketAuth(pubClient));
 
 io.on("connection", (socket) => {
+  // services push to people, not connections: trip-service emits trip:offer / trip:status to
+  // user:{id} through the Redis emitter, and every device of that user receives it
+  void socket.join(`user:${socket.data.userId as string}`);
   registerLocationHandlers(io, socket, { redis: pubClient, publisher });
 
   // A suspension must also end connections opened before it (Auth.md §9.5).

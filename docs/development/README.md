@@ -236,6 +236,23 @@ curl -XPOST localhost:3003/internal/dev/drivers/<driver user id>/online -H "auth
 
 The user needs the `DRIVER` role (`POST /internal/drivers/:userId/role {"active":true}` on auth-service).
 
+### Book a ride locally
+
+With auth, location, mapping, trip and realtime-gateway running (`make dev-services`) and Kafka up:
+
+1. **Sign in** a rider and a driver with phone OTP (section 2), grant the driver role, and get fresh access tokens from `GET /api/auth/token`.
+2. **Put the driver online** with the location-service dev route above, connect the driver's socket to realtime-gateway (`auth: { token }`), and send `location:update` pings near the pickup.
+3. **Quote** (stand-in until pricing-service exists):
+   ```bash
+   curl -XPOST localhost:3002/api/trips/estimates -H "authorization: Bearer $RIDER" -H 'content-type: application/json' \
+     -d '{"pickup":{"lat":8.9806,"lng":38.7578},"dropoff":{"lat":9.0333,"lng":38.75},"vehicleTypes":["economy"]}'
+   ```
+4. **Request:** `POST localhost:3002/api/trips {"quoteId":"q_…","paymentMethod":"CASH"}` with `Idempotency-Key: <uuid>`.
+5. The driver's socket receives **`trip:offer`** with an `offerId`. Accept it: `POST /api/trips/:id/accept {"offerId":"…"}` with the driver's token. The rider's socket receives `trip:status` `matched`.
+6. Drive it: `en-route` → ping within 150 m of the pickup → `arrive` → `start` → `complete`.
+
+Without location-service's view of the driver, matching finds nobody and the trip is cancelled with `NO_DRIVER_FOUND` after 120 s.
+
 ---
 
 ## 7. Editor

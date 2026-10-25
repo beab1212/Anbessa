@@ -1,0 +1,166 @@
+// Trip database (docs/design/Database.md §7.3, §8, §9). Tables and columns are snake_case via @map.
+// Constraints Prisma can't express (partial unique indexes, checks, the partitioned trip_event,
+// generated geography columns) are in the SQL migrations.
+
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+model Trip {
+  id              String  @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  cityId          String  @map("city_id")
+  riderUserId     String  @map("rider_user_id") @db.Uuid
+  bookedByUserId  String  @map("booked_by_user_id") @db.Uuid
+  channel         String
+  billingType     String  @map("billing_type")
+  billingOrgId    String? @map("billing_org_id") @db.Uuid
+  paymentMethod   String  @map("payment_method")
+  status          String  @default("requested")
+  vehicleType     String  @map("vehicle_type")
+  quoteId         String? @map("quote_id")
+
+  pickupLat      Float                                  @map("pickup_lat")
+  pickupLng      Float                                  @map("pickup_lng")
+  dropoffLat     Float                                  @map("dropoff_lat")
+  dropoffLng     Float                                  @map("dropoff_lng")
+  /// generated from lat/lng (PostGIS), for zone and heatmap queries
+  pickup         Unsupported("geography(Point,4326)")?
+  dropoff        Unsupported("geography(Point,4326)")?
+  pickupAddress  String?                                @map("pickup_address")
+  dropoffAddress String?                                @map("dropoff_address")
+
+  // snapshot at match time (Role.md §6: earnings follow the vehicle owner at that moment)
+  driverUserId     String?   @map("driver_user_id") @db.Uuid
+  vehicleId        String?   @map("vehicle_id")
+  vehicleOwnerType String?   @map("vehicle_owner_type")
+  /// the fleet organisation for ORGANIZATION vehicles, else the driver (Payment.md D1)
+  beneficiaryId    String?   @map("beneficiary_id") @db.Uuid
+  matchedAt        DateTime? @map("matched_at") @db.Timestamptz
+
+  // money in santim (minor units)
+  fareEstimateMinor  BigInt  @map("fare_estimate_minor")
+  waitingPerMinMinor BigInt  @default(0) @map("waiting_per_min_minor")
+  fareFinalMinor     BigInt? @map("fare_final_minor")
+  waitingFeeMinor    BigInt? @map("waiting_fee_minor")
+  currency           String  @default("ETB") @db.Char(3)
+
+  estDistanceM  Int     @map("est_distance_m")
+  estDurationS  Int     @map("est_duration_s")
+  distanceM     Int?    @map("distance_m")
+  durationS     Int?    @map("duration_s")
+  routePolyline String? @map("route_polyline")
+
+  /// 4-digit code the rider tells the driver at pickup (anti-fraud, workflow 06 step 8)
+  pin         String    @db.Char(4)
+  arrivedAt   DateTime? @map("arrived_at") @db.Timestamptz
+  startedAt   DateTime? @map("started_at") @db.Timestamptz
+  completedAt DateTime? @map("completed_at") @db.Timestamptz
+
+  cancelledAt             DateTime? @map("cancelled_at") @db.Timestamptz
+  cancelledBy             String?   @map("cancelled_by")
+  cancelledByUserId       String?   @map("cancelled_by_user_id") @db.Uuid
+  cancelReason            String?   @map("cancel_reason")
+  cancelFeeMinor          BigInt?   @map("cancel_fee_minor")
+  driverCompensationMinor BigInt?   @map("driver_compensation_minor")
+
+  /// review flags, e.g. FAR_FROM_DROPOFF
+  flags     String[] @default([])
+  version   Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  offers  TripOffer[]
+  active  DriverActiveTrip?
+  ratings TripRating[]
+
+  @@index([riderUserId, createdAt(sort: Desc)], map: "ix_trip_rider_recent")
+  @@index([bookedByUserId, createdAt(sort: Desc)], map: "ix_trip_booked_by_recent")
+  @@map("trip")
+}
+
+/// One active trip per driver, enforced by the primary key (Database.md §9, race 1).
+model DriverActiveTrip {
+  driverUserId String   @id @map("driver_user_id") @db.Uuid
+  tripId       String   @unique @map("trip_id") @db.Uuid
+  trip         Trip     @relation(fields: [tripId], references: [id])
+  since        DateTime @default(now()) @db.Timestamptz
+
+  @@map("driver_active_trip")
+}
+
+/// Each offer to a driver during matching (workflow 05, step 18).
+model TripOffer {
+  id             String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  tripId         String    @map("trip_id") @db.Uuid
+  trip           Trip      @relation(fields: [tripId], references: [id])
+  driverUserId   String    @map("driver_user_id") @db.Uuid
+  status         String    @default("OFFERED")
+  etaSeconds     Int?      @map("eta_seconds")
+  distanceMeters Int?      @map("distance_meters")
+  offeredAt      DateTime  @default(now()) @map("offered_at") @db.Timestamptz
+  expiresAt      DateTime  @map("expires_at") @db.Timestamptz
+  answeredAt     DateTime? @map("answered_at") @db.Timestamptz
+
+  @@index([tripId, offeredAt])
+  @@index([driverUserId, offeredAt(sort: Desc)], map: "ix_trip_offer_driver_recent")
+  @@map("trip_offer")
+}
+
+/// Append-only state history, partitioned monthly by `at` (see the migration).
+model TripEvent {
+  id         String   @default(dbgenerated("uuidv7()")) @db.Uuid
+  tripId     String   @map("trip_id") @db.Uuid
+  at         DateTime @default(now()) @db.Timestamptz
+  fromStatus String?  @map("from_status")
+  toStatus   String   @map("to_status")
+  actorId    String?  @map("actor_id") @db.Uuid
+  data       Json?
+
+  @@id([at, id])
+  @@index([tripId, at], map: "ix_trip_event_trip")
+  @@map("trip_event")
+}
+
+model TripRating {
+  tripId    String   @map("trip_id") @db.Uuid
+  trip      Trip     @relation(fields: [tripId], references: [id])
+  byRole    String   @map("by_role")
+  byUserId  String   @map("by_user_id") @db.Uuid
+  stars     Int
+  comment   String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@id([tripId, byRole])
+  @@map("trip_rating")
+}
+
+/// HTTP idempotency keys (Database.md §9, race 3). Kept 24 h.
+model IdempotencyKey {
+  userId      String   @map("user_id") @db.Uuid
+  key         String
+  requestHash Bytes    @map("request_hash")
+  status      String   @default("IN_PROGRESS")
+  statusCode  Int?     @map("status_code")
+  response    Json?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@id([userId, key])
+  @@map("idempotency_key")
+}
+
+/// Transactional outbox (Database.md §8). Published to Kafka by the relay.
+model Outbox {
+  id          String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  topic       String
+  key         String
+  payload     Json
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  publishedAt DateTime? @map("published_at") @db.Timestamptz
+
+  @@map("outbox")
+}

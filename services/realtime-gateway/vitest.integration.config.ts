@@ -1,6 +1,6 @@
 import { defineConfig } from "vitest/config";
 
-// Integration tests run against a real Redis: a throwaway container on port 6392,
+// Integration tests run against a real Redis: a throwaway container on port 6395,
 // started by the global setup (needs Docker). Nothing else is required.
 export default defineConfig({
   test: {

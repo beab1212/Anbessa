@@ -8,6 +8,8 @@
 | **Outcome** | The trip is `matched` with one driver who accepted, or `cancelled` with reason `NO_DRIVER_FOUND` |
 | **Related** | [← Workflows](README.md) · [Architecture §5.2](../../architecture/overview.md#52-request-a-trip-target-design) · [Database.md §9 (races)](../Database.md#9-concurrency-control) · [Payment.md §8 (cash filtering)](../Payment.md#how-matching-uses-the-state) |
 
+> **Implemented** in trip-service. Quotes come from a development stand-in until pricing-service exists (`POST /api/trips/estimates`, `PRICING=builtin`). Offers are pushed over the socket only (no push notification for backgrounded apps yet). The acceptance-rate tie-break and the rider ↔ driver safety blocks aren't applied yet. See the [trip-service README](../../../services/trip-service/README.md).
+
 ## 1. Summary
 
 1. The rider gets a **binding fare estimate** (a quote) from pricing, which uses OSRM road distance and duration.

@@ -35,6 +35,10 @@ Health check : http://localhost:3000/health
 | `trip:subscribe` | the trip's rider or driver | `tripId` → `{ ok }` | Joins room `trip:{tripId}` only if the user is in `trip:{id}:members` (written on `trip.matched`) |
 | `trip:unsubscribe` | anyone | `tripId` | Leaves the room |
 | `driver:location` | server → room | `{ tripId, driverId, lat, lng, heading, at }` | Live position for the rider's map |
+| `trip:offer` · `trip:offer_expired` · `trip:offer_cancelled` | trip-service → the driver | `{ tripId, offerId, expiresAt, pickup, dropoff, fare, paymentMethod, etaToPickupSeconds }` | A ride offer (15 s) and its end |
+| `trip:status` | trip-service → rider, booker and driver | `{ tripId, status, trip }` | Every status change |
+
+Every socket joins room **`user:{userId}`** on connect. trip-service publishes into those rooms with Socket.io's Redis emitter (same Redis), so services address people, and all of a user's devices receive it.
 
 Rejection reasons: `forbidden` (not a driver), `not_online` (no active driving session in Redis), `too_frequent` (< 1 s since the last accepted ping), `invalid`, `inaccurate` (> 100 m), `future`, `out_of_order`, `too_fast` (> 200 km/h jump), `unavailable` (Redis down).
 

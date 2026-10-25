@@ -149,7 +149,7 @@ Each service owns one business capability **and its data**. No service reads ano
 | Service | Port | Responsibility | Owns | Status |
 |---|---|---|---|---|
 | **auth-service** | 3001 | Identity on **Better Auth** ([Auth.md](../design/Auth.md)): phone OTP and staff password + TOTP, sessions, organisations, ES256 JWTs + JWKS, `/api/identity` (guests, maker–checker staff roles, suspension) | `auth_service` DB: users, sessions, organisations, members, signing keys, approvals, outbox | ✅ implemented, unit + integration tests |
-| **trip-service** | 3002 | Trip lifecycle state machine, driver–rider matching | `trip_service` DB: trips | 📐 `/health` only |
+| **trip-service** | 3002 | Trip lifecycle state machine, matching (one driver at a time, OSRM-ranked, 2→4→6 km), cancellations and fees, ratings, dispatcher board | `trip_service` DB: trip, trip_event (monthly partitions), trip_offer, driver_active_trip, ratings, idempotency keys, outbox | ✅ implemented, integration tests + an end-to-end run with all services. Quotes from a dev stand-in until pricing-service exists |
 | **location-service** | 3003 | Driver state from `driver.online`/`offline` and `trip.*`, nearby-driver search for matching, ETA to pickup, staleness sweeper, ops map and the rider's trip view | Redis: driver state, geo sets per city and vehicle type (Database.md §10) | ✅ implemented, integration tests on Redis. Waits for fleet-service and trip-service events (dev routes stand in) |
 | **pricing-service** | 3004 | Fare estimates, surge multipliers | Pricing rules (stateless today) | 📐 `/health` only |
 | **payment-service** | 3005 | Fare capture and driver payouts (Stripe Connect), idempotent charges | `payment_service` DB: charges, payouts | 📐 `/health` only |
@@ -447,8 +447,10 @@ Contracts live in `libs/shared-types/src/events.ts`. Producer and consumer impor
 | `driver.location` | `driverId` | realtime-gateway | `{ driverId, cityId, tripId?, lat, lng, heading?, speed?, accuracy?, at }` | ETA, trip audit, analytics | ✅ produced (guarded, never blocks pings) |
 | `driver.online` / `driver.offline` | `driverId` | fleet-service | `{ driverId, vehicleId, vehicleType, cityId, fleetOrgId?, cashAllowed, balanceState? }` / `{ driverId, reason }` | location | 📐 producer not built; location consumes |
 | `driver.connection_lost` | `driverId` | location-service | `{ driverId, cityId, lastSeenAt }` | fleet (ends the session) | ✅ produced |
-| `trip.matched` | `tripId` | trip-service | `{ tripId, riderId, driverId, cityId, vehicleType }` | location (driver busy, trip members), notification | 📐 producer not built; location consumes |
-| `trip.requested` / `matched` / `driver_en_route` / `started` / `completed` / `cancelled` | `tripId` | trip-service | trip snapshot + transition | payment, notification, analytics | 📐 |
+| `trip.matched` | `tripId` | trip-service | `{ tripId, riderId, driverId, cityId, vehicleType }` | location (driver busy, trip members), notification | ✅ |
+| `trip.requested` / `driver_en_route` / `driver_arrived` / `started` | `tripId` | trip-service | ids, city, payment method / fare estimate | notification, analytics | ✅ produced |
+| `trip.completed` | `tripId` | trip-service | `{ fareMinor, waitingFeeMinor, paymentMethod, beneficiary {type, id}, billingType, billingOrgId?, distanceMeters, durationSeconds, … }` | payment, notification, location | ✅ produced (payment-service not built) |
+| `trip.cancelled` | `tripId` | trip-service | `{ by, reason, feeMinor, driverCompensationMinor, beneficiary?, … }` | payment (fee), notification, location | ✅ produced |
 | `payment.captured` / `payment.failed` | `tripId` | payment-service | `{ tripId, amountCents, … }` | trip, notification | 📐 |
 
 ### Event conventions
@@ -715,6 +717,6 @@ Issues found while running the system, listed so nobody builds on false assumpti
 | Compose stack mode | Redpanda advertises `localhost:9092`; root `.env` points containers at `localhost` | Containerized services can't reach Kafka or Redis |
 | Delivery | Kubernetes manifests use `:latest`; deploy jobs lack cluster credentials; only trip-service has manifests; `.github/` is gitignored | CD doesn't deploy new code yet |
 | Infra | `infra/terraform/modules/` is empty; RDS pinned to Postgres 16 vs 18 locally | `terraform init` fails; dev/prod parity gap |
-| Services | trip, pricing, payment and fleet expose `/health` only (fleet doesn't exist yet) | The flows in [§5.2](#52-request-a-trip-target-design) and [§5.4](#54-trip-completion-and-payment-target-design) are designs, not code |
+| Services | pricing, payment and fleet aren't built (pricing and payment expose `/health` only, fleet doesn't exist) | trip-service uses a quote stand-in, and no money moves yet | The flows in [§5.2](#52-request-a-trip-target-design) and [§5.4](#54-trip-completion-and-payment-target-design) are designs, not code |
 
 When you close a gap, update this table and the status markers in [§3](#3-services-and-ownership) and [§8](#8-event-catalog).

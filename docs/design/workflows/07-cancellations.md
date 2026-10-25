@@ -8,6 +8,8 @@
 | **Outcome** | Trip `cancelled` with a **reason** and **who** cancelled. Fees are applied fairly, the driver is freed, and payment holds are released |
 | **Related** | [← Workflows](README.md) · [Payment.md §6.5 (cancellation fee)](../Payment.md#65-tip-digital-and-cancellation-fee) · [Database.md §9 race 2](../Database.md#race-2-concurrent-status-changes-on-one-trip-rider-cancels-while-the-driver-accepts) |
 
+> **Implemented** in trip-service (`src/trips/policy.ts`): the policy table, the no-show rule (5 min after arrival, at the pickup), the "driver asked me to cancel" waiver, staff and system cancellations. Not yet: the contact-attempt check for no-shows, the ETA-growth and moving-away waivers, reliability counters. Charging the fee is payment-service's (it consumes `trip.cancelled`).
+
 ## 1. Summary
 
 Cancelling is always allowed until the trip starts. Whether a **fee** applies depends on who cancels, when, and whether the other side was already inconvenienced. Each cancellation is one conditional transaction (it only succeeds from a cancellable state), followed by events that release the driver, release any payment hold, apply fees and update reliability statistics.

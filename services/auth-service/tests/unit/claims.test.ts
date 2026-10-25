@@ -28,32 +28,43 @@ describe("selectRolesForSurface", () => {
 });
 
 describe("createClaimsBuilder", () => {
-  const db = { member: { findMany: vi.fn().mockResolvedValue([]) } } as unknown as Db;
+  type Row = { id: string; role?: string; permissionVersion?: number; twoFactorEnabled?: boolean; mustChangePassword?: boolean; banned?: boolean };
+  /** `row` is the user as stored now; the session only carries the id (its cached copy is ignored). */
+  const build = (surface: "app" | "admin", row: Row | null, sessionSurface = surface, sessionCopy: object = {}) => {
+    const db = {
+      member: { findMany: vi.fn().mockResolvedValue([]) },
+      user: { findUnique: vi.fn().mockResolvedValue(row && { role: "", permissionVersion: 0, twoFactorEnabled: false, mustChangePassword: false, banned: false, ...row }) },
+    } as unknown as Db;
+    return createClaimsBuilder(db, surface)({ user: { id: row?.id ?? "gone", ...sessionCopy }, session: { surface: sessionSurface } });
+  };
 
   it("refuses an app session on the admin surface and vice versa", async () => {
-    await expect(createClaimsBuilder(db, "admin")({ user: ready, session: { surface: "app" } })).rejects.toThrow(/surface/);
-    await expect(createClaimsBuilder(db, "app")({ user: ready, session: { surface: "admin" } })).rejects.toThrow(/surface/);
+    await expect(build("admin", ready, "app")).rejects.toThrow(/surface/);
+    await expect(build("app", ready, "admin")).rejects.toThrow(/surface/);
   });
 
-  it("refuses banned users", async () => {
-    await expect(createClaimsBuilder(db, "app")({ user: { ...ready, banned: true }, session: { surface: "app" } })).rejects.toThrow(/suspended/);
+  it("refuses banned and deleted users", async () => {
+    await expect(build("app", { ...ready, banned: true })).rejects.toThrow(/suspended/);
+    await expect(build("app", null)).rejects.toThrow(/not found/);
   });
 
   it("builds minimal claims without PII", async () => {
-    const claims = await createClaimsBuilder(db, "app")({ user: { ...ready, role: "rider", permissionVersion: 4 }, session: { surface: "app" } });
-    expect(claims).toEqual({ roles: [{ r: "RIDER" }], pv: 4, amr: ["otp"] });
+    expect(await build("app", { ...ready, role: "rider", permissionVersion: 4 })).toEqual({ roles: [{ r: "RIDER" }], pv: 4, amr: ["otp"] });
+  });
+
+  it("uses the current user row, not the copy cached with the session", async () => {
+    // signed in as a rider (pv 0); the driver role was granted afterwards (pv 1)
+    const claims = await build("app", { id: "u1", role: "driver,rider", permissionVersion: 1 }, "app", { role: "rider", permissionVersion: 0 });
+    expect(claims).toMatchObject({ roles: [{ r: "DRIVER" }, { r: "RIDER" }], pv: 1 });
+    await expect(build("app", { id: "u1", role: "rider", banned: true }, "app", { banned: false })).rejects.toThrow(/suspended/);
   });
 
   it("tells the dashboard what setup is missing", async () => {
-    const claims = await createClaimsBuilder(db, "admin")({
-      user: { id: "u1", role: "super_admin", twoFactorEnabled: false, mustChangePassword: true },
-      session: { surface: "admin" },
-    });
+    const claims = await build("admin", { id: "u1", role: "super_admin", twoFactorEnabled: false, mustChangePassword: true });
     expect(claims).toMatchObject({ roles: [], amr: ["pwd"], setup: { twoFactor: true, changePassword: true } });
   });
 
   it("marks global staff roles", async () => {
-    const claims = await createClaimsBuilder(db, "admin")({ user: { ...ready, role: "super_admin" }, session: { surface: "admin" } });
-    expect(claims).toMatchObject({ roles: [{ r: "SUPER_ADMIN", g: true }], amr: ["pwd", "otp"] });
+    expect(await build("admin", { ...ready, role: "super_admin" })).toMatchObject({ roles: [{ r: "SUPER_ADMIN", g: true }], amr: ["pwd", "otp"] });
   });
 });

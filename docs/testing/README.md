@@ -47,6 +47,8 @@ Turbo caches results. To re-run everything anyway: `pnpm test --force`.
 | `services/location-service/tests/integration` | 17 | Real Redis: geo index and filters, sweeper and its lock, lost drivers, trips, ETA with and without mapping-service, access control |
 | `services/mapping-service/tests/unit` | 12 | Against an OSRM/Nominatim-shaped HTTP server: parsing, cache, no-route, timeout, circuit breaker, fallback, limits, auth, per-user rate limit |
 | `services/realtime-gateway/tests/integration` | 5 | Socket handlers on real Redis: drivers only, token subject, flooding, fan-out to the assigned trip, trip-room membership |
+| `services/trip-service/tests/unit` | 8 | Unit: waiting and cancellation fees, config rules |
+| `services/trip-service/tests/integration` | 23 | Real Postgres + Redis with the real location code: request rules and idempotency, booking on behalf, matching, races, execution, fees, ratings, read access |
 | other `services/*/tests` | — | Empty, ready for tests |
 | `apps/web` | — | None yet (see section 7) |
 
@@ -125,7 +127,7 @@ Follow auth-service: a `vitest.integration.config.ts` with a `globalSetup` that 
 
 For CI without a shared Postgres, the same `globalSetup` can start `postgis/postgis:18-3.6-alpine` with `testcontainers` instead.
 
-**Redis-backed tests** (location-service, realtime-gateway) start their own Redis container, `anbessa-test-redis` on port **6392**, and stop it afterwards. They flush it between tests, so they never use the Redis on 6379. Set `TEST_REDIS_URL` to point them at another *dedicated* instance (CI).
+**Redis-backed tests** start their own Redis containers and stop them afterwards: location-service on port **6392**, trip-service on **6394**, realtime-gateway on **6395**. Each suite flushes only its own container, so they can run at the same time and never touch the Redis on 6379. Set `TEST_REDIS_URL` to point them at another *dedicated* instance (CI).
 
 ---
 
