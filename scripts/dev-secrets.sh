@@ -4,7 +4,8 @@
 #   - creates services/*/.env from .env.example where missing
 #   - adds keys that are new in the auth/notification .env.example to an existing .env
 #   - fills BETTER_AUTH_SECRET, INTERNAL_SERVICE_TOKEN, PHONE_HASH_KEY and OTP_ENCRYPTION_KEY
-#     with fresh random values when blank, and copies INTERNAL_SERVICE_TOKEN to notification-service
+#     with fresh random values when blank, and copies INTERNAL_SERVICE_TOKEN to notification,
+#     location and mapping services
 #
 # Staging and production secrets come from the secrets manager (docs/production/README.md).
 set -euo pipefail
@@ -57,21 +58,28 @@ fill_secret() {
 }
 
 sync_keys "$AUTH_ENV"
-sync_keys "$NOTIF_ENV"
+# services that receive /internal/* calls get the same INTERNAL_SERVICE_TOKEN as auth-service
+TOKEN_ENVS=("$NOTIF_ENV" services/location-service/.env services/mapping-service/.env)
+for f in "${TOKEN_ENVS[@]}"; do
+  git check-ignore -q "$f" || { echo "Refusing: $f is not gitignored"; exit 1; }
+  sync_keys "$f"
+done
 
 fill_secret BETTER_AUTH_SECRET "$AUTH_ENV"
 fill_secret INTERNAL_SERVICE_TOKEN "$AUTH_ENV"
 fill_secret PHONE_HASH_KEY "$NOTIF_ENV"
 fill_secret OTP_ENCRYPTION_KEY "$NOTIF_ENV"
 
-# auth-service and notification-service share INTERNAL_SERVICE_TOKEN (auth → /internal/otp-deliveries)
+# one interim service token for all /internal/* calls (until mTLS)
 auth_token="$(grep -E '^INTERNAL_SERVICE_TOKEN=' "$AUTH_ENV" | cut -d= -f2-)"
-if ! grep -qE "^INTERNAL_SERVICE_TOKEN=${auth_token}$" "$NOTIF_ENV"; then
-  set_value INTERNAL_SERVICE_TOKEN "$NOTIF_ENV" "$auth_token"
-  echo "  copied INTERNAL_SERVICE_TOKEN from $AUTH_ENV to $NOTIF_ENV"
-fi
+for f in "${TOKEN_ENVS[@]}"; do
+  if ! grep -qE "^INTERNAL_SERVICE_TOKEN=${auth_token}$" "$f"; then
+    set_value INTERNAL_SERVICE_TOKEN "$f" "$auth_token"
+    echo "  copied INTERNAL_SERVICE_TOKEN from $AUTH_ENV to $f"
+  fi
+done
 
-for f in "$AUTH_ENV" "$NOTIF_ENV"; do
+for f in "$AUTH_ENV" "${TOKEN_ENVS[@]}"; do
   chmod 600 "$f" 2>/dev/null || true
   if [ "$(stat -c %a "$f")" != "600" ]; then
     echo "  ⚠  this filesystem ignores Unix permissions: $f is readable by other local users."

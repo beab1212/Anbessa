@@ -733,6 +733,20 @@ flowchart LR
 
 Capacity: 12,500 pings/s × 4 commands ≈ 50k ops/s, about half of one modern Redis node. Year 3 runs as a 3-shard cluster with replicas, split by city.
 
+### Implementation (v1)
+
+Built in **`libs/shared-location`**, the one place that knows this key layout. realtime-gateway writes pings with it, and location-service reads, sweeps and applies driver and trip events with it, so the two can't drift. What the code adds or changes:
+
+| Change | Why |
+|---|---|
+| `driver:{id}` lives **15 min** after the last ping or state change (not 60 s) | It holds the city, vehicle type and trip from `driver.online`. A 60 s TTL would make a driver who loses signal for a minute invisible until the next `driver.online`. 15 min is longer than the 10-min "connection lost" rule, so the sweeper still knows where to remove them from |
+| A ping is applied only if `driver:{id}.status` is `available` or `on_trip`, and the set (`available` / `busy`) comes from that status | Pings can't put an offline driver back into matching, and a client can't choose its own set |
+| `seen:{city}` scores are **milliseconds** | Same unit as ping timestamps |
+| Extra keys: `vtypes:{city}` (vehicle types seen in the city), `location:cities` (cities to sweep), `trip:{id}:members` (rider + driver, 12 h), `lock:sweep:{city}` (one sweeper per city) | The sweeper must clean every set even when a driver hash is gone, and live trip views must be limited to the trip's members |
+| Stale for 10 min without a trip → location-service publishes **`driver.connection_lost`** | fleet-service ends the session (workflow 04, step 14) without polling Redis |
+| Pings are written with a read (`HGETALL driver:{id}`) then one pipeline, not a Lua script | Every key is computed from the state, so a script would reach undeclared keys, which Redis Cluster forbids |
+
+
 ---
 
 ## 11. Kafka topics as data

@@ -46,6 +46,30 @@ services:
       - name: request-size-limiting
         config: { allowed_payload_size: 16, size_unit: kilobytes }
 
+  - name: mapping-service
+    url: http://mapping-service:3007
+    routes:
+      # destination search, pickup labels and road snapping for the apps (JWT checked in the service)
+      - name: maps-routes
+        paths: ["/api/maps"]
+        methods: ["GET"]
+        strip_path: false
+    plugins:
+      - name: rate-limiting
+        config: { minute: 120, policy: local }
+
+  - name: location-service
+    url: http://location-service:3003
+    routes:
+      # ops map (staff) and the rider's trip view; /internal/* (matching) is never routed
+      - name: location-routes
+        paths: ["/api/locations"]
+        methods: ["GET"]
+        strip_path: false
+    plugins:
+      - name: rate-limiting
+        config: { minute: 120, policy: local }
+
   - name: trip-service
     url: http://trip-service:3002
     routes:

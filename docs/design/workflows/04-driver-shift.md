@@ -8,6 +8,8 @@
 | **Outcome** | The driver is visible to matching in their city and vehicle type, streams GPS every ~4 s, and can go offline cleanly |
 | **Related** | [← Workflows](README.md) · [Role.md §6 (going online)](../Role.md#going-online-which-vehicle-is-allowed) · [Database.md §10](../Database.md#10-hot-path-live-location-in-redis) · [Payment.md §8](../Payment.md#8-balance-limits-and-blocking) |
 
+> **Implemented:** parts B and C (pings, plausibility checks, Redis pipeline, guarded `driver.location`, the sweeper) and the Redis side of A and D (`driver.online` / `driver.offline` handled by location-service). Not yet: fleet-service (sessions, step 2–5, 14–17), so in development drivers go online through location-service's dev route. Details: [Database.md §10, implementation](../Database.md#implementation-v1).
+
 ## 1. Summary
 
 Going online opens a **driving session** for exactly one vehicle (database-enforced). It checks the driver, the vehicle, ownership or fleet authorisation and the balance state. From then on the app sends a GPS ping about every 4 seconds over the WebSocket. Each ping updates Redis (geo index, last-seen, driver state) and is published to Kafka for history. A sweeper removes drivers whose pings stop. Going offline, or being forced offline, ends the session.

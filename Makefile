@@ -12,7 +12,7 @@
 .DEFAULT_GOAL := help
 .PHONY: help setup setup-mobile setup-services setup-web setup-infra \
         dev-services dev-mobile dev-web dev-infra \
-        stack-up secrets test lint typecheck clean
+        stack-up secrets map-data test lint typecheck clean
 
 SHELL := /bin/bash
 SERVICES := auth-service trip-service location-service pricing-service \
@@ -44,6 +44,7 @@ help:
 	@echo "  make dev-mobile       Flutter run the phone app (rider + driver modes)"
 	@echo "  make dev-web          Start the web app dev server"
 	@echo "  make dev-infra        Start the local mapping stack"
+	@echo "  make map-data         Download the OSM extract + build the OSRM graph (once)"
 	@echo ""
 	@echo "$(CYAN)One service at a time:$(RESET)"
 	@echo "  make dev-svc SVC=auth-service"
@@ -111,6 +112,10 @@ _copy-env-examples:
 # by other users, even for the instant between creation and chmod.
 secrets:
 	@bash scripts/dev-secrets.sh
+
+# Download the OSM extract and build the OSRM routing graph for make dev-infra (one-time, ~10 min)
+map-data:
+	@bash scripts/map-data.sh
 
 # ── dev ────────────────────────────────────────────────────────────────────────
 dev-services: secrets

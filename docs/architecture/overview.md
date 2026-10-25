@@ -150,12 +150,12 @@ Each service owns one business capability **and its data**. No service reads ano
 |---|---|---|---|---|
 | **auth-service** | 3001 | Identity on **Better Auth** ([Auth.md](../design/Auth.md)): phone OTP and staff password + TOTP, sessions, organisations, ES256 JWTs + JWKS, `/api/identity` (guests, maker–checker staff roles, suspension) | `auth_service` DB: users, sessions, organisations, members, signing keys, approvals, outbox | ✅ implemented, unit + integration tests |
 | **trip-service** | 3002 | Trip lifecycle state machine, driver–rider matching | `trip_service` DB: trips | 📐 `/health` only |
-| **location-service** | 3003 | Nearby-driver queries, ETA lookups | Redis geo index (read side) | 📐 `/health` only |
+| **location-service** | 3003 | Driver state from `driver.online`/`offline` and `trip.*`, nearby-driver search for matching, ETA to pickup, staleness sweeper, ops map and the rider's trip view | Redis: driver state, geo sets per city and vehicle type (Database.md §10) | ✅ implemented, integration tests on Redis. Waits for fleet-service and trip-service events (dev routes stand in) |
 | **pricing-service** | 3004 | Fare estimates, surge multipliers | Pricing rules (stateless today) | 📐 `/health` only |
 | **payment-service** | 3005 | Fare capture and driver payouts (Stripe Connect), idempotent charges | `payment_service` DB: charges, payouts | 📐 `/health` only |
 | **notification-service** | 3006 | Push (FCM) and SMS from events. **Login codes via the Telegram Gateway API, SMS fallback** (internal API from auth-service, never Kafka: [Auth.md §9.7](../design/Auth.md#97-otp-delivery-telegram-gateway-first-sms-fallback)) | `notification_service` DB: `otp_delivery`, `notification` (dedupe log), `device_token` | ✅ OTP delivery (Telegram + SMS fallback), invite SMS and driver-activated push from Kafka, device tokens. Trip/payment notifications wait for those events |
-| **mapping-service** | 3007 | The only gateway to OSRM / Nominatim / tiles | Route cache | 📐 `/health` only |
-| **realtime-gateway** | 3000 | WebSocket connections, live location fan-out | Socket rooms (in Redis) | 🟡 auth + location relay work; crashes on Kafka publish |
+| **mapping-service** | 3007 | The only gateway to OSRM / Nominatim: route, table, snap, search, reverse, with timeouts, a circuit breaker and straight-line fallback | Route and geocoding cache (Redis) | ✅ implemented, tested against OSRM/Nominatim-shaped fakes. Needs `make map-data` for real routing |
+| **realtime-gateway** | 3000 | WebSocket connections, driver pings into Redis, live location fan-out to trip rooms | Socket rooms (in Redis) | ✅ pings from `DRIVER` tokens only, plausibility checks, fan-out to the assigned trip only, guarded Kafka publish |
 
 ### Internal structure (auth-service is the reference template)
 
@@ -307,11 +307,12 @@ sequenceDiagram
   participant K as Kafka
 
   R->>GB: connect (auth.token) → verified once at handshake
-  R->>GB: trip:subscribe "trip-42" → joins room trip:trip-42
+  R->>GB: trip:subscribe "trip-42" → member of trip:trip-42:members? → joins room
   D->>GA: connect (auth.token)
   loop every ~4 s
-    D->>GA: location:update {tripId, lat, lng, heading}
-    GA->>Redis: GEOADD drivers:geo lng lat driverId
+    D->>GA: location:update {lat, lng, heading, accuracy, at}
+    GA->>Redis: HGETALL driver:{id} → status, city, vehicle type, trip
+    GA->>Redis: GEOADD geo:{city}:{type}:available|busy · ZADD seen · HSET (one pipeline)
     GA->>Redis: publish room trip:trip-42 (Socket.io adapter)
     Redis-->>GB: room message
     GB-->>R: driver:location {driverId, lat, lng}
@@ -319,7 +320,9 @@ sequenceDiagram
   end
 ```
 
-- `driverId` comes from the verified token's `sub`, never from the message body.
+- `driverId` comes from the verified token's `sub`, never from the message body, and only `DRIVER` tokens may send pings.
+- The trip comes from the driver's state in Redis (set by location-service on `trip.matched`), never from the client. Only the trip's rider and driver may join its room.
+- Implausible pings (accuracy > 100 m, faster than 200 km/h, from the future, out of order) are dropped before they reach the geo index.
 - Redis gives sub-millisecond nearby search. Kafka gives a durable stream for ETA recalculation, audit and analytics.
 
 ### 5.4 Trip completion and payment (target design)
@@ -402,7 +405,7 @@ flowchart LR
 | Store | Data | Durability | Production |
 |---|---|---|---|
 | PostgreSQL 18 + PostGIS | Users, trips, payments; zones and pickups (geography) | Durable, the system of record | Amazon RDS |
-| Redis 8 | Live driver positions (`drivers:geo`), Socket.io room fan-out, caches | **Rebuildable**: lost data regenerates within seconds | Amazon ElastiCache |
+| Redis 8 | Live driver positions (`geo:{city}:{type}:*`, `driver:{id}`), Socket.io room fan-out, caches | **Rebuildable**: lost data regenerates within seconds | Amazon ElastiCache |
 | Kafka | Domain event streams | Durable, retained, replayable | Amazon MSK |
 
 ### Current schema (auth-service)
@@ -434,14 +437,17 @@ erDiagram
 
 ## 8. Event catalog
 
-Contracts live in `libs/shared-types/src/events.ts`. Producer and consumer import the same type.
+Contracts live in `libs/shared-types/src/events.ts`. Producer and consumer import the same type, and consumers validate the payload (zod) before acting on it.
 
 | Topic | Key | Producer | Payload | Consumers | Status |
 |---|---|---|---|---|---|
 | `user.created` | `userId` | auth-service | `{ userId, guest }` | trip (rider cache) | 🟡 produced; no consumers yet |
 | `org.member_invited` | `orgId` | auth-service | `{ invitationId, orgId, orgName, role, phoneNumber? }` | notification (invite SMS) | ✅ |
 | `role.granted` / `role.revoked` | `userId` | auth-service | `{ userId, role, orgId?, cityId?, byUserId }` | notification (driver activated push), audit | ✅ produced, notification consumes `DRIVER` grants |
-| `driver.location` | `driverId` | realtime-gateway | `{ driverId, tripId, lat, lng, heading?, at }` | ETA, trip audit, analytics | 🟡 publish crashes (producer not connected) |
+| `driver.location` | `driverId` | realtime-gateway | `{ driverId, cityId, tripId?, lat, lng, heading?, speed?, accuracy?, at }` | ETA, trip audit, analytics | ✅ produced (guarded, never blocks pings) |
+| `driver.online` / `driver.offline` | `driverId` | fleet-service | `{ driverId, vehicleId, vehicleType, cityId, fleetOrgId?, cashAllowed, balanceState? }` / `{ driverId, reason }` | location | 📐 producer not built; location consumes |
+| `driver.connection_lost` | `driverId` | location-service | `{ driverId, cityId, lastSeenAt }` | fleet (ends the session) | ✅ produced |
+| `trip.matched` | `tripId` | trip-service | `{ tripId, riderId, driverId, cityId, vehicleType }` | location (driver busy, trip members), notification | 📐 producer not built; location consumes |
 | `trip.requested` / `matched` / `driver_en_route` / `started` / `completed` / `cancelled` | `tripId` | trip-service | trip snapshot + transition | payment, notification, analytics | 📐 |
 | `payment.captured` / `payment.failed` | `tripId` | payment-service | `{ tripId, amountCents, … }` | trip, notification | 📐 |
 
@@ -705,12 +711,10 @@ Issues found while running the system, listed so nobody builds on false assumpti
 
 | Area | Gap | Impact |
 |---|---|---|
-| realtime-gateway | Kafka producer is never connected | The first `location:update` crashes the process |
-| realtime-gateway | `EXPIRE` on the whole `drivers:geo` key | Stale drivers don't expire individually |
 | Events | Only auth-service has an outbox (and relay) so far | Other services can lose events if Kafka is down after a commit |
 | Compose stack mode | Redpanda advertises `localhost:9092`; root `.env` points containers at `localhost` | Containerized services can't reach Kafka or Redis |
 | Delivery | Kubernetes manifests use `:latest`; deploy jobs lack cluster credentials; only trip-service has manifests; `.github/` is gitignored | CD doesn't deploy new code yet |
 | Infra | `infra/terraform/modules/` is empty; RDS pinned to Postgres 16 vs 18 locally | `terraform init` fails; dev/prod parity gap |
-| Services | trip, location, pricing, payment and mapping expose `/health` only | The flows in [§5.2](#52-request-a-trip-target-design) and [§5.4](#54-trip-completion-and-payment-target-design) are designs, not code |
+| Services | trip, pricing, payment and fleet expose `/health` only (fleet doesn't exist yet) | The flows in [§5.2](#52-request-a-trip-target-design) and [§5.4](#54-trip-completion-and-payment-target-design) are designs, not code |
 
 When you close a gap, update this table and the status markers in [§3](#3-services-and-ownership) and [§8](#8-event-catalog).

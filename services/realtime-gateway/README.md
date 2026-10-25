@@ -27,23 +27,32 @@ Health check : http://localhost:3000/health
 
 ---
 
+## Socket events
+
+| Event | Who | Payload → ack | What happens |
+|---|---|---|---|
+| `location:update` | drivers (`DRIVER` token, `location:stream`) | `{ lat, lng, heading?, speed?, accuracy?, at? }` → `{ accepted }` or `{ accepted: false, reason }` | Plausibility checks, then one Redis pipeline into the driver's geo set (`libs/shared-location`). On a trip, `driver:location` goes to room `trip:{tripId}`, where the trip is the one location-service assigned (never one from the message). Then `driver.location` to Kafka |
+| `trip:subscribe` | the trip's rider or driver | `tripId` → `{ ok }` | Joins room `trip:{tripId}` only if the user is in `trip:{id}:members` (written on `trip.matched`) |
+| `trip:unsubscribe` | anyone | `tripId` | Leaves the room |
+| `driver:location` | server → room | `{ tripId, driverId, lat, lng, heading, at }` | Live position for the rider's map |
+
+Rejection reasons: `forbidden` (not a driver), `not_online` (no active driving session in Redis), `too_frequent` (< 1 s since the last accepted ping), `invalid`, `inaccurate` (> 100 m), `future`, `out_of_order`, `too_fast` (> 200 km/h jump), `unavailable` (Redis down).
+
+**Kafka is a side path.** The producer reconnects in the background. A failed publish is counted (`/health/ready` shows `published` / `dropped`) and never reaches the driver's socket or blocks the Redis update. Without `KAFKA_BROKERS` (local) nothing is published.
+
+**Suspensions** end open sockets: every connection rechecks the `deny:{userId}` key once a minute.
+
+---
+
 ## Project layout
 
 ```
 src/
-├── config/         env → typed config object (Zod, fails fast at boot)
-├── routes/         HTTP route wiring → controller (no logic here)
-├── controllers/    parse request · call service · shape response
-├── services/       business logic lives here
-├── repositories/   the only layer that talks to Prisma / Redis
-├── models/         domain types (DB schema comes from prisma/schema.prisma)
-├── middlewares/    error handler, auth guard
-├── events/
-│   ├── producers/  Kafka publish
-│   └── consumers/  Kafka subscribe
-├── utils/          logger, small helpers
-├── app.ts          builds Fastify instance — no listen() call, fully testable
-└── server.ts       calls app.ts, listens, wires graceful shutdown
+├── config/                 env → typed config (Zod)
+├── middlewares/            handshake authentication (JWKS, deny list, permission version)
+├── sockets/                location:update, trip:subscribe
+├── kafka.ts                guarded driver.location publisher
+└── server.ts               HTTP health, Socket.io + Redis adapter, graceful shutdown
 ```
 
 ---
@@ -55,8 +64,7 @@ src/
 | `pnpm dev` | Start with hot reload (tsx watch) |
 | `pnpm build` | Compile TypeScript → dist/ (build libs first: `pnpm turbo run build --filter=@ride-app/realtime-gateway...`) |
 | `pnpm start` | Run compiled output (production) |
-| `pnpm test` | Run all tests |
-| `pnpm vitest` | Tests in watch mode |
+| `pnpm test:integration` | Socket handlers against a real Redis |
 | `pnpm lint` | ESLint |
 | `pnpm typecheck` | Type-check only, no emit (against lib source, no build needed) |
 
@@ -65,14 +73,10 @@ src/
 ## Running tests
 
 ```bash
-pnpm test            # all tests once (passes when no test files exist yet)
-pnpm vitest          # watch mode during development
+pnpm test:integration   # handlers against a real Redis (throwaway container on port 6392, needs Docker)
 ```
 
-- **Unit tests** (`tests/unit/`): mock the repository and Kafka boundaries,
-  assert on pure business logic only.
-- **Integration tests** (`tests/integration/`): spin up a real DB via
-  Testcontainers so migrations and queries run against an actual Postgres.
+Covers: only drivers stream, the driver id comes from the token, offline drivers are refused, ping flooding, fan-out to the assigned trip only, trip rooms limited to the trip's members.
 
 ---
 

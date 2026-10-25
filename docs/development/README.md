@@ -216,11 +216,25 @@ make dev-mobile                   # flutter run in apps/phone-app
 ## 6. Mapping stack (optional, heavy)
 
 ```bash
+make map-data     # once: download the Ethiopia extract (~140 MB) and build the OSRM graph (~10 min, ~4 GB RAM)
 make dev-infra    # tileserver-gl, Nominatim, OSRM — see infra/mapping-stack/README.md
 ```
 
-Nominatim needs a regional OSM import, and OSRM needs a one-time preprocessing
-step. Most developers point `OSRM_URL` / `NOMINATIM_URL` at a shared staging instance instead.
+Nominatim imports the extract on its first start (slow). Most developers point `OSRM_URL` / `NOMINATIM_URL` in `services/mapping-service/.env` at a shared staging instance instead.
+
+**You don't need the engines to work on the backend.** Without them, mapping-service answers routes and ETAs with straight-line estimates flagged `"approximate": true`, and address search returns `503`.
+
+### Drivers online without fleet-service
+
+fleet-service (which publishes `driver.online`) doesn't exist yet. In development, location-service has a stand-in route, so a driver account can go online and stream pings through realtime-gateway:
+
+```bash
+TOKEN=$(grep ^INTERNAL_SERVICE_TOKEN= services/location-service/.env | cut -d= -f2)
+curl -XPOST localhost:3003/internal/dev/drivers/<driver user id>/online -H "authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' -d '{"vehicleId":"v-1","vehicleType":"economy","cityId":"addis-ababa","cashAllowed":true}'
+```
+
+The user needs the `DRIVER` role (`POST /internal/drivers/:userId/role {"active":true}` on auth-service).
 
 ---
 

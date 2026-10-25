@@ -23,6 +23,8 @@ secrets/
 
 # ── local dev infra data (docker volumes mapped to disk) ─────────────────────
 **/.dev-data/
+# OSM extracts, OSRM graphs, Nominatim DB, tiles (make map-data): hundreds of MB, regenerated
+infra/mapping-stack/data/
 
 # ── editor ────────────────────────────────────────────────────────────────────
 .DS_Store

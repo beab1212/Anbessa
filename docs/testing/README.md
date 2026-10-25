@@ -43,6 +43,10 @@ Turbo caches results. To re-run everything anyway: `pnpm test --force`.
 | `services/notification-service/tests/integration` | 20 | Integration: OTP delivery with a fake Telegram Gateway and a movable clock (fallbacks, reports, resend, verify, nothing secret in Postgres), deduplicated event SMS/push, device tokens |
 | `apps/phone-app/test/widget_test.dart` | 3 | Widget: boots to login; rider → sign out → driver flow; provider override straight into driver mode |
 | `packages/core/test/primary_button_test.dart` | 1 | Widget: shared button |
+| `libs/shared-location/tests` | 7 | Unit: ping plausibility (accuracy, speed, clock), distances, key safety |
+| `services/location-service/tests/integration` | 17 | Real Redis: geo index and filters, sweeper and its lock, lost drivers, trips, ETA with and without mapping-service, access control |
+| `services/mapping-service/tests/unit` | 12 | Against an OSRM/Nominatim-shaped HTTP server: parsing, cache, no-route, timeout, circuit breaker, fallback, limits, auth, per-user rate limit |
+| `services/realtime-gateway/tests/integration` | 5 | Socket handlers on real Redis: drivers only, token subject, flooding, fan-out to the assigned trip, trip-room membership |
 | other `services/*/tests` | — | Empty, ready for tests |
 | `apps/web` | — | None yet (see section 7) |
 
@@ -120,6 +124,8 @@ Not covered yet: key rotation with the grace period, Redis-backed rate limits (t
 Follow auth-service: a `vitest.integration.config.ts` with a `globalSetup` that recreates a `<svc>_test` database and runs migrations, a `test:integration` script, and `pnpm test` excluding `tests/integration/**`, so `pnpm test` stays fast and needs no Docker.
 
 For CI without a shared Postgres, the same `globalSetup` can start `postgis/postgis:18-3.6-alpine` with `testcontainers` instead.
+
+**Redis-backed tests** (location-service, realtime-gateway) start their own Redis container, `anbessa-test-redis` on port **6392**, and stop it afterwards. They flush it between tests, so they never use the Redis on 6379. Set `TEST_REDIS_URL` to point them at another *dedicated* instance (CI).
 
 ---
 
