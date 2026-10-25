@@ -64,8 +64,8 @@ for svc in services/*/; do
     echo "  created $svc.env"
   fi
 done
-[ -f apps/admin-dashboard/.env.example ] && \
-  cp -n apps/admin-dashboard/.env.example apps/admin-dashboard/.env 2>/dev/null || true
+[ -f apps/web/.env.example ] && \
+  cp -n apps/web/.env.example apps/web/.env 2>/dev/null || true
 ok "Env files ready"
 
 log "Creating local dev JWT keys (skipped if present)..."
@@ -83,7 +83,7 @@ echo ""
 echo -e "${BOLD}All done! Next steps:${RESET}"
 echo "  Backend team   → make dev-services"
 echo "  Mobile team    → make dev-mobile"
-echo "  Admin team     → make dev-admin"
+echo "  Web team       → make dev-web"
 echo "  Infra team     → make infra-up"
 echo ""
 echo "  Run 'make help' to see all available commands."

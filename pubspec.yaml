@@ -7,7 +7,7 @@ environment:
   sdk: ^3.12.0
 
 workspace:
-  - apps/rider-app
+  - apps/phone-app
   - packages/core
 
 dev_dependencies:

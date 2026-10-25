@@ -1,6 +1,6 @@
 # Architecture overview
 
-Anbessa is a ride-hailing platform. It's built as **independently deployable microservices** in one monorepo, with one phone app (rider + driver modes) and an admin dashboard.
+Anbessa is a ride-hailing platform. It's built as **independently deployable microservices** in one monorepo, with one phone app (rider + driver modes) and one web app (staff dashboard, fleet portal and corporate portal).
 
 This document describes the target architecture **and** where the code is today, so you know what you can rely on. Each section marks its status:
 
@@ -43,7 +43,7 @@ Who uses the system and which external systems it depends on.
 flowchart TB
   Rider([Rider<br/>phone app, rider mode])
   Driver([Driver<br/>phone app, driver mode])
-  Ops([Ops / support staff<br/>admin dashboard])
+  Ops([Staff, fleet owners, corporate admins<br/>web app])
 
   subgraph Anbessa["Anbessa platform"]
     Core[Ride-hailing backend]
@@ -81,8 +81,8 @@ The deployable pieces and how they connect.
 ```mermaid
 flowchart LR
   subgraph Clients
-    App["Phone app<br/>apps/rider-app<br/>Flutter (rider + driver)"]
-    Admin["Admin dashboard<br/>apps/admin-dashboard<br/>React + Vite"]
+    App["Phone app<br/>apps/phone-app<br/>Flutter (rider + driver)"]
+    Admin["Web app<br/>apps/web<br/>React + Vite<br/>staff · fleet · corporate"]
   end
 
   subgraph Edge
@@ -550,7 +550,7 @@ flowchart LR
 flowchart TB
   subgraph Host["Developer machine"]
     Dev["make dev-services<br/>8 services · tsx watch · hot reload<br/>ports 3000–3007"]
-    AdminDev["make dev-admin :5173"]
+    AdminDev["make dev-web :5173"]
     Mobile["make dev-mobile<br/>emulator / device"]
   end
   subgraph Compose["make infra-up (docker compose)"]
@@ -655,8 +655,8 @@ Every synchronous call needs a timeout, retries with backoff for idempotent oper
 ```
 Anbessa/
 ├── apps/
-│   ├── rider-app/          Flutter phone app, rider AND driver modes (role-based)
-│   └── admin-dashboard/    React + Vite ops tooling
+│   ├── phone-app/          Flutter phone app, rider AND driver modes (role-based)
+│   └── web/                React + Vite web app: staff dashboard, fleet and corporate portals (role-based)
 ├── packages/core/          Shared Dart models + widgets
 ├── services/               8 Node.js microservices (one image each)
 ├── libs/                   shared-types · shared-utils · shared-config

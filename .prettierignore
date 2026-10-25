@@ -4,7 +4,7 @@ coverage
 .turbo
 pnpm-lock.yaml
 **/src/generated
-apps/rider-app
+apps/phone-app
 packages
 infra/terraform/.terraform
 learned

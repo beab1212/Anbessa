@@ -7,9 +7,9 @@ Detailed guides: [architecture](docs/architecture/overview.md) · [design docs](
 
 | Team | Folder(s) | Their workspace file |
 |------|-----------|---------------------|
-| **Mobile** | `apps/rider-app` (rider + driver modes), `packages/core` | `.vscode/mobile.code-workspace` |
+| **Mobile** | `apps/phone-app` (rider + driver modes), `packages/core` | `.vscode/mobile.code-workspace` |
 | **Backend** | `services/*`, `libs/*` | `.vscode/services.code-workspace` |
-| **Admin dashboard** | `apps/admin-dashboard` | `.vscode/admin.code-workspace` |
+| **Web** (staff dashboard, fleet and corporate portals) | `apps/web` | `.vscode/web.code-workspace` |
 | **Infra / DevOps** | `infra/`, `.github/workflows/` | `.vscode/infra.code-workspace` |
 
 Open your workspace file instead of the repo root: it limits the file tree, search scope, and installed extensions to just your context.
@@ -36,10 +36,10 @@ make setup-services
 ```
 Requires Node ≥24 (`nvm use` reads `.nvmrc`) + Docker. pnpm comes from `corepack enable`.
 
-### Admin dashboard team
+### Web team
 ```bash
-make setup-admin
-# Then: make dev-admin
+make setup-web
+# Then: make dev-web
 ```
 Requires Node ≥24.
 

@@ -48,7 +48,8 @@ Every other service and the realtime gateway **verify those JWTs locally** again
 ```mermaid
 flowchart LR
   App["📱 Phone app"] -->|"phone OTP → session (bearer)"| BA
-  Admin["🛠 Admin dashboard"] -->|"password + 2FA → session (cookie)"| BA2
+  Web["🌐 Web app: fleet / corporate portals"] -->|"phone OTP → session (cookie)"| BA
+  Admin["🛠 Web app: staff dashboard"] -->|"password + 2FA → session (cookie)"| BA2
   subgraph AS["auth-service (Fastify)"]
     BA["Better Auth · app surface<br/>/api/auth/*"]
     BA2["Better Auth · admin surface<br/>/api/admin-auth/*"]
@@ -204,7 +205,7 @@ export const appAuth = betterAuth({
   secret: process.env.BETTER_AUTH_SECRET,                       // from Secrets Manager; also encrypts JWKS private keys
   database: prismaAdapter(prisma, { provider: "postgresql" }),
   secondaryStorage: redisStorage,
-  trustedOrigins: [process.env.FLEET_PORTAL_ORIGIN!, process.env.CORPORATE_PORTAL_ORIGIN!],
+  trustedOrigins: config.APP_TRUSTED_ORIGINS,   // the web app (fleet + corporate portals)
   advanced: { database: { generateId: () => uuidv7() } },
 
   user: {
@@ -297,7 +298,7 @@ The **admin instance** reuses the same database, Prisma client, access control a
 | `session.expiresIn` | 12 h, and `session.additionalFields.surface.defaultValue = "admin"` |
 | `jwt.audience` / `expirationTime` | `ride-admin` / `10m` |
 | `phoneNumber`, `bearer` | not loaded |
-| `trustedOrigins` | the admin dashboard origin only |
+| `trustedOrigins` | the web app's origin only (`ADMIN_TRUSTED_ORIGINS`) |
 | Cookies | `__Host-` prefixed, `Secure`, `SameSite=Strict` |
 
 ---
@@ -796,7 +797,7 @@ erDiagram
 |---|---|---|
 | `databaseHooks.user.create.after` | `user.created` | notification (welcome), trip (rider cache), audit |
 | user updated with `banned = true` / `false` | `user.suspended` / `user.reinstated` | every service (denylist), audit |
-| `organizationHooks` after add/remove member | `role.granted` / `role.revoked` (+ `permissionVersion` bump) | audit, admin dashboard |
+| `organizationHooks` after add/remove member | `role.granted` / `role.revoked` (+ `permissionVersion` bump) | audit, staff dashboard |
 | `organizationHooks` after organisation status changes | `org.verified` / `org.suspended` | fleet, payment, trip |
 | sign-in success / failure | `audit.recorded` (staff surface: always. App: failures only, sampled) | audit-service |
 
@@ -817,7 +818,7 @@ Today, auth-service has hand-written `register`/`login` (both currently broken, 
 | **3. Data migration** ✅ | `User` → `user` (+ `phoneNumber`), `passwordHash` → `account` (`providerId = "credential"`, argon2 kept), `role` → `user.role` (`RIDER → rider`, `DRIVER → driver`, `ADMIN → super_admin`, flagged for review). Seed `STAFF_CITY` org `staff-addis-ababa` | Existing users keep working |
 | **4. Switch auth-service** ✅ | Mount both Better Auth surfaces. Delete the hand-written routes, `jose` signing and `JWT_PRIVATE_KEY_PATH`. Add `/api/identity/*` for guests and staff grants | Login works (fixes today's bugs) |
 | **5. Switch verifiers** ✅ (gateway; other services as they get routes) | `libs/shared-authz` `verifyAccessToken` in realtime-gateway and services. Remove the `jwt` plugin from Kong | One verification path |
-| **6. Clients** | Phone app: OTP screens + bearer + `/token` refresh (replaces the login placeholder and the rider/driver buttons). Admin dashboard: password + TOTP | End-to-end |
+| **6. Clients** | Phone app (`apps/phone-app`): OTP screens + bearer + `/token` refresh (replaces the login placeholder and the rider/driver buttons). Web app (`apps/web`): phone OTP for the fleet and corporate portals, password + TOTP for the staff dashboard | End-to-end |
 | **7. Hardening** (partly: integration tests for ban, pv, OTP lockout) | OTP abuse controls, key-rotation drill, ban → denylist test, audit events | Production-ready |
 
 ---

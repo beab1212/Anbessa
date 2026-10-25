@@ -93,7 +93,7 @@ export class AppUser {
   }
 }
 
-// ── admin dashboard (cookie sessions, password + TOTP) ─────────────────────────
+// ── staff dashboard (cookie sessions, password + TOTP) ─────────────────────────
 
 export function totp(secret: string, at = Date.now()) {
   const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";

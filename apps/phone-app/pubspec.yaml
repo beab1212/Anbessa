@@ -1,4 +1,4 @@
-name: ride_app_rider
+name: phone_app
 description: Ride-app phone app — rider and driver modes in one app.
 publish_to: "none"
 version: 1.0.0+1

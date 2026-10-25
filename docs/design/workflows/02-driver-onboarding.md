@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Actors** | Driver (phone app, driver mode), onboarding officer (admin dashboard) |
+| **Actors** | Driver (phone app, driver mode), onboarding officer (staff dashboard) |
 | **Services** | auth-service, fleet-service, notification-service, object storage (S3) |
 | **Trigger** | A signed-in user taps "Drive with Anbessa" |
 | **Outcome** | An **owner-driver** with role `DRIVER` and a `VERIFIED` vehicle they own, ready to go online ([04](04-driver-shift.md)). Fleet drivers skip the vehicle part ([03](03-fleet-onboarding.md)) |

@@ -1,7 +1,8 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { TripsPage } from "./pages/TripsPage";
 
-// Ops/support dashboard: live trip map, driver roster, payout review.
+// The Anbessa web app: staff dashboard, fleet portal and corporate portal in one app.
+// Pages are shown per the roles in the access token; the APIs enforce the same rules.
 function App() {
   return (
     <BrowserRouter>

@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Actors** | Caller (no app, or prefers to call), call center agent (admin dashboard) |
+| **Actors** | Caller (no app, or prefers to call), call center agent (staff dashboard) |
 | **Services** | telephony (call queue), auth-service (guest users), pricing-service, trip-service, notification-service (SMS) |
 | **Trigger** | Someone calls the booking number |
 | **Outcome** | A trip booked **on behalf of** the caller, with SMS updates to their phone. Both the agent and the rider are recorded in the audit trail |
@@ -14,7 +14,7 @@ The agent identifies the caller by phone number (the caller ID is pre-filled), c
 
 ## 2. Preconditions
 
-- The agent is signed in to the admin dashboard with 2FA, role `CALL_CENTER_AGENT @ CITY` ([Auth.md §9.2](../Auth.md#92-staff-sign-in-with-two-factor)).
+- The agent is signed in to the staff dashboard with 2FA, role `CALL_CENTER_AGENT @ CITY` ([Auth.md §9.2](../Auth.md#92-staff-sign-in-with-two-factor)).
 - The pickup is in the agent's city.
 
 ## 3. Steps

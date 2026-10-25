@@ -101,7 +101,7 @@ Production values that differ from dev:
 | `BETTER_AUTH_SECRET` | auth-service only. From Secrets Manager, unique per environment. Never rotate it without a key-migration plan |
 | `AUTH_BASE_URL` | auth-service: public URL, must be `https://` (e.g. `https://api.anbessa.et`). Also the default JWT issuer |
 | `AUTH_ISSUER` / `AUTH_JWKS_URL` | verifiers: the issuer above / in-cluster JWKS URL (`http://auth-service:3001/api/auth/jwks`) |
-| `APP_TRUSTED_ORIGINS` / `ADMIN_TRUSTED_ORIGINS` | auth-service: the exact web origins (comma separated). The admin dashboard origin only in `ADMIN_TRUSTED_ORIGINS` |
+| `APP_TRUSTED_ORIGINS` / `ADMIN_TRUSTED_ORIGINS` | auth-service: the exact web origins (comma separated). The web app's origin (e.g. `https://web.anbessa.et`) goes in **both**: its fleet and corporate portals use the app surface, its staff dashboard the admin surface. Nothing else goes in `ADMIN_TRUSTED_ORIGINS` |
 | `OTP_DELIVERY` / `NOTIFICATION_INTERNAL_URL` | auth-service: `notification` / in-cluster notification-service URL. `console` is refused in production |
 | `INTERNAL_SERVICE_TOKEN` | auth-service and its internal callers. Required in production |
 | `AUTH_RATE_LIMIT` | leave unset (`on`). `off` is refused in production |
@@ -134,26 +134,26 @@ Config is validated with Zod at process start, so a missing or invalid variable 
 
 ## 8. Client releases
 
-### Mobile (`apps/rider-app`, rider + driver in one app)
+### Mobile (`apps/phone-app`, rider + driver in one app)
 
 ```bash
-cd apps/rider-app
+cd apps/phone-app
 flutter build appbundle --release \
   --dart-define=API_BASE_URL=https://api.example.com \
   --dart-define=WS_URL=wss://ws.example.com
 flutter build ipa --release --dart-define=...   # macOS only
 ```
 
-- Android application ID / iOS bundle: `com.anbessa.ride_app_rider`. Display name: "Ride".
+- Android application ID / iOS bundle: `com.anbessa.phone_app`. Display name: "Ride".
 - Bump `version:` in `pubspec.yaml` (`1.0.0+1` → name + build number) for every store upload.
 - Android release builds are still signed with the **debug key** (`android/app/build.gradle.kts`). Create an upload keystore and a `key.properties` (keep both out of git) before the first store release.
 - Store listings must explain the location permission (driver mode). The iOS usage string is in `ios/Runner/Info.plist`.
 
-### Admin dashboard
+### Web app (staff dashboard, fleet and corporate portals)
 
 ```bash
 VITE_API_BASE_URL=https://api.example.com VITE_WS_URL=wss://ws.example.com \
-  pnpm --filter @ride-app/admin-dashboard build     # → apps/admin-dashboard/dist
+  pnpm --filter @ride-app/web build     # → apps/web/dist
 ```
 
 `VITE_*` values are compiled into the bundle, so build once per environment. Serve `dist/`

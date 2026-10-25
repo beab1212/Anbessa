@@ -1,8 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:ride_app_rider/core/session/session.dart';
-import 'package:ride_app_rider/main.dart';
+import 'package:phone_app/core/session/session.dart';
+import 'package:phone_app/main.dart';
 
 class _DriverSession extends SessionRole {
   @override

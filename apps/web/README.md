@@ -1,7 +1,19 @@
-# admin-dashboard
+# web — the Anbessa web app
 
-React + Vite web app for ops and support teams — live trip map, driver roster,
-payout review, dispute resolution.
+One React + Vite app for everyone who works in a browser. What a user sees depends on
+the roles in their access token ([Role.md §4](../../docs/design/Role.md#which-surface-each-role-uses)):
+
+| Area | Who | Sign-in | Token |
+|---|---|---|---|
+| **Staff dashboard** (`/staff`) | call center, dispatch, support, onboarding, safety, operations, marketing, analysts, finance, super admins, auditors, regulator | email + password + TOTP (`/api/admin-auth`) | `aud=ride-admin`, 10 min |
+| **Fleet portal** (`/fleet`) | fleet owners | phone OTP (`/api/auth`) | `aud=ride-app`, 15 min |
+| **Corporate portal** (`/corporate`) | corporate admins and coordinators | phone OTP (`/api/auth`) | `aud=ride-app`, 15 min |
+
+**Access control.** The app hides pages and buttons a user's roles don't allow, but that's
+convenience only: every API call is checked again by the service with `libs/shared-authz`
+(permission + scope). Staff and partner sessions are separate (different cookies and token
+audiences), so a partner token can never open a staff API. Today the app has only the first
+placeholder pages (trips); the role-gated areas are still to build.
 
 Stack: React 19, React Router 7, TanStack Query 5, Vite 8, Vitest 5, TypeScript 7
 (`moduleResolution: Bundler`, `vite/client` types). Requires Node 24 and pnpm via `corepack enable`.

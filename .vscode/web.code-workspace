@@ -1,6 +1,6 @@
 {
   "folders": [
-    { "name": "admin-dashboard", "path": "../apps/admin-dashboard" }
+    { "name": "web (staff · fleet · corporate)", "path": "../apps/web" }
   ],
   "settings": {
     "editor.formatOnSave": true,
@@ -10,7 +10,8 @@
     "recommendations": [
       "dbaeumer.vscode-eslint",
       "esbenp.prettier-vscode",
-      "bradlc.vscode-tailwindcss",      "bierner.markdown-mermaid"
+      "bradlc.vscode-tailwindcss",
+      "bierner.markdown-mermaid"
     ]
   }
 }

@@ -42,12 +42,12 @@ make lint           # includes melos analyze
 make test           # includes melos test
 ```
 
-There is **one phone app** — `apps/rider-app` — for both riders and drivers.
+There is **one phone app** — `apps/phone-app` — for both riders and drivers.
 The signed-in user's role (`RIDER` / `DRIVER` in the JWT) decides which home
 screen, features and theme they get.
 
 Open **`.vscode/mobile.code-workspace`** in VS Code.
-Full guide → [`apps/rider-app/README.md`](apps/rider-app/README.md)
+Full guide → [`apps/phone-app/README.md`](apps/phone-app/README.md)
 
 ---
 
@@ -89,17 +89,19 @@ docker build -f services/auth-service/Dockerfile -t ride-app/auth-service .
 
 ---
 
-## I'm on the admin dashboard team
+## I'm on the web team
 
 ```bash
-make setup-admin   # installs Node deps
+make setup-web   # installs Node deps
 
 # Daily work
-make dev-admin     # → http://localhost:5173
+make dev-web     # → http://localhost:5173
 ```
 
-Open **`.vscode/admin.code-workspace`** in VS Code.
-Full guide → [`apps/admin-dashboard/README.md`](apps/admin-dashboard/README.md)
+There is **one web app**, `apps/web`, for everyone who works in a browser: the **staff dashboard** (call center, dispatch, onboarding, safety, finance, …), the **fleet portal** and the **corporate portal**. What each person sees depends on the roles in their token; the APIs enforce the same rules.
+
+Open **`.vscode/web.code-workspace`** in VS Code.
+Full guide → [`apps/web/README.md`](apps/web/README.md)
 
 ---
 
@@ -129,8 +131,8 @@ Full guide → [`infra/README.md`](infra/README.md)
 ```
 ride-app/
 ├── apps/
-│   ├── rider-app/            Flutter phone app — rider AND driver modes (role-based)
-│   └── admin-dashboard/      React/Vite — ops tooling
+│   ├── phone-app/            Flutter phone app — rider AND driver modes (role-based)
+│   └── web/                  React/Vite web app — staff dashboard, fleet and corporate portals (role-based)
 │
 ├── packages/
 │   └── core/                 Shared Dart models + widgets
@@ -160,7 +162,7 @@ ride-app/
 ├── .vscode/                  Per-team VS Code workspace files
 │   ├── mobile.code-workspace
 │   ├── services.code-workspace
-│   ├── admin.code-workspace
+│   ├── web.code-workspace
 │   └── infra.code-workspace
 │
 ├── .github/workflows/        CI (lint/test/build) · CD (build→push→deploy)

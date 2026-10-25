@@ -51,7 +51,7 @@ async function main() {
 
     process.stdout.write(
       `super admin created\n  userId:             ${userId}\n  email:              ${email}\n  temporary password: ${temporaryPassword}\n` +
-        "Sign in to the admin dashboard, change the password and enrol TOTP. This password is not shown again.\n",
+        "Sign in to the staff dashboard, change the password and enrol TOTP. This password is not shown again.\n",
     );
   } finally {
     await db.$disconnect();

@@ -1,4 +1,4 @@
-package com.anbessa.ride_app_rider
+package com.anbessa.phone_app
 
 import io.flutter.embedding.android.FlutterActivity
 

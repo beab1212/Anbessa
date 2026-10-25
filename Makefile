@@ -6,12 +6,12 @@
 #   make setup-mobile     → Flutter team
 #   make setup-services   → Backend team
 #   make setup-infra      → DevOps/infra team
-#   make setup-admin      → Admin dashboard team
+#   make setup-web        → Web team (staff dashboard, fleet and corporate portals)
 # ==============================================================================
 
 .DEFAULT_GOAL := help
-.PHONY: help setup setup-mobile setup-services setup-admin setup-infra \
-        dev-services dev-mobile dev-admin dev-infra \
+.PHONY: help setup setup-mobile setup-services setup-web setup-infra \
+        dev-services dev-mobile dev-web dev-infra \
         stack-up secrets test lint typecheck clean
 
 SHELL := /bin/bash
@@ -34,7 +34,7 @@ help:
 	@echo "$(CYAN)Initial setup (run once, per team):$(RESET)"
 	@echo "  make setup-mobile     Install Flutter deps for the phone app (rider + driver modes)"
 	@echo "  make setup-services   Install Node deps + spin up infra containers"
-	@echo "  make setup-admin      Install Node deps for the admin dashboard"
+	@echo "  make setup-web        Install Node deps for the web app"
 	@echo "  make setup-infra      Bootstrap Terraform + Kubernetes tooling"
 	@echo "  make setup            Everything above in one shot"
 	@echo "  make secrets          Create .env files + local dev auth secrets (never overwrites)"
@@ -42,7 +42,7 @@ help:
 	@echo "$(CYAN)Day-to-day dev:$(RESET)"
 	@echo "  make dev-services     Start all services in watch mode (hot reload)"
 	@echo "  make dev-mobile       Flutter run the phone app (rider + driver modes)"
-	@echo "  make dev-admin        Start the admin dashboard dev server"
+	@echo "  make dev-web          Start the web app dev server"
 	@echo "  make dev-infra        Start the local mapping stack"
 	@echo ""
 	@echo "$(CYAN)One service at a time:$(RESET)"
@@ -65,7 +65,7 @@ help:
 	@echo ""
 
 # ── setup ──────────────────────────────────────────────────────────────────────
-setup: setup-services setup-mobile setup-admin
+setup: setup-services setup-mobile setup-web
 	@echo "$(GREEN)✔  Full setup complete. See README.md for next steps.$(RESET)"
 
 setup-mobile:
@@ -85,11 +85,11 @@ setup-services:
 	@$(MAKE) --no-print-directory db-migrate
 	@echo "$(GREEN)✔  Services ready. Run: make dev-services$(RESET)"
 
-setup-admin:
-	@echo "$(BOLD)→ Admin dashboard setup$(RESET)"
-	cd apps/admin-dashboard && pnpm install
-	@cp -n apps/admin-dashboard/.env.example apps/admin-dashboard/.env 2>/dev/null || true
-	@echo "$(GREEN)✔  Admin ready. Run: make dev-admin$(RESET)"
+setup-web:
+	@echo "$(BOLD)→ Web app setup$(RESET)"
+	cd apps/web && pnpm install
+	@cp -n apps/web/.env.example apps/web/.env 2>/dev/null || true
+	@echo "$(GREEN)✔  Web app ready. Run: make dev-web$(RESET)"
 
 setup-infra:
 	@echo "$(BOLD)→ Infra setup$(RESET)"
@@ -121,10 +121,10 @@ dev-svc: secrets
 	pnpm --filter @ride-app/$(SVC) dev
 
 dev-mobile:
-	cd apps/rider-app && flutter run
+	cd apps/phone-app && flutter run
 
-dev-admin:
-	cd apps/admin-dashboard && pnpm dev
+dev-web:
+	cd apps/web && pnpm dev
 
 dev-infra:
 	docker compose -f infra/mapping-stack/docker-compose.mapping.yml up

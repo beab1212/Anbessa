@@ -8,7 +8,7 @@
 **/src/generated
 **/tests
 .git
-apps/rider-app
+apps/phone-app
 packages
 infra
 docs

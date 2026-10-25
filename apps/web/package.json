@@ -1,5 +1,5 @@
 {
-  "name": "@ride-app/admin-dashboard",
+  "name": "@ride-app/web",
   "version": "1.0.0",
   "private": true,
   "type": "module",

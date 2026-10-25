@@ -27,7 +27,7 @@ nvm use && corepack enable
 
 make setup            # everything; or pick one:
 make setup-services   # backend: pnpm install, .env files + dev secrets, infra-up, db-migrate
-make setup-admin      # admin dashboard
+make setup-web      # web app (staff dashboard, fleet and corporate portals)
 make setup-mobile     # Flutter: dart pub get for the whole workspace
 ```
 
@@ -59,7 +59,7 @@ There are no key files any more: Better Auth generates the ES256 signing keys on
 
 ### First staff login (super admin)
 
-The admin dashboard has no sign-up. Create the first two super admins with the bootstrap command (it refuses once two exist):
+The staff dashboard has no sign-up. Create the first two super admins with the bootstrap command (it refuses once two exist):
 
 ```bash
 pnpm --filter @ride-app/auth-service bootstrap:super-admin -- --email you@anbessa.et --name "Your Name"
@@ -114,7 +114,7 @@ tsx watch --conditions=development --env-file-if-exists=.env src/server.ts
 | 3005 | payment-service |
 | 3006 | notification-service |
 | 3007 | mapping-service |
-| 5173 | admin dashboard (Vite) |
+| 5173 | web app (Vite) |
 | 5432 / 6379 / 9092 | Postgres / Redis / Redpanda (Kafka API) |
 | 8000 | Kong. Only in `make stack-up` |
 | 5000 / 8080 / 8081 | OSRM / Nominatim / tile server (`make dev-infra`) |
@@ -171,14 +171,16 @@ type in the same PR as the producer and consumer (see `CONTRIBUTING.md`).
 
 ---
 
-## 4. Admin dashboard
+## 4. Web app (staff dashboard, fleet and corporate portals)
 
 ```bash
-make setup-admin                  # pnpm install + apps/admin-dashboard/.env
-make dev-admin                    # http://localhost:5173
+make setup-web                  # pnpm install + apps/web/.env
+make dev-web                    # http://localhost:5173
 ```
 
-`VITE_*` variables in `apps/admin-dashboard/.env` are baked in at build time.
+One app, three areas: the staff dashboard, the fleet portal and the corporate portal. Which pages a user sees depends on the roles in their token (see [Role.md §4](../design/Role.md#which-surface-each-role-uses)).
+
+`VITE_*` variables in `apps/web/.env` are baked in at build time.
 `VITE_API_BASE_URL` should point at Kong (`http://localhost:8000`, only up with `make stack-up`)
 or directly at a service while Kong isn't running.
 
@@ -188,10 +190,10 @@ or directly at a service while Kong isn't running.
 
 ```bash
 make setup-mobile                 # dart pub get (root pub workspace)
-make dev-mobile                   # flutter run in apps/rider-app
+make dev-mobile                   # flutter run in apps/phone-app
 ```
 
-- There is one app, `apps/rider-app`. The login screen offers **Continue as rider** / **Continue as driver** until the OTP screens are wired to the API. After that, the JWT's `roles` claim (`RIDER`, `DRIVER`) picks the mode.
+- There is one app, `apps/phone-app`. The login screen offers **Continue as rider** / **Continue as driver** until the OTP screens are wired to the API. After that, the JWT's `roles` claim (`RIDER`, `DRIVER`) picks the mode.
 - Backend URLs come from `--dart-define` (`lib/core/config/env.dart`):
   ```bash
   flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8000 --dart-define=WS_URL=ws://10.0.2.2:3000
@@ -216,7 +218,7 @@ step. Most developers point `OSRM_URL` / `NOMINATIM_URL` at a shared staging ins
 ## 7. Editor
 
 Open the workspace file for your team instead of the repo root:
-`.vscode/services.code-workspace`, `admin.code-workspace`,
+`.vscode/services.code-workspace`, `web.code-workspace`,
 `mobile.code-workspace` or `infra.code-workspace`.
 
 Formatting: `.editorconfig` everywhere; Prettier (`pnpm format`) for TS/JSON/MD;

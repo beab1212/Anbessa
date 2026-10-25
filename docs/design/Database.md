@@ -608,7 +608,7 @@ The consumer, in **one** transaction: `INSERT INTO inbox … ON CONFLICT DO NOTH
 ### Read-your-writes and replicas
 
 - Writes and the immediate reads after them (the rider's "my current trip") go to the **primary**.
-- Read replicas serve reports, history lists and the admin dashboard, which tolerate seconds of lag. Monitor `replica_lag` and fall back to the primary above a threshold.
+- Read replicas serve reports, history lists and the staff dashboard, which tolerate seconds of lag. Monitor `replica_lag` and fall back to the primary above a threshold.
 - **Never** read from a replica to decide something you'll write (a balance check before a payout, for example).
 
 ### Isolation levels
@@ -759,7 +759,7 @@ Admin screens want joins across services ("trips with rider name, driver phone, 
 flowchart LR
   E[(Kafka events:<br/>user.*, trip.*, vehicle.*, payment.*)] --> P[ops-read projector]
   P --> RM[(ops_read DB<br/>denormalised trip_view, driver_view)]
-  RM --> AD[Admin dashboard lists + search]
+  RM --> AD[Staff dashboard lists + search]
   E --> CH[(ClickHouse)]
   CH --> BI[Reports · regulator aggregates · heatmaps]
 ```
@@ -898,7 +898,7 @@ Under Ethiopia's Personal Data Protection Proclamation (2024), and as good pract
 | Sensitive columns | National ID, licence number and bank details are encrypted at the application layer (envelope encryption, KMS-managed keys, per-user data keys) |
 | Searching encrypted data | **Blind index**: an HMAC of the normalised value in a separate column (`license_hash`), for exact-match lookups and duplicate detection without decrypting |
 | Org isolation (defense in depth) | Optional PostgreSQL **Row-Level Security** on fleet/corporate tables (`USING (owner_org_id = current_setting('app.org_id')::uuid)`), set per transaction by the service, in addition to the app-level scope checks in [Role.md §9](Role.md#9-authorization-how-a-request-is-checked) |
-| Staff data access | Staff never get direct DB credentials. They use the admin dashboard (permission-checked and audited). A break-glass read-only DB role has alerting on use |
+| Staff data access | Staff never get direct DB credentials. They use the staff dashboard (permission-checked and audited). A break-glass read-only DB role has alerting on use |
 | PII in logs | No raw SQL parameters in logs. Phone numbers masked in application logs |
 
 ---
@@ -965,7 +965,7 @@ The existing practice ([Database Migrations note](../../learned/Concepts/Databas
 | **4** | Trip schema: `driver_active_trip`, conditional transitions, `trip_event` partitioned, idempotency keys | Phases 1–2 |
 | **5** | Redis key design ([§10](#10-hot-path-live-location-in-redis)) with per-member freshness. `driver.location` → ClickHouse | ClickHouse provisioned |
 | **6** | Payment ledger with the balance trigger, reconciliation and nightly integrity checks | Phases 2, 4 |
-| **7** | `ops_read` read model for the admin dashboard. Partition maintenance with pg_partman. Archiving to S3 | Phases 4, 6 |
+| **7** | `ops_read` read model for the staff dashboard. Partition maintenance with pg_partman. Archiving to S3 | Phases 4, 6 |
 | **8** | Backup/restore drills, alerts from [§19](#19-observability), retention jobs | All |
 
 ---

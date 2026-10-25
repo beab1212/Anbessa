@@ -1,12 +1,12 @@
-# rider-app — the Ride phone app (rider + driver)
+# phone-app — the Anbessa phone app (rider + driver)
 
 One Flutter app for **both** sides of a trip:
 
 - **Rider mode**: book trips, track the driver live, pay.
 - **Driver mode**: go online, accept trip requests, navigate, send live GPS, track earnings.
 
-The signed-in user's role decides the mode. auth-service puts a `role` claim
-(`RIDER` / `DRIVER`) in the JWT; after login it is stored in
+The signed-in user's roles decide the mode. auth-service puts a `roles` claim
+(`[{ "r": "RIDER" }, { "r": "DRIVER" }]`) in the JWT; after login it is stored in
 `sessionRoleProvider` (`lib/core/session/session.dart`), and `RideApp` in
 `lib/main.dart` shows the matching home screen and theme (indigo for rider,
 teal for driver). Until login is wired to the API, the login screen has

@@ -130,7 +130,7 @@ A **vehicle is owned either by its driver or by a company, never both.** Ownersh
 | `CORPORATE_ADMIN` | Admin of a corporate account | Invite employees, set ride policies and budgets, view trips and invoices | Corporate portal (web) | `ORG:<corporate>` |
 | `CORPORATE_COORDINATOR` | Assistant or travel desk | Book rides for guests or employees, billed to the company | Corporate portal (web) | `ORG:<corporate>` |
 
-### B. Staff (admin dashboard)
+### B. Staff (staff dashboard)
 
 | Role code | What they do | Typical scope |
 |---|---|---|
@@ -173,16 +173,14 @@ In code the regulator is its own role code, **`REGULATOR`** (`report:read_regula
 
 ```mermaid
 flowchart LR
-  subgraph Phone["📱 Phone app (apps/rider-app)"]
+  subgraph Phone["📱 Phone app (apps/phone-app)"]
     RM[Rider mode]
     DM[Driver mode]
   end
-  subgraph Portals["🌐 Partner web portals (planned)"]
-    FP[Fleet portal]
-    CP[Corporate portal]
-  end
-  subgraph Admin["🛠 Admin dashboard (apps/admin-dashboard)"]
-    AD[Staff views, filtered by permission]
+  subgraph Web["🌐 Web app (apps/web)"]
+    FP["Fleet portal /fleet"]
+    CP["Corporate portal /corporate"]
+    AD["Staff dashboard /staff<br/>views filtered by permission"]
   end
   RIDER --> RM
   DRIVER --> DM
@@ -192,7 +190,15 @@ flowchart LR
   STAFF["All 11 staff roles + AUDITOR"] --> AD
 ```
 
-The admin dashboard is **one app**. Navigation and buttons are shown according to the permissions in the token, while the APIs enforce them.
+There are **two apps**: the phone app and **one web app** (`apps/web`) that contains the fleet portal, the corporate portal and the staff dashboard. Navigation and buttons are shown according to the roles and permissions in the token, while the APIs enforce them.
+
+| Area of the web app | Who | Signs in through | Token audience |
+|---|---|---|---|
+| `/fleet` | `FLEET_OWNER` | phone OTP (`/api/auth`, app surface) | `ride-app` |
+| `/corporate` | `CORPORATE_ADMIN`, `CORPORATE_COORDINATOR` | phone OTP (`/api/auth`, app surface) | `ride-app` |
+| `/staff` | staff roles, `AUDITOR`, `REGULATOR` | email + password + TOTP (`/api/admin-auth`, admin surface) | `ride-admin` |
+
+A partner and a staff session are separate even in the same browser (different cookies: `anb.*` vs `anb-admin.*`), and a partner token never opens a staff API. Hiding a page in the web app is convenience only: the services check every request with `libs/shared-authz`.
 
 ---
 
@@ -427,7 +433,7 @@ Scope legend: **S** = own data (`SELF`) · **O** = own organisation (`ORG`) · *
 | Service-specific scopes | — | — | Per client, e.g. trip-service: `location:read_live`, `driver:read` |
 
 > [!NOTE]
-> The matrix lives in code as **one shared definition** (`libs/shared-authz/src/matrix.ts`), so services, the admin dashboard and tests use the same source of truth. `CORPORATE_EMPLOYEE` has `trip:bill_corporate` (O), and `FLEET_DRIVER` has nothing of its own (§4, attributes). Changing a role's bundle is a reviewed code change plus a permission-version bump ([§10](#10-tokens)).
+> The matrix lives in code as **one shared definition** (`libs/shared-authz/src/matrix.ts`), so services, the staff dashboard and tests use the same source of truth. `CORPORATE_EMPLOYEE` has `trip:bill_corporate` (O), and `FLEET_DRIVER` has nothing of its own (§4, attributes). Changing a role's bundle is a reviewed code change plus a permission-version bump ([§10](#10-tokens)).
 
 ---
 
@@ -492,7 +498,7 @@ A `SELF` grant covers the resource only if the user is one of `ownerUserIds`. `O
 ## 10. Tokens
 
 > [!NOTE]
-> **Implementation (Better Auth):** sessions are opaque (bearer for the app, `__Host-` cookie for the admin dashboard). Access JWTs come from Better Auth's `jwt` plugin: **ES256** keys stored encrypted in the `jwks` table, rotated every 90 days, published at `/api/auth/jwks`. They replace today's RS256 key files. The claims below are produced by `definePayload`. Two Better Auth surfaces issue the two audiences. See [Auth.md §8](Auth.md#8-sessions-and-tokens).
+> **Implementation (Better Auth):** sessions are opaque (bearer for the app, `__Host-` cookie for the staff dashboard). Access JWTs come from Better Auth's `jwt` plugin: **ES256** keys stored encrypted in the `jwks` table, rotated every 90 days, published at `/api/auth/jwks`. They replace today's RS256 key files. The claims below are produced by `definePayload`. Two Better Auth surfaces issue the two audiences. See [Auth.md §8](Auth.md#8-sessions-and-tokens).
 
 The claims and rules below define **what** the tokens contain. Auth.md defines **how** they're issued.
 
@@ -931,18 +937,18 @@ flowchart LR
 | Extend | **payment-service**: ledger with one balance per beneficiary, cash-commission limits, top-ups, approvals, corporate invoicing ([Payment.md](Payment.md)) |
 | Extend | **pricing-service**: city zones, vehicle types, fare proposals with approval |
 | New lib | **`libs/shared-authz`**: the permission matrix and the `require()` helper |
-| New apps | **Fleet portal** and **corporate portal** (web). The **admin dashboard** gains permission-driven views |
+| New apps | **Fleet portal** and **corporate portal** as areas of the web app (`apps/web`). The **staff dashboard** (same app) gains permission-driven views |
 
 ### New events
 
 | Topic | Producer | Consumers |
 |---|---|---|
-| `role.granted` / `role.revoked` | auth-service | audit, admin dashboard |
+| `role.granted` / `role.revoked` | auth-service | audit, staff dashboard |
 | `user.suspended` / `user.reinstated` | auth-service | every service (immediate deny), audit |
 | `org.verified` / `org.suspended` | auth-service | fleet, payment, trip |
 | `driver.activated` / `driver.suspended` | fleet-service | auth (grant/revoke DRIVER), trip, audit |
 | `vehicle.verified` / `vehicle.suspended` / `vehicle.transferred` | fleet-service | trip, payment, audit |
-| `approval.requested` / `approval.decided` | owning service | admin dashboard (queues), audit |
+| `approval.requested` / `approval.decided` | owning service | staff dashboard (queues), audit |
 | `audit.recorded` | every service | audit-service |
 
 ---
@@ -971,7 +977,7 @@ flowchart LR
 | **0–1. Better Auth identity** | Adopt Better Auth in auth-service ([Auth.md §14](Auth.md#14-migration-from-the-current-auth-service)). This replaces the broken hand-written register/login. Migrate `User.role` → `user.role` (`RIDER → rider`, `DRIVER → driver`, `ADMIN → super_admin`, flagged for review). Seed `City` and a `STAFF_CITY` organisation per city. Tokens carry `iss`/`aud`/`roles`/`pv`. Services verify via JWKS, and Kong's `jwt` plugin is removed | Users can hold several roles. Login works |
 | **2. Shared authz** | `libs/shared-authz` with the matrix + `require()`. Use it in auth-service and realtime-gateway | One enforcement pattern |
 | **3. Organisations + fleet-service** | `Organization`, `Membership`; fleet-service with drivers, vehicles, ownership rules V1–V10, documents, onboarding queue | Owner-drivers and company cars |
-| **4. Staff roles in admin dashboard** | MFA, `ride-admin` audience, permission-driven UI; call center, dispatcher, onboarding and support views | Staff can operate |
+| **4. Staff roles in staff dashboard** | MFA, `ride-admin` audience, permission-driven UI; call center, dispatcher, onboarding and support views | Staff can operate |
 | **5. Money** | Beneficiary balances and limits, top-ups, approvals, payouts, refunds, corporate invoices ([Payment.md §18](Payment.md#18-rollout-plan)) | Finance roles live |
 | **6. Safety + audit** | support-service (SOS, incidents), audit-service, PII masking, access reviews | Compliance-ready |
 | **7. Partner portals** | Fleet portal, corporate portal | Partners self-serve |

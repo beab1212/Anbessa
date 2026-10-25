@@ -9,10 +9,10 @@ should pass too.
 ## 1. The gates
 
 ```bash
-# Node workspace (Turborepo, every service + lib + admin dashboard)
+# Node workspace (Turborepo, every service + lib + web app)
 pnpm lint && pnpm typecheck && pnpm test && pnpm build
 
-# Flutter workspace (apps/rider-app + packages/core)
+# Flutter workspace (apps/phone-app + packages/core)
 dart run melos run analyze && dart run melos run test
 
 # or both halves at once
@@ -39,10 +39,10 @@ Turbo caches results. To re-run everything anyway: `pnpm test --force`.
 | `libs/shared-authz/tests` | 18 | Unit: scope checks (`authorize`, `citiesWith`), token verification (alg pinning, audience, denylist, `pv`) |
 | `services/auth-service/tests/unit` | 39 | Unit: role decoding, claims gating per surface, endpoint allowlist, config rules |
 | `services/auth-service/tests/integration` | 31 | Integration: the real app on a throwaway Postgres database (section 5) |
-| `apps/rider-app/test/widget_test.dart` | 3 | Widget: boots to login; rider → sign out → driver flow; provider override straight into driver mode |
+| `apps/phone-app/test/widget_test.dart` | 3 | Widget: boots to login; rider → sign out → driver flow; provider override straight into driver mode |
 | `packages/core/test/primary_button_test.dart` | 1 | Widget: shared button |
 | other `services/*/tests` | — | Empty, ready for tests |
-| `apps/admin-dashboard` | — | None yet (see section 7) |
+| `apps/web` | — | None yet (see section 7) |
 
 ---
 
@@ -53,7 +53,7 @@ pnpm --filter @ride-app/auth-service test                 # one service
 cd services/auth-service && pnpm vitest                    # watch mode
 pnpm vitest tests/unit/claims.test.ts -t "two-factor"      # one file / one test name
 
-cd apps/rider-app && flutter test                          # one Flutter package
+cd apps/phone-app && flutter test                          # one Flutter package
 flutter test test/widget_test.dart --plain-name "boots"   # one Flutter test
 ```
 
@@ -121,12 +121,12 @@ For CI without a shared Postgres, the same `globalSetup` can start `postgis/post
 
 ---
 
-## 7. Admin dashboard
+## 7. Web app
 
 Vitest is installed, but there are no tests and no DOM environment yet. To add component tests:
 
 ```bash
-pnpm --filter @ride-app/admin-dashboard add -D jsdom @testing-library/react @testing-library/jest-dom
+pnpm --filter @ride-app/web add -D jsdom @testing-library/react @testing-library/jest-dom
 ```
 
 Then set `test: { environment: "jsdom" }` in `vite.config.ts` and put tests next to components as `*.test.tsx`.
