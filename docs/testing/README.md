@@ -40,7 +40,7 @@ Turbo caches results. To re-run everything anyway: `pnpm test --force`.
 | `apps/rider-app/test/widget_test.dart` | 3 | Widget: boots to login; rider → sign out → driver flow; provider override straight into driver mode |
 | `packages/core/test/primary_button_test.dart` | 1 | Widget: shared button |
 | `services/*/tests/unit`, `services/*/tests/integration` | — | Empty, ready for tests |
-| `apps/admin-dashboard` | — | None yet (see section 6) |
+| `apps/admin-dashboard` | — | None yet (see section 7) |
 
 ---
 
@@ -93,7 +93,17 @@ expect(res.statusCode).toBe(401);
 
 ---
 
-## 5. Integration tests (not set up yet)
+## 5. Auth tests (planned with Better Auth)
+
+When auth-service moves to Better Auth ([Auth.md](../design/Auth.md)), add an **auth suite** that runs on every Better Auth upgrade ([Auth.md R6](../design/Auth.md#15-risks-and-spikes)):
+- **OTP:** send → verify, the 3-attempt limit, expiry, the rate limit on `send-otp`.
+- **Tokens:** `/token` claims match `definePayload` (no PII), `aud` per surface, ES256 `kid` resolvable from the JWKS.
+- **Surfaces:** an app session can't mint a `ride-admin` token. Staff without 2FA get no staff roles.
+- **Grants:** `addMember` into a `STAFF_CITY` org without an approved request is refused.
+- **Ban:** sessions revoked, `/token` refused, `user.suspended` written to the outbox.
+- **Rotation:** tokens signed with the previous key still verify during the grace period.
+
+## 6. Integration tests (not set up yet)
 
 `services/*/tests/integration/` is reserved for tests against real
 Postgres, Redis and Kafka. No tooling is installed yet. The recommended setup:
@@ -109,7 +119,7 @@ throwaway database (e.g. `auth_service_test`) and run `prisma migrate dev`.
 
 ---
 
-## 6. Admin dashboard
+## 7. Admin dashboard
 
 Vitest is installed, but there are no tests and no DOM environment yet. To add component tests:
 
@@ -121,7 +131,7 @@ Then set `test: { environment: "jsdom" }` in `vite.config.ts` and put tests next
 
 ---
 
-## 7. Flutter tests
+## 8. Flutter tests
 
 - Wrap widgets in `ProviderScope`, as `main()` does.
 - To start in a given mode, override the session provider instead of tapping through login:
@@ -138,7 +148,7 @@ Then set `test: { environment: "jsdom" }` in `vite.config.ts` and put tests next
 
 ---
 
-## 8. Coverage
+## 9. Coverage
 
 Not wired up yet:
 

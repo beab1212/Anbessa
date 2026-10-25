@@ -88,6 +88,12 @@ The image is `node:24-alpine`. The build stage uses pnpm (`pnpm deploy --prod`) 
 
 ---
 
+## Authentication
+
+Sockets authenticate once, at the handshake (`auth.token`). Today the gateway verifies RS256 JWTs with the public key file at `JWT_PUBLIC_KEY_PATH`. **Planned:** verify Better Auth JWTs against the JWKS through `libs/shared-authz` (`verifyAccessToken(token, "ride-app")`), so `JWT_PUBLIC_KEY_PATH` goes away ([Auth.md §10](../../docs/design/Auth.md#10-verifying-tokens-in-other-services)).
+
+---
+
 ## Environment variables
 
 See `.env.example` — every variable is documented there.

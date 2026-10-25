@@ -42,6 +42,8 @@ make setup-mobile     # Flutter: dart pub get for the whole workspace
 
 ### JWT keys (required once)
 
+> **Planned change:** when auth-service moves to Better Auth ([docs/design/Auth.md](../design/Auth.md)), signing keys are generated and rotated by Better Auth inside the database, and `make secrets` will create `BETTER_AUTH_SECRET` instead of key files. The steps below describe the code as it is today.
+
 auth-service signs tokens with a private key. realtime-gateway (and later Kong)
 verifies them with the public key. The paths in the `.env.example` files point at
 `secrets/` in the repo root:

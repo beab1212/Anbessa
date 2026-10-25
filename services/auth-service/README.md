@@ -70,6 +70,12 @@ src/
 
 ---
 
+## Planned: Better Auth
+
+This service is planned to move to **Better Auth** ([docs/design/Auth.md](../../docs/design/Auth.md)): phone OTP and staff 2FA login, sessions, organisations, and JWTs signed with rotating ES256 keys published at `/api/auth/jwks`. It replaces the hand-written `register`/`login` routes (both currently broken) and the RSA key files. Until then, the sections below describe the current code.
+
+---
+
 ## Prisma 7 notes
 
 - `prisma.config.ts` holds the schema path, the migrations path and the connection URL (`DATABASE_URL` from `.env`). `schema.prisma` no longer has a `url`.

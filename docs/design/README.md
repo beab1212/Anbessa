@@ -15,6 +15,7 @@ This folder holds Anbessa's **design documents**: one file per design topic, eac
 | Design | Status | Summary |
 |---|---|---|
 | [Roles, permissions and vehicle ownership](Role.md) | ✅ Accepted · not implemented | 18 scoped roles, permission matrix, owner-driver vs company-owned vehicles, tokens, maker–checker approvals, audit log, migration plan |
+| [Authentication with Better Auth](Auth.md) | 👀 In review | Better Auth in auth-service: phone OTP, bearer, staff 2FA, organisations (fleet / corporate / city staff), JWT + JWKS (ES256), two surfaces, role/scope mapping, verification in services, migration |
 | [Earnings, commission and the driver balance](Payment.md) | 👀 In review | How commission is collected on cash trips: one balance per driver or fleet, netting, cash-first blocking, top-ups, payouts, commission models (percent / fixed / subscription), taxes |
 | [Database architecture](Database.md) | 👀 In review | Store per data type, clusters, schemas (verified on PG 18), consistency (outbox/inbox, sagas), concurrency control, Redis hot path, ledger, scaling stages, lifecycle, DR, security |
 

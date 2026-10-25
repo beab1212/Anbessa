@@ -84,9 +84,9 @@ Each Deployment expects two objects that aren't in the repo, by design:
 | `<svc>-config` (ConfigMap) | non-secret env: `PORT`, `NODE_ENV=production`, `LOG_LEVEL`, `KAFKA_BROKERS`, `REDIS_URL`, mapping URLs, `JWT_*_TTL` | Kustomize `configMapGenerator` per overlay |
 | `<svc>-secrets` (Secret) | `DATABASE_URL`, `STRIPE_*`, `FCM_SERVER_KEY`, `TWILIO_*` | Cloud secrets manager → External Secrets / CSI driver |
 
-JWT keys are read from **files** (`JWT_PRIVATE_KEY_PATH`, `JWT_PUBLIC_KEY_PATH`).
-Mount them from a Secret as a volume. Only auth-service gets the private key;
-realtime-gateway and anything else that verifies tokens gets only the public key.
+**Auth secrets.** With Better Auth ([Auth.md](../design/Auth.md)), JWT signing keys live **encrypted in the identity database** (`jwks` table) and rotate automatically, so there are no key files to mount. The one secret is `BETTER_AUTH_SECRET` (32+ random bytes, different per environment), and only auth-service gets it. Every other service only needs `AUTH_INTERNAL_URL` to fetch the public JWKS.
+
+*Until the Better Auth migration ships*, the current code reads JWT keys from **files** (`JWT_PRIVATE_KEY_PATH`, `JWT_PUBLIC_KEY_PATH`). Mount them from a Secret as a volume: only auth-service gets the private key, and verifiers get only the public key.
 
 ---
 
@@ -98,6 +98,8 @@ Production values that differ from dev:
 | Variable | Production value |
 |----------|------------------|
 | `NODE_ENV` | `production` |
+| `BETTER_AUTH_SECRET` | auth-service only. From Secrets Manager, unique per environment. Never rotate it without a key-migration plan |
+| `AUTH_BASE_URL` / `AUTH_INTERNAL_URL` | Public auth URL (cookies, links) / in-cluster URL that services use to fetch the JWKS |
 | `DATABASE_URL` | RDS endpoint, one database per service (`auth_service`, `trip_service`, …), TLS on |
 | `REDIS_URL` | ElastiCache endpoint (`rediss://` for TLS) |
 | `KAFKA_BROKERS` | MSK bootstrap brokers, comma-separated |
@@ -119,7 +121,7 @@ Config is validated with Zod at process start, so a missing or invalid variable 
 
 ## 7. Edge: Kong and realtime-gateway
 
-- Kong runs DB-less from `infra/kong/kong.yml`: `/api/auth` (rate-limited), and `/api/trips`, `/api/pricing`, `/api/payments` behind the `jwt` plugin.
+- Kong runs DB-less from `infra/kong/kong.yml`. **Target:** routing, rate limits (stricter on `/api/auth/phone-number/*` against SMS abuse) and request limits. JWTs are verified by the services against Better Auth's JWKS, not by Kong ([Auth.md AU5](../design/Auth.md#3-decisions)). **Today:** `/api/trips`, `/api/pricing` and `/api/payments` sit behind Kong's `jwt` plugin, which is misconfigured (see the checklist).
 - realtime-gateway (Socket.io) verifies the JWT once at handshake and uses the Redis adapter, so it scales horizontally. The load balancer needs WebSocket support. Sticky sessions are only needed if long-polling is enabled (the mobile app uses websocket-only transport).
 
 ---
@@ -163,7 +165,7 @@ These are known gaps in the current scaffold. Each one blocks or weakens a real 
 - [ ] **ConfigMaps / Secrets** per service (section 4).
 - [ ] **Migration step** before rollout (section 6).
 - [ ] **Terraform modules** in `infra/terraform/modules/` (section 3), and the RDS 16-vs-18 decision.
-- [ ] **Kong JWT:** `kong.yml` defines no consumers or RS256 credentials, and tokens from auth-service carry no `iss` claim. Kong's `jwt` plugin will reject every request until both are configured.
+- [ ] **Authentication on Better Auth** ([Auth.md §14](../design/Auth.md#14-migration-from-the-current-auth-service)): replaces today's broken register/login, adds phone OTP, staff 2FA and JWKS. Then **remove Kong's `jwt` plugin** (today it has no consumers and rejects every request) and verify tokens in services.
 - [ ] **auth-service error handler** is registered after the routes, so `AppError`s use Fastify's default error format instead of `{ error, message }`. Register it before `authRoutes` in `src/app.ts`.
 - [ ] **`.github/` is gitignored** (section 1).
 - [ ] **Android release signing** (section 8).

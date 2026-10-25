@@ -5,7 +5,7 @@
 | **Status** | 👀 In review (proposal) |
 | **Scope** | Every persistent store in Anbessa: which data goes where, schemas, keys and indexes, consistency guarantees, concurrency control, scaling path, performance, data lifecycle, backup/DR, security and migrations |
 | **Out of scope** | Business rules themselves (see [Role.md](Role.md) and the planned `Trip.md` / `Payment.md`) |
-| **Related** | [← Design home](README.md) · [Role.md](Role.md) · [Architecture overview](../architecture/overview.md) · [Production guide](../production/README.md) |
+| **Related** | [← Design home](README.md) · [Role.md](Role.md) · [Auth.md](Auth.md) · [Architecture overview](../architecture/overview.md) · [Production guide](../production/README.md) |
 
 ---
 
@@ -146,7 +146,7 @@ flowchart TD
 
 | Data | Store | Why |
 |---|---|---|
-| Users, roles, organisations, memberships | PostgreSQL `identity` | Relational, strongly consistent, low volume |
+| Users, sessions, roles, organisations, memberships | PostgreSQL `identity` (Better Auth tables, [Auth.md](Auth.md)) | Relational, strongly consistent, low volume |
 | Drivers, vehicles, ownership, authorisations, sessions, document metadata | PostgreSQL `fleet` | Ownership invariants need constraints ([Role.md §6](Role.md#6-vehicle-ownership)) |
 | Document **files** (licences, registrations) | Object storage (S3), encrypted | Large binaries. The DB stores only the key + hash + metadata |
 | Trips, trip state history | PostgreSQL `trip` (+ PostGIS) | State machine with concurrency guarantees, geo columns for pickup/dropoff |
@@ -247,70 +247,57 @@ trip cluster:  trip-service 10 pods × 10 = 100   (+ workers 20)  → 120  ≤ 7
 The DDL below is PostgreSQL 18 (the services may express it through Prisma migrations). Each block shows tables, keys and the indexes that serve the main queries.
 
 > [!NOTE]
-> **Verified on PostgreSQL 18.6** (the local `postgis/postgis:18-3.6-alpine` image): every `CREATE` block in this document applies cleanly, and these invariants were tested and hold. A vehicle with two owners is rejected (`ck_vehicle_single_owner`). An unbalanced journal entry fails at `COMMIT`, and a balanced one commits. A duplicate settlement is rejected (`idempotency_key`). A second active trip for one driver is rejected (`driver_active_trip_pkey`). A stale conditional transition updates 0 rows. Overlapping fare validity is rejected (`ex_fare_rule_no_overlap`). Corporate billing without an org is rejected. A `CITY` role without a city is rejected. The app role has no `UPDATE`/`DELETE` on ledger tables. The outbox `SKIP LOCKED` query runs.
+> **Verified on PostgreSQL 18.6** (the local `postgis/postgis:18-3.6-alpine` image): every `CREATE` block in this document applies cleanly (the identity constraints in §7.1 were applied to stand-in tables shaped like Better Auth's generated schema), and these invariants were tested and hold. A vehicle with two owners is rejected (`ck_vehicle_single_owner`). An unbalanced journal entry fails at `COMMIT`, and a balanced one commits. A duplicate settlement is rejected (`idempotency_key`). A second active trip for one driver is rejected (`driver_active_trip_pkey`). A stale conditional transition updates 0 rows. Overlapping fare validity is rejected (`ex_fare_rule_no_overlap`). Corporate billing without an org is rejected. The app role has no `UPDATE`/`DELETE` on ledger tables. Identity: non-Ethiopian-mobile phone numbers, duplicate phones, unknown organisation kinds, unknown cities, and a duplicate TIN within one organisation kind are all rejected. The outbox `SKIP LOCKED` query runs.
 
-### 7.1 Identity (auth-service) — from [Role.md §14](Role.md#14-data-model)
+### 7.1 Identity (auth-service, Better Auth)
+
+Identity tables are **owned by Better Auth** ([Auth.md §11](Auth.md#11-data-model)). Its CLI generates the Prisma models, and we add `additionalFields`, map them to snake_case tables (`@@map`, `@map`), use UUIDv7 IDs (`advanced.database.generateId`) and migrate with our normal Prisma migrations.
+
+| Table (mapped name) | From | Holds |
+|---|---|---|
+| `app_user` | Better Auth core + `phoneNumber`, `admin`, `twoFactor` plugins | id, name, email (temp for phone-only users), `phone_number` (E.164), `phone_number_verified`, `role` (comma-separated **global** roles), `banned` / `ban_reason` / `ban_expires`, `two_factor_enabled`, **ours:** `account_status`, `permission_version` |
+| `session` | core (+ `organization`, `admin`) | token, user, expiry, IP, user agent, `active_organization_id`, **ours:** `surface` (`app` / `admin`) |
+| `account` | core | credentials per provider. Staff `password` = argon2id hash |
+| `verification` | core | OTP codes and other one-time values (short TTL) |
+| `organization` | `organization` plugin | name, slug, **ours:** `kind` (`FLEET` / `CORPORATE` / `STAFF_CITY` / `STAFF_HQ`), `city_id`, `legal_name`, `tin`, `status` |
+| `member` | `organization` plugin | user ↔ organisation, `role` (comma-separated **org** roles), **ours:** `valid_until` |
+| `invitation` | `organization` plugin | pending invitations (fleet drivers, corporate employees) |
+| `jwks` | `jwt` plugin | signing keys. Private keys **AES-256-GCM encrypted** |
+| `two_factor` | `twoFactor` plugin | TOTP secrets and backup codes (encrypted) |
+| `city` | **ours** | the list of cities (scope key everywhere) |
+| `approval_request`, `outbox`, `inbox` | **ours** | maker–checker grants, events ([§8](#8-consistency-model)) |
+
+Constraints and the `city` table we add with raw-SQL migrations on top of the generated ones:
 
 ```sql
-CREATE TABLE app_user (
-  id              uuid PRIMARY KEY DEFAULT uuidv7(),
-  phone           text NOT NULL UNIQUE,                 -- E.164
-  email           citext UNIQUE,
-  password_hash   text,                                 -- argon2id, optional (OTP-only users)
-  status          text NOT NULL DEFAULT 'ACTIVE'
-                  CHECK (status IN ('ACTIVE','GUEST','SUSPENDED','DELETED')),
-  token_version   int  NOT NULL DEFAULT 0,              -- bump to invalidate refresh tokens
-  display_name    text,
-  created_at      timestamptz NOT NULL DEFAULT now(),
-  updated_at      timestamptz NOT NULL DEFAULT now()
-);
-
 CREATE TABLE city (
-  id        text PRIMARY KEY,                           -- 'addis-ababa'
+  id        text PRIMARY KEY,                               -- 'addis-ababa'
   name      text NOT NULL,
   timezone  text NOT NULL DEFAULT 'Africa/Addis_Ababa'
 );
 
-CREATE TABLE organization (
-  id          uuid PRIMARY KEY DEFAULT uuidv7(),
-  type        text NOT NULL CHECK (type IN ('FLEET','CORPORATE')),
-  legal_name  text NOT NULL,
-  tin         text NOT NULL,
-  status      text NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING','VERIFIED','SUSPENDED')),
-  city_id     text NOT NULL REFERENCES city(id),
-  created_at  timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (type, tin)                                    -- same legal entity may be FLEET and CORPORATE
-);
+ALTER TABLE app_user
+  ADD CONSTRAINT ck_app_user_phone_e164_et
+    CHECK (phone_number IS NULL OR phone_number ~ '^\+251[79][0-9]{8}$'),
+  ADD CONSTRAINT ck_app_user_account_status
+    CHECK (account_status IN ('ACTIVE','GUEST','DELETED'));
+CREATE UNIQUE INDEX ux_app_user_phone ON app_user (phone_number) WHERE phone_number IS NOT NULL;
 
-CREATE TABLE role_assignment (
-  id           uuid PRIMARY KEY DEFAULT uuidv7(),
-  user_id      uuid NOT NULL REFERENCES app_user(id),
-  role_code    text NOT NULL,
-  scope_type   text NOT NULL CHECK (scope_type IN ('SELF','ORG','CITY','GLOBAL')),
-  org_id       uuid REFERENCES organization(id),
-  city_id      text REFERENCES city(id),
-  valid_until  timestamptz,
-  granted_by   uuid REFERENCES app_user(id),
-  created_at   timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT ck_scope_fields CHECK (
-       (scope_type = 'ORG'  AND org_id IS NOT NULL AND city_id IS NULL)
-    OR (scope_type = 'CITY' AND city_id IS NOT NULL AND org_id IS NULL)
-    OR (scope_type IN ('SELF','GLOBAL') AND org_id IS NULL AND city_id IS NULL))
-);
-CREATE UNIQUE INDEX ux_role_assignment ON role_assignment
-  (user_id, role_code, scope_type, coalesce(org_id::text,''), coalesce(city_id,''));
+ALTER TABLE organization
+  ADD CONSTRAINT ck_organization_kind   CHECK (kind IN ('FLEET','CORPORATE','STAFF_CITY','STAFF_HQ')),
+  ADD CONSTRAINT ck_organization_status CHECK (status IN ('PENDING','VERIFIED','SUSPENDED')),
+  ADD CONSTRAINT fk_organization_city   FOREIGN KEY (city_id) REFERENCES city(id);
+CREATE UNIQUE INDEX ux_organization_kind_tin ON organization (kind, tin) WHERE tin IS NOT NULL;
 
-CREATE TABLE membership (
-  user_id  uuid NOT NULL REFERENCES app_user(id),
-  org_id   uuid NOT NULL REFERENCES organization(id),
-  kind     text NOT NULL CHECK (kind IN ('FLEET_DRIVER','EMPLOYEE','ADMIN','COORDINATOR')),
-  status   text NOT NULL DEFAULT 'INVITED' CHECK (status IN ('INVITED','ACTIVE','REMOVED')),
-  PRIMARY KEY (user_id, org_id, kind)
-);
-CREATE INDEX ix_membership_org ON membership (org_id) WHERE status = 'ACTIVE';
+CREATE UNIQUE INDEX ux_member_org_user ON member (organization_id, user_id);
+CREATE INDEX ix_member_user ON member (user_id);             -- building token claims: all memberships of a user
 ```
 
-Main queries: login by phone (unique index), roles for a token (`role_assignment` by `user_id`), the members of an org (partial index).
+Main queries:
+- sign-in by phone (unique index),
+- session lookup (Redis secondary storage first, then `session.token`),
+- claims for a token (`app_user.role` + `member` by `user_id`, joined with `organization.kind/city_id`),
+- the members of an organisation.
 
 ### 7.2 Fleet (fleet-service)
 
@@ -974,7 +961,7 @@ The existing practice ([Database Migrations note](../../learned/Concepts/Databas
 |---|---|---|
 | **1** | Conventions ([§6](#6-conventions-for-every-table)) in all new migrations: UUIDv7, santim, `city_id`, `version`. Align RDS to Postgres 18. One DB user per service. RDS Proxy | — |
 | **2** | `outbox` + relay and `inbox` in auth-service and trip-service. Fix realtime-gateway's Kafka producer | Kafka topics as code |
-| **3** | Identity and fleet schemas from [Role.md](Role.md) (Role.md migration phases 1–3) | Phase 1 |
+| **3** | Identity on Better Auth ([Auth.md §14](Auth.md#14-migration-from-the-current-auth-service)) and fleet schemas from [Role.md](Role.md) | Phase 1 |
 | **4** | Trip schema: `driver_active_trip`, conditional transitions, `trip_event` partitioned, idempotency keys | Phases 1–2 |
 | **5** | Redis key design ([§10](#10-hot-path-live-location-in-redis)) with per-member freshness. `driver.location` → ClickHouse | ClickHouse provisioned |
 | **6** | Payment ledger with the balance trigger, reconciliation and nightly integrity checks | Phases 2, 4 |

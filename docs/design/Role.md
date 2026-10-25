@@ -5,7 +5,7 @@
 | **Status** | Accepted design, not implemented yet |
 | **Scope** | Who can do what in Anbessa: identity, roles, permissions, scopes, organisations (fleet companies and corporate accounts), vehicle ownership, approvals and audit |
 | **Replaces** | The single `role` column (`RIDER` / `DRIVER` / `ADMIN`) in `services/auth-service/prisma/schema.prisma` |
-| **Related** | [← Design home](README.md) · [Architecture overview](../architecture/overview.md) · [Production guide](../production/README.md) |
+| **Related** | [← Design home](README.md) · [Auth.md (Better Auth implementation)](Auth.md) · [Architecture overview](../architecture/overview.md) · [Production guide](../production/README.md) |
 
 ---
 
@@ -84,6 +84,7 @@ A **vehicle is owned either by its driver or by a company, never both.** Ownersh
 | D6 | Staff roles are **scoped** (by city or organisation), so the same role can be limited to one area |
 | D7 | Refunds, payouts, fare changes and role grants use **request → approve by a different person** |
 | D8 | Code checks **permissions**, not role names. Roles are configurable bundles |
+| D9 | **Authentication is implemented with Better Auth** (sessions, phone OTP, staff 2FA, organisations, JWT/JWKS). Authorization (this document's matrix and scopes) stays in `libs/shared-authz`. See [Auth.md](Auth.md) |
 
 ### Assumptions (change these if they're wrong)
 
@@ -192,6 +193,9 @@ The admin dashboard is **one app**. Navigation and buttons are shown according t
 ---
 
 ## 5. Core model: users, roles, scopes, organisations
+
+> [!NOTE]
+> **Implementation (Better Auth):** `SELF`/`GLOBAL` roles live on `user.role` (admin plugin). `ORG` roles live on `member.role` in **FLEET** and **CORPORATE** organisations. `CITY` roles live on `member.role` in a seeded **STAFF_CITY** organisation per city. The model below is unchanged. Only its storage is. See [Auth.md §7](Auth.md#7-mapping-roles-and-scopes-onto-better-auth).
 
 ```mermaid
 flowchart TB
@@ -454,8 +458,8 @@ flowchart TD
 
 | Layer | Checks | Why there |
 |---|---|---|
-| **Kong** (edge) | Token signature and expiry; **audience** (`ride-app` vs `ride-admin`); route group (`/api/admin/*` requires `ride-admin`); rate limits | Cheap rejection before traffic reaches services |
-| **Each service** | Permission + scope + ownership + domain rules + approval | Only the owning service knows the resource (which org owns this vehicle, which city this trip is in) |
+| **Kong** (edge) | Routing, rate limits, request size. Rejects requests to `/api/admin/*` that carry no bearer token. **No JWT verification** ([Auth.md AU5](Auth.md#3-decisions)) | Cheap rejection of abuse before traffic reaches services |
+| **Each service** (`libs/shared-authz`) | Token signature (JWKS), `iss`, **audience** (`ride-app` vs `ride-admin` per route group), expiry, `pv`, suspension denylist, then permission + scope + ownership + domain rules + approval | Only the owning service knows the resource (which org owns this vehicle, which city this trip is in) |
 | **Clients** | Hide what the user can't do | UX only, **never** a security boundary |
 
 ### The service-side helper (proposed `libs/shared-authz`)
@@ -476,7 +480,10 @@ await authz.require(principal, "vehicle:authorize_driver", {
 
 ## 10. Tokens
 
-Extends the current RS256 design (auth-service signs with the private key; everyone else verifies with the public key).
+> [!NOTE]
+> **Implementation (Better Auth):** sessions are opaque (bearer for the app, `__Host-` cookie for the admin dashboard). Access JWTs come from Better Auth's `jwt` plugin: **ES256** keys stored encrypted in the `jwks` table, rotated every 90 days, published at `/api/auth/jwks`. They replace today's RS256 key files. The claims below are produced by `definePayload`. Two Better Auth surfaces issue the two audiences. See [Auth.md §8](Auth.md#8-sessions-and-tokens).
+
+The claims and rules below define **what** the tokens contain. Auth.md defines **how** they're issued.
 
 ### Two audiences
 
@@ -522,7 +529,7 @@ A user with both customer and staff roles gets **separate sessions** per audienc
 
 | Claim | Purpose |
 |---|---|
-| `iss`, `aud` | Kong's `jwt` plugin and services verify both (fixes the current gap where tokens have neither) |
+| `iss`, `aud` | Every service verifies both (fixes the current gap where tokens have neither). Set by Better Auth's `jwt.issuer` / `jwt.audience` per surface |
 | `roles` | Role **codes with scopes**, not expanded permissions. Services expand them from the shared matrix, which keeps tokens small |
 | `pv` | Permission-matrix version. A token with an old `pv` is refused, so the client refreshes and gets the current roles |
 | `amr` | Authentication methods. Staff routes require `otp` (MFA) |
@@ -530,7 +537,7 @@ A user with both customer and staff roles gets **separate sessions** per audienc
 
 ### Role changes take effect fast
 
-- A role grant or revocation bumps the user's **token version**, and the refresh is refused until they re-authenticate.
+- A role grant or revocation bumps the user's **permission version** (`user.permissionVersion`, the `pv` claim). Services compare it with the latest value in Redis, so the client fetches a fresh JWT carrying the new roles.
 - The worst case is the access-token TTL (10 minutes for staff, 15 for apps).
 - **Suspension** goes further: auth-service publishes `user.suspended`, and services deny that `sub` immediately, from a short-lived denylist in Redis.
 
@@ -714,6 +721,9 @@ sequenceDiagram
 
 ## 14. Data model
 
+> [!NOTE]
+> **Implementation (Better Auth):** `User`, `RoleAssignment`, `Organization` and `Membership` are realised by Better Auth's `user` (+ `role`, ban fields, additional fields), `organization` (+ `kind`, `cityId`, `tin`, `status`) and `member` (+ `validUntil`) tables. The mapping is in [Auth.md §11](Auth.md#11-data-model). The fleet, approval and audit entities below are ours, unchanged.
+
 ```mermaid
 erDiagram
   User ||--o{ RoleAssignment : has
@@ -862,11 +872,11 @@ Each table belongs to exactly one service ([database per service](../architectur
 
 ```mermaid
 flowchart LR
-  subgraph Identity["auth-service (identity)"]
+  subgraph Identity["auth-service (identity, Better Auth)"]
     I1[User · credentials · MFA]
-    I2[Role · RoleAssignment · City]
-    I3[Organization · Membership]
-    I4[Token issuing]
+    I2["Roles: user.role + member.role · City"]
+    I3["organization · member · invitation (Better Auth)"]
+    I4[Token issuing: JWT plugin + JWKS]
   end
   subgraph FleetS["fleet-service (new)"]
     F1[DriverProfile]
@@ -900,7 +910,7 @@ flowchart LR
 
 | Change | Service |
 |---|---|
-| Extend | **auth-service**: multi-role assignments, scopes, organisations, memberships, staff MFA, two audiences, `iss`/`aud`/`roles`/`pv` claims |
+| Extend | **auth-service**: adopt **Better Auth** (phone OTP, bearer, JWT/JWKS, organisation, admin, two-factor plugins), two surfaces (`ride-app` / `ride-admin`), `iss`/`aud`/`roles`/`pv` claims via `definePayload` ([Auth.md](Auth.md)) |
 | New | **fleet-service** (port 3008): drivers, vehicles, ownership, authorisations, sessions, documents |
 | New | **support-service** (port 3009): tickets, lost items, SOS, incidents |
 | New | **audit-service** (port 3010): consumes `audit.recorded` and stores it write-once |
@@ -945,8 +955,7 @@ flowchart LR
 
 | Phase | Work | Result |
 |---|---|---|
-| **0. Fix the basics** | Fix the auth-service register/login bugs; add `iss`/`aud`; configure Kong's JWT consumer | Today's flows work |
-| **1. Multi-role identity** | Add `Role`, `RoleAssignment`, `City`. Migrate `User.role` → one `RoleAssignment` per user (`RIDER` / `DRIVER` @ `SELF`; `ADMIN` → `SUPER_ADMIN` @ `GLOBAL`, flagged for review). Tokens carry `roles` + `pv`. Keep `User.role` read-only for one release, then drop it (expand → contract) | Users can hold several roles |
+| **0–1. Better Auth identity** | Adopt Better Auth in auth-service ([Auth.md §14](Auth.md#14-migration-from-the-current-auth-service)). This replaces the broken hand-written register/login. Migrate `User.role` → `user.role` (`RIDER → rider`, `DRIVER → driver`, `ADMIN → super_admin`, flagged for review). Seed `City` and a `STAFF_CITY` organisation per city. Tokens carry `iss`/`aud`/`roles`/`pv`. Services verify via JWKS, and Kong's `jwt` plugin is removed | Users can hold several roles. Login works |
 | **2. Shared authz** | `libs/shared-authz` with the matrix + `require()`. Use it in auth-service and realtime-gateway | One enforcement pattern |
 | **3. Organisations + fleet-service** | `Organization`, `Membership`; fleet-service with drivers, vehicles, ownership rules V1–V10, documents, onboarding queue | Owner-drivers and company cars |
 | **4. Staff roles in admin dashboard** | MFA, `ride-admin` audience, permission-driven UI; call center, dispatcher, onboarding and support views | Staff can operate |

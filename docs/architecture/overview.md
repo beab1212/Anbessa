@@ -146,7 +146,7 @@ Each service owns one business capability **and its data**. No service reads ano
 
 | Service | Port | Responsibility | Owns | Status |
 |---|---|---|---|---|
-| **auth-service** | 3001 | Registration, login, JWT issuing (RS256) | `auth_service` DB: users, roles | 🟡 register/login implemented, both currently fail (see [§16](#16-known-gaps)) |
+| **auth-service** | 3001 | Identity: phone OTP and staff login, sessions, organisations, JWT issuing. **Planned on Better Auth** ([Auth.md](../design/Auth.md)) | `auth_service` DB: users, sessions, organisations, members, signing keys | 🟡 today: hand-written register/login (RS256), both currently fail (see [§16](#16-known-gaps)) |
 | **trip-service** | 3002 | Trip lifecycle state machine, driver–rider matching | `trip_service` DB: trips | 📐 `/health` only |
 | **location-service** | 3003 | Nearby-driver queries, ETA lookups | Redis geo index (read side) | 📐 `/health` only |
 | **pricing-service** | 3004 | Fare estimates, surge multipliers | Pricing rules (stateless today) | 📐 `/health` only |
@@ -223,30 +223,33 @@ The realtime gateway is reached directly (through the load balancer), not throug
 
 ## 5. Key flows
 
-### 5.1 Login and session
+### 5.1 Login and session (target design: Better Auth)
 
 ```mermaid
 sequenceDiagram
   autonumber
   participant App as Phone app
   participant Kong
-  participant Auth as auth-service
-  participant DB as auth_service DB
+  participant BA as auth-service (Better Auth)
+  participant N as notification-service
+  participant S as Any service
 
-  App->>Kong: POST /api/auth/login {email, password}
-  Kong->>Kong: rate limit (30/min)
-  Kong->>Auth: POST /auth/login
-  Auth->>DB: find user by email
-  DB-->>Auth: user + passwordHash
-  Auth->>Auth: argon2.verify(passwordHash, password)
-  Auth->>Auth: sign JWT {sub, role, exp=15m} with PRIVATE key (RS256)
-  Auth-->>App: {accessToken, user: {id, role}}
-  App->>App: store token (secure storage)
-  App->>App: role RIDER → rider home · DRIVER → driver home
+  App->>Kong: POST /api/auth/phone-number/send-otp {+2519…}
+  Kong->>BA: (rate limited at edge and in Better Auth)
+  BA-->>N: enqueue SMS code
+  App->>BA: POST /api/auth/phone-number/verify {phone, code}
+  BA->>BA: first time → create user (role rider)
+  BA-->>App: session token (bearer, 30 days)
+  App->>BA: GET /api/auth/token (Bearer session)
+  BA-->>App: JWT (ES256, 15 min) {sub, roles, pv}
+  App->>App: roles contain DRIVER → driver home, else rider home
+  App->>S: request with Bearer JWT
+  S->>S: verify signature with cached JWKS, check iss/aud/pv, then permission + scope
 ```
 
-- Every other component verifies tokens with the **public** key, with no call back to auth-service.
-- The phone app chooses rider or driver mode from the token's `role` claim (`lib/core/session/session.dart`).
+- Services verify JWTs **locally** against Better Auth's JWKS (`/api/auth/jwks`, keys rotated every 90 days). There's no call back to auth-service per request.
+- Staff use the admin surface (`/api/admin-auth`, password + TOTP, `aud = ride-admin`). See [Auth.md §8–9](../design/Auth.md#8-sessions-and-tokens).
+- **Today** the code still has hand-written email/password `register`/`login` that signs RS256 tokens with key files (and both endpoints currently fail, [§16](#16-known-gaps)).
 
 ### 5.2 Request a trip (target design)
 
@@ -472,11 +475,11 @@ flowchart LR
   end
   subgraph EdgeZ["Edge (TLS terminated)"]
     LB[Load balancer]
-    Kong["Kong: verifies JWT signature + exp"]
+    Kong["Kong: routing + rate limits"]
     RT["realtime-gateway: verifies JWT at handshake"]
   end
   subgraph Private["Private network: no public IPs"]
-    S["Services: authorize per resource"]
+    S["Services: verify JWT (JWKS) + authorize per resource"]
     D[(Databases, Redis, Kafka)]
   end
   C -->|HTTPS / WSS| LB --> Kong & RT
@@ -489,9 +492,10 @@ flowchart LR
 |---|---|
 | Passwords | argon2id hashes. Plaintext is never stored or logged |
 | Roles | Today: one `role` per user (`RIDER` / `DRIVER` / `ADMIN`). **Accepted design:** 18 scoped roles with a permission matrix and maker–checker approvals. See [docs/design/Role.md](../design/Role.md) |
-| Tokens | RS256 JWT. 15-minute access token (`JWT_ACCESS_TTL`), 30-day refresh token (`JWT_REFRESH_TTL`, 📐) |
-| Signing key | **Only auth-service** has `JWT_PRIVATE_KEY_PATH`. Every other service gets `JWT_PUBLIC_KEY_PATH` only |
-| Edge auth | Kong `jwt` plugin on `/api/trips`, `/api/pricing`, `/api/payments`. realtime-gateway verifies at handshake |
+| Authentication | Today: hand-written register/login with RS256 key files. **Planned:** Better Auth (phone OTP, staff 2FA, organisations, JWT + JWKS with ES256 and rotation), verified in each service. See [docs/design/Auth.md](../design/Auth.md) |
+| Tokens | **Planned:** Better Auth sessions (app 30 days via bearer, admin 12 h cookie) + short-lived ES256 JWTs (app 15 min, admin 10 min). **Today:** RS256 JWT, 15 min (`JWT_ACCESS_TTL`) |
+| Signing key | **Planned:** keys generated, encrypted and rotated by Better Auth (`jwks` table), published as a JWKS. Only auth-service can sign. **Today:** only auth-service has `JWT_PRIVATE_KEY_PATH`, others get `JWT_PUBLIC_KEY_PATH` |
+| Edge auth | **Planned:** Kong does routing and rate limits only. Every service and realtime-gateway verify JWTs with the JWKS (`libs/shared-authz`). **Today:** Kong `jwt` plugin on `/api/trips`, `/api/pricing`, `/api/payments` (misconfigured, [§16](#16-known-gaps)) |
 | Authorization | In the owning service (e.g. only the trip's rider or driver may read it). Never "the gateway checked" |
 | Rate limiting | Kong per route (stricter on `/api/auth` and `/api/payments`) |
 | Payments | Idempotency keys per trip. Card data never touches our systems (Stripe) |
@@ -501,7 +505,7 @@ flowchart LR
 
 | Environment | Source | Delivery |
 |---|---|---|
-| Local dev | `make secrets` (RSA-3072, `umask 077`, never overwrites, gitignored), `.env` files | Files + env vars |
+| Local dev | `make secrets` (today: RSA-3072 JWT keys, `umask 077`, never overwrites, gitignored. Planned: generates `BETTER_AUTH_SECRET`), `.env` files | Files + env vars |
 | CI | GitHub environment secrets, OIDC to AWS (no static keys) | Masked env vars |
 | Staging / production | AWS Secrets Manager → External Secrets → Kubernetes Secrets | `envFrom` + read-only key-file mounts |
 
@@ -659,7 +663,7 @@ Anbessa/
 │   ├── k8s/                Kustomize base + overlays
 │   └── terraform/          AWS: EKS · RDS · ElastiCache · MSK
 ├── docs/                   architecture · development · testing · production · api
-├── secrets/                local dev JWT keys (gitignored, created by `make secrets`)
+├── secrets/                local dev secrets (gitignored, `make secrets`: JWT keys today, BETTER_AUTH_SECRET planned)
 ├── learned/                Obsidian learning notes per technology
 └── Makefile                team entry points (`make help`)
 ```
@@ -679,13 +683,14 @@ Anbessa/
 | 1 | Microservices in a **monorepo** | Atomic changes to shared contracts; one toolchain | Needs task caching and affected-only CI to stay fast |
 | 2 | **One phone app** with rider and driver modes | One codebase, release and set of shared widgets | The app bundle contains both experiences |
 | 3 | **Kafka** for inter-service events, **Redis pub/sub** only for socket fan-out | Durable, replayable and ordered vs instant and ephemeral | Two messaging systems to operate |
-| 4 | **RS256 JWT**, verified at the edge and by services | Stateless verification; only auth-service can sign | Revocation needs short TTLs and refresh-token control |
+| 4 | **Asymmetric JWTs verified by each service** (ES256 via Better Auth's JWKS, with rotation. RS256 files today) | Stateless verification; only auth-service can sign; keys rotate without redeploys | Revocation needs short TTLs plus the suspension denylist |
 | 5 | **Self-hosted OSM** mapping behind mapping-service | No per-request fees; engines are swappable | You operate OSRM, Nominatim and tile servers |
 | 6 | **Database per service** on shared Postgres instances | Isolation without one server per service | No cross-service joins; eventual consistency |
 | 7 | **Redis GEO** for live positions, **PostGIS** for durable geo | Write-heavy hot path vs queryable history | Two geo stores to keep consistent |
 | 8 | **Managed** data services in production (RDS, ElastiCache, MSK) | Backups, failover and patching handled by AWS | Cost; some vendor coupling |
 | 9 | **Kong DB-less** declarative config | Gateway config reviewed and versioned like code | No runtime admin changes |
 | 10 | **Kubernetes + Kustomize** | Self-healing, rolling deploys, per-service autoscaling | Operational complexity |
+| 11 | **Better Auth** for authentication (planned), our own permission matrix for authorization | Proven auth flows, sessions, organisations and key rotation without hand-written security code | Library upgrades need care. Two-surface setup needs a spike ([Auth.md §15](../design/Auth.md#15-risks-and-spikes)) |
 
 ---
 
@@ -695,12 +700,12 @@ Issues found while running the system, listed so nobody builds on false assumpti
 
 | Area | Gap | Impact |
 |---|---|---|
-| auth-service | `register` spreads the plaintext `password` into the Prisma `create` call | Every registration returns 500 |
-| auth-service | `login` signs with a raw PEM `Buffer`; jose 6 requires an imported key | Login returns 500 |
+| auth-service | `register` spreads the plaintext `password` into the Prisma `create` call | Every registration returns 500. Replaced by Better Auth ([Auth.md §14](../design/Auth.md#14-migration-from-the-current-auth-service)) |
+| auth-service | `login` signs with a raw PEM `Buffer`; jose 6 requires an imported key | Login returns 500. Replaced by Better Auth |
 | auth-service | Error handler registered after the routes | Internal error details leak to clients |
 | realtime-gateway | Kafka producer is never connected | The first `location:update` crashes the process |
 | realtime-gateway | `EXPIRE` on the whole `drivers:geo` key | Stale drivers don't expire individually |
-| Kong | Routes strip `/api/<svc>` (services receive `/login`, not `/auth/login`); `jwt` plugin has no consumers and tokens have no `iss` | Auth routes 404; protected routes always 401 |
+| Kong | Routes strip `/api/<svc>` (services receive `/login`, not `/auth/login`); `jwt` plugin has no consumers and tokens have no `iss` | Auth routes 404; protected routes always 401. **Planned fix:** remove the `jwt` plugin and verify in services ([Auth.md §10](../design/Auth.md#10-verifying-tokens-in-other-services)) |
 | Events | No outbox | Events can be lost if Kafka is down after a commit |
 | Compose stack mode | Redpanda advertises `localhost:9092`; root `.env` points containers at `localhost` | Containerized services can't reach Kafka or Redis |
 | Delivery | Kubernetes manifests use `:latest`; deploy jobs lack cluster credentials; only trip-service has manifests; `.github/` is gitignored | CD doesn't deploy new code yet |
