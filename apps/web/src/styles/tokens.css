@@ -1,0 +1,46 @@
+/* Anbessa operations console: design tokens.
+   Light, neutral surfaces frame the map. Amber marks the active thing, red the urgent one. */
+
+:root {
+  --canvas: #f5f6f8;
+  --surface: #ffffff;
+  --surface-2: #f8fafc;
+  --border: #e4e7ec;
+  --border-strong: #cbd2dc;
+  --text: #0f172a;
+  --text-2: #475569;
+  --muted: #64748b;
+  --faint: #94a3b8;
+
+  --accent: #d97706;
+  --accent-strong: #b45309;
+  --accent-soft: #fef3c7;
+  --accent-ring: rgb(217 119 6 / 0.35);
+
+  --success: #15803d;
+  --success-soft: #dcfce7;
+  --warning: #b45309;
+  --warning-soft: #fef3c7;
+  --danger: #dc2626;
+  --danger-soft: #fee2e2;
+  --info: #2563eb;
+  --info-soft: #dbeafe;
+
+  --font: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", monospace;
+  --ethiopic: "Noto Serif Ethiopic", serif;
+
+  --r-sm: 6px;
+  --r: 8px;
+  --r-lg: 12px;
+  --shadow-sm: 0 1px 2px rgb(15 23 42 / 0.06);
+  --shadow: 0 4px 12px rgb(15 23 42 / 0.08), 0 1px 3px rgb(15 23 42 / 0.06);
+  --shadow-lg: 0 16px 40px rgb(15 23 42 / 0.16), 0 2px 6px rgb(15 23 42 / 0.08);
+
+  --sidebar-w: 232px;
+  --topbar-h: 56px;
+  --gutter: clamp(1rem, 2vw, 1.5rem);
+  --ease: 160ms cubic-bezier(0.2, 0, 0, 1);
+
+  color-scheme: light;
+}

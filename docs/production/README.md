@@ -161,13 +161,23 @@ flutter build ipa --release --dart-define=...   # macOS only
 
 ### Web app (staff dashboard, fleet and corporate portals)
 
+Serve the app and the API on **one origin**: the web app calls relative `/api/*` URLs, and the auth cookies (`anb.*`, `anb-admin.*`, `SameSite`) are first-party. For example, the CDN serves `dist/` and routes `/api/*` to Kong. Put that origin in auth-service's `APP_TRUSTED_ORIGINS` and `ADMIN_TRUSTED_ORIGINS`.
+
+
 ```bash
-VITE_API_BASE_URL=https://api.example.com VITE_WS_URL=wss://ws.example.com \
-  pnpm --filter @ride-app/web build     # → apps/web/dist
+pnpm --filter @ride-app/web build     # → apps/web/dist
 ```
 
-`VITE_*` values are compiled into the bundle, so build once per environment. Serve `dist/`
-from any static host or CDN, with a fallback to `index.html` for client-side routes.
+API URLs are relative. The one build-time value is `VITE_MAP_STYLE_URL`, the MapLibre style for the maps: point it at the self-hosted TileServer GL (`infra/mapping-stack`, e.g. `https://tiles.anbessa.et/styles/<id>/style.json`) or a licensed tile provider. Don't use the public OpenFreeMap default for production traffic. If the tile host is the same in every environment, one build serves them all.
+
+Serve `dist/` with a fallback to `index.html` for client-side routes, and a strict `Content-Security-Policy`:
+
+- `default-src 'self'`
+- `style-src` and `font-src`: Google Fonts
+- `connect-src` and `img-src`: the tile host (style, tiles, sprites, glyphs)
+- `worker-src 'self' blob:` (MapLibre's worker)
+
+Keep the OpenStreetMap attribution in the map corner visible; it is a licence condition.
 
 ---
 

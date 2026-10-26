@@ -271,6 +271,8 @@ describe("partner organisations", () => {
     expect(early.statusCode).toBeGreaterThanOrEqual(400); // not verified yet
 
     const officer = await staffWithRole("ONBOARDING_OFFICER", "addis-ababa");
+    const queue = await officer.identity("GET", "/api/identity/organizations?cityId=addis-ababa&status=PENDING");
+    expect(queue.json<{ id: string }[]>().map((o) => o.id)).toContain(org.id);
     const verified = await officer.identity("POST", `/api/identity/organizations/${org.id}/verify`, {});
     expect(verified.statusCode, verified.body).toBe(200);
 
@@ -289,6 +291,26 @@ describe("partner organisations", () => {
     const accept = await driver.call("POST", "/api/auth/organization/accept-invitation", { invitationId: inv.id });
     expect(accept.statusCode, accept.body).toBe(200);
     expect(claimsOf(await driver.accessToken()).roles).toContainEqual({ r: "FLEET_DRIVER", org: org.id });
+  });
+
+  it("company accounts: the creator becomes the admin; a TIN can't be registered twice", async () => {
+    const admin = new AppUser(h, phone());
+    await admin.signIn();
+    const create = await admin.call("POST", "/api/auth/organization/create", {
+      name: "Abay Bank", slug: `abay-${Date.now()}`, kind: "CORPORATE", cityId: "addis-ababa", legalName: "Abay Bank S.C.", tin: "0055443322",
+    });
+    expect(create.statusCode, create.body).toBe(200);
+    const org = create.json<{ id: string }>();
+    expect(claimsOf(await admin.accessToken()).roles).toContainEqual({ r: "CORPORATE_ADMIN", org: org.id });
+
+    const other = new AppUser(h, phone());
+    await other.signIn();
+    const dup = await other.call("POST", "/api/auth/organization/create", {
+      name: "Copycat", slug: `copy-${Date.now()}`, kind: "CORPORATE", cityId: "addis-ababa", legalName: "Copycat", tin: "0055443322",
+    });
+    expect(dup.statusCode).toBe(400);
+    expect(dup.json()).toMatchObject({ message: "a company with this TIN is already registered" });
+    expect(await h.c.db.organization.count({ where: { tin: "0055443322" } })).toBe(1);
   });
 
   it("org owners can't change protected organisation fields", async () => {

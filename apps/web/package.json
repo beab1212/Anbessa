@@ -12,13 +12,19 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@ride-app/shared-authz": "workspace:*",
+    "@ride-app/shared-location": "workspace:*",
+    "@ride-app/shared-types": "workspace:*",
     "@tanstack/react-query": "^5.104.5",
-    "axios": "^1.20.0",
+    "lucide-react": "^1.61.0",
+    "maplibre-gl": "^6.16.0",
+    "qrcode": "^1.5.4",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "react-router-dom": "^7.18.4"
   },
   "devDependencies": {
+    "@types/qrcode": "^1.5.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",

@@ -44,14 +44,15 @@ export function createOrganizationHooks(db: Db) {
       if (!(await db.city.findUnique({ where: { id: cityId } }))) throw bad("unknown cityId");
       if (!organization.legalName || typeof organization.legalName !== "string") throw bad("legalName is required");
       if (!TIN.test(String(organization.tin ?? ""))) throw bad("tin must be 10 digits");
+      // checked here, before Better Auth writes the row: the unique index would otherwise surface as a 500
+      if (await db.organization.findFirst({ where: { kind, tin: String(organization.tin) }, select: { id: true } })) {
+        throw bad("a company with this TIN is already registered");
+      }
       // status is never client-controlled
       return { data: { ...organization, status: "PENDING" } };
     },
 
-    async afterCreateOrganization({ organization, member, user }: { organization: Record<string, unknown>; member: { id: string }; user: { id: string } }) {
-      if (organization.kind === "CORPORATE") {
-        await db.member.update({ where: { id: member.id }, data: { role: ROLES.CORPORATE_ADMIN.stored } });
-      }
+    async afterCreateOrganization({ organization, user }: { organization: Record<string, unknown>; user: { id: string } }) {
       await bumpPermissionVersion(db, user.id);
       await writeOutbox(db,
         { topic: "org.created", key: String(organization.id), payload: { orgId: String(organization.id), kind: String(organization.kind), cityId: String(organization.cityId) } },
@@ -70,6 +71,12 @@ export function createOrganizationHooks(db: Db) {
     async beforeAddMember({ member, organization }: { member: { userId: string; role: string }; organization: Record<string, unknown> }) {
       const kind = organization.kind as OrgKind;
       assertNotStaff(kind, "memberships");
+      // The creator is added with the fixed creatorRole (fleet_owner). For a company account the
+      // creator is its admin: switch the role before the member is written.
+      if (kind === "CORPORATE" && member.role === ROLES.FLEET_OWNER.stored) {
+        const hasMembers = await db.member.count({ where: { organizationId: String(organization.id) } });
+        if (hasMembers === 0) return { data: { role: ROLES.CORPORATE_ADMIN.stored } };
+      }
       assertRolesAllowed(kind, member.role);
     },
 

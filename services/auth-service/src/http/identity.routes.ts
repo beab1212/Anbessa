@@ -81,6 +81,11 @@ export function registerIdentityRoutes(
   });
 
   // ── partner organisations ───────────────────────────────────────────────────
+  app.get("/api/identity/organizations", async (req) => {
+    const q = z.object({ cityId, status: z.enum(["PENDING", "VERIFIED", "SUSPENDED"]).optional() }).parse(req.query);
+    return identity.listOrganizations(await staff(req), q);
+  });
+
   app.post("/api/identity/organizations/:id/verify", async (req) => {
     const { id } = z.object({ id: uuid }).parse(req.params);
     return identity.verifyOrganization(await staff(req), id);

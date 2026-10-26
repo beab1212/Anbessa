@@ -178,9 +178,9 @@ flowchart LR
     DM[Driver mode]
   end
   subgraph Web["🌐 Web app (apps/web)"]
-    FP["Fleet portal /fleet"]
-    CP["Corporate portal /corporate"]
-    AD["Staff dashboard /staff<br/>views filtered by permission"]
+    FP["Fleet portal /partner/org/:id"]
+    CP["Corporate portal /partner/org/:id<br/>+ book for someone"]
+    AD["Staff dashboard /staff/*<br/>views filtered by permission"]
   end
   RIDER --> RM
   DRIVER --> DM
@@ -194,9 +194,11 @@ There are **two apps**: the phone app and **one web app** (`apps/web`) that cont
 
 | Area of the web app | Who | Signs in through | Token audience |
 |---|---|---|---|
-| `/fleet` | `FLEET_OWNER` | phone OTP (`/api/auth`, app surface) | `ride-app` |
-| `/corporate` | `CORPORATE_ADMIN`, `CORPORATE_COORDINATOR` | phone OTP (`/api/auth`, app surface) | `ride-app` |
-| `/staff` | staff roles, `AUDITOR`, `REGULATOR` | email + password + TOTP (`/api/admin-auth`, admin surface) | `ride-admin` |
+| `/partner/org/:id` (fleet) | `FLEET_OWNER` | phone OTP (`/api/auth`, app surface) | `ride-app` |
+| `/partner/org/:id` (company account) | `CORPORATE_ADMIN`, `CORPORATE_COORDINATOR` | phone OTP (`/api/auth`, app surface) | `ride-app` |
+| `/staff/*` | staff roles, `AUDITOR`, `REGULATOR` | email + password + TOTP (`/api/admin-auth`, admin surface) | `ride-admin` |
+
+**Implemented** in `apps/web` (see its README for the page-by-page permission table). The index shows only pages the token's roles allow, computed with `libs/shared-authz` — the same matrix the services enforce.
 
 A partner and a staff session are separate even in the same browser (different cookies: `anb.*` vs `anb-admin.*`), and a partner token never opens a staff API. Hiding a page in the web app is convenience only: the services check every request with `libs/shared-authz`.
 

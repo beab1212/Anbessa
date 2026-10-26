@@ -291,6 +291,18 @@ export function createIdentityService(deps: IdentityDeps) {
       return { userId, suspended: false };
     },
 
+    /** Onboarding queue: partner organisations of a city, by status (org:read @ CITY). */
+    async listOrganizations(principal: Principal, q: { cityId: string; status?: string }) {
+      authorize(principal, "org:read", { cityId: q.cityId });
+      const orgs = await db.organization.findMany({
+        where: { cityId: q.cityId, kind: { in: ["FLEET", "CORPORATE"] }, ...(q.status ? { status: q.status } : {}) },
+        orderBy: { createdAt: "asc" },
+        take: 200,
+        select: { id: true, name: true, kind: true, cityId: true, legalName: true, tin: true, status: true, createdAt: true, _count: { select: { members: true } } },
+      });
+      return orgs.map(({ _count, ...o }) => ({ ...o, members: _count.members }));
+    },
+
     async verifyOrganization(principal: Principal, orgId: string) {
       const org = await db.organization.findUnique({ where: { id: orgId } });
       if (!org || (org.kind !== "FLEET" && org.kind !== "CORPORATE")) throw notFound("organization");

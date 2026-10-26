@@ -16,5 +16,7 @@ minimumReleaseAgeExclude:
   - '@better-auth/prisma-adapter@1.7.13'
   - '@better-auth/telemetry@1.7.13'
   - better-auth@1.7.13
+  - '@maplibre/vt-pbf@4.3.3'
+  - maplibre-gl@6.16.0
 patchedDependencies:
   kafkajs@2.2.4: patches/kafkajs@2.2.4.patch

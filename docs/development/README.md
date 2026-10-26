@@ -187,11 +187,13 @@ make setup-web                  # pnpm install + apps/web/.env
 make dev-web                    # http://localhost:5173
 ```
 
-One app, three areas: the staff dashboard, the fleet portal and the corporate portal. Which pages a user sees depends on the roles in their token (see [Role.md §4](../design/Role.md#which-surface-each-role-uses)).
+One app, three areas: the staff dashboard, the fleet portal and the corporate portal. Which pages a user sees depends on the roles in their token (see [Role.md §4](../design/Role.md#which-surface-each-role-uses) and `apps/web/README.md`).
 
-`VITE_*` variables in `apps/web/.env` are baked in at build time.
-`VITE_API_BASE_URL` should point at Kong (`http://localhost:8000`, only up with `make stack-up`)
-or directly at a service while Kong isn't running.
+The browser only calls `/api/*` on `localhost:5173`; Vite forwards each prefix to its service (targets in `apps/web/.env`). Run auth, trip, location and mapping (`make dev-services`). To sign in as staff locally, bootstrap a super admin (section 2), then sign in at `/sign-in/staff`: the first sign-in walks through the new password and authenticator setup. Partners sign in at `/sign-in/partner` with a console OTP.
+
+To go through Kong instead (`make stack-up`), point every target in `apps/web/.env` at `http://localhost:8000`.
+
+Map tiles come from OpenFreeMap by default (`VITE_MAP_STYLE_URL` in `apps/web/.env`), so the maps work without running anything else. To use the self-hosted tile server instead, run `make dev-infra` and set `VITE_MAP_STYLE_URL` to one of its styles (listed at `http://localhost:8081/`).
 
 ---
 

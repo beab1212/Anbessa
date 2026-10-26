@@ -147,7 +147,7 @@ export function createAppAuth(deps: AuthDeps) {
       organization({
         ac: orgAc,
         roles: orgRoles,
-        creatorRole: "fleet_owner", // corrected to corporate_admin for CORPORATE orgs in afterCreateOrganization
+        creatorRole: "fleet_owner", // becomes corporate_admin for CORPORATE orgs in beforeAddMember
         allowUserToCreateOrganization: async (user) => !(user as { banned?: boolean }).banned,
         disableOrganizationDeletion: true,
         invitationExpiresIn: 7 * DAY,
