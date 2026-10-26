@@ -34,6 +34,10 @@ export const envSchema = z
 
     // Disable Better Auth rate limiting (tests only).
     AUTH_RATE_LIMIT: z.enum(["on", "off"]).default("on"),
+
+    // Development sign-in (src/dev): /api/dev/* lists the `seed:dev` accounts and hands out their
+    // current codes. Refused in production; needs console OTP delivery.
+    DEV_LOGIN: z.enum(["on", "off"]).default("off"),
   })
   .superRefine((env, ctx) => {
     const fail = (path: string, message: string) => ctx.addIssue({ code: "custom", path: [path], message });
@@ -43,7 +47,11 @@ export const envSchema = z
       if (!env.KAFKA_BROKERS) fail("KAFKA_BROKERS", "required in production (outbox relay)");
       if (!env.INTERNAL_SERVICE_TOKEN) fail("INTERNAL_SERVICE_TOKEN", "required in production");
       if (env.AUTH_RATE_LIMIT === "off") fail("AUTH_RATE_LIMIT", "rate limiting can't be disabled in production");
+      if (env.DEV_LOGIN === "on") fail("DEV_LOGIN", "development sign-in is not allowed in production");
       if (!env.AUTH_BASE_URL.startsWith("https://")) fail("AUTH_BASE_URL", "must be https in production");
+    }
+    if (env.DEV_LOGIN === "on" && env.OTP_DELIVERY !== "console") {
+      fail("DEV_LOGIN", "development sign-in needs OTP_DELIVERY=console");
     }
     if (env.OTP_DELIVERY === "notification" && !env.NOTIFICATION_INTERNAL_URL) {
       fail("NOTIFICATION_INTERNAL_URL", "required when OTP_DELIVERY=notification");

@@ -58,6 +58,8 @@ The browser only calls `/api/*` **on its own origin**. In development Vite forwa
 | `/api/locations` | location-service (3003) |
 | `/api/maps` | mapping-service (3007) |
 
+In development the sign-in page also has a **Sign in as…** panel with ready-made accounts: run `pnpm --filter @ride-app/auth-service seed:dev` once, with `DEV_LOGIN=on` in auth-service's `.env`. The panel lives in `src/dev/`, is loaded only when `import.meta.env.DEV` is true, and isn't in production builds ([docs/development](../../docs/development/README.md#ready-made-accounts-web-app-dev-sign-in)).
+
 Without Nominatim, place search falls back to a list of common Addis Ababa places (`src/components/PlacePicker.tsx`). Fares come from trip-service's development quote stand-in until pricing-service exists.
 
 ## Layout
@@ -67,6 +69,7 @@ src/
 ├── lib/          api (tokens per surface, errors), session, hooks, formatting
 ├── components/   Shell (sidebar + top bar), ui (pills, fields, notices, drawer), CityPicker, PlacePicker
 │   └── map/      CityMap (MapLibre + context), markers (driver, pickup, drop-off, trip line)
+├── dev/          development-only sign-in panel (left out of production builds)
 ├── pages/        SignIn · staff/{Setup, Board, Drivers, PhoneBooking, TripDetail, Onboarding, Safety, People} · partner/Partner
 ├── styles/       tokens · base · components · layout
 └── App.tsx       routes and the role-based index

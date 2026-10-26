@@ -8,6 +8,7 @@ import { createDb, type Db } from "./db.js";
 import { createAdminAuth, createAppAuth } from "./auth/instances.js";
 import { consoleOtpSender, notificationOtpSender, type OtpRequest, type OtpSender } from "./auth/otp-delivery.js";
 import { betterAuthKeySet, createPrincipalResolver } from "./http/principal.js";
+import { createOtpInbox } from "./dev/accounts.js";
 import { createIdentityService } from "./identity/service.js";
 import { redisSecondaryStorage } from "./lib/secondary-storage.js";
 import { noopSignals, redisSignals, type SecuritySignals } from "./lib/signals.js";
@@ -24,10 +25,15 @@ export function createContainer(config: Config, logger: Logger, opts: ContainerO
   const db = opts.db ?? createDb(config.DATABASE_URL);
   const redis = config.REDIS_URL ? new Redis(config.REDIS_URL, { maxRetriesPerRequest: 2, lazyConnect: false }) : undefined;
   const signals = opts.signals ?? (redis ? redisSignals(redis, logger) : noopSignals());
+  // DEV_LOGIN=on (never in production, see config): console OTPs are kept for the dev sign-in
+  const devInbox = config.DEV_LOGIN === "on" ? createOtpInbox() : undefined;
   const otp: OtpSender =
     config.OTP_DELIVERY === "notification"
       ? notificationOtpSender(config.NOTIFICATION_INTERNAL_URL!, config.INTERNAL_SERVICE_TOKEN!, logger)
-      : consoleOtpSender(logger, opts.otpSink);
+      : consoleOtpSender(logger, (req) => {
+          opts.otpSink?.(req);
+          devInbox?.put(req.phoneNumber, req.code);
+        });
 
   const authDeps = { config, db, otp, ...(redis ? { secondaryStorage: redisSecondaryStorage(redis) } : {}) };
   const appAuth = createAppAuth(authDeps);
@@ -50,7 +56,7 @@ export function createContainer(config: Config, logger: Logger, opts: ContainerO
   const requirePrincipal = createPrincipalResolver({ issuer: config.AUTH_ISSUER ?? config.AUTH_BASE_URL, keySet, signals });
 
   return {
-    config, db, redis, signals, appAuth, adminAuth, identity, requirePrincipal,
+    config, db, redis, signals, appAuth, adminAuth, identity, requirePrincipal, devInbox,
     async close() {
       await db.$disconnect();
       redis?.disconnect();

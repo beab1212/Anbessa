@@ -27,6 +27,9 @@ pnpm dev
 
 # 6. First staff login: create a super admin (works until two exist)
 pnpm bootstrap:super-admin --email you@anbessa.et --name "Your Name"
+
+# …or, for local work, ready-made staff and partner accounts for the web app's dev sign-in
+pnpm seed:dev
 ```
 
 Service URL: http://localhost:3001 · health: `/health`, `/health/ready` (checks the database).
@@ -45,6 +48,7 @@ With `OTP_DELIVERY=console` (the default), login codes are printed in the log. S
 | `/api/admin-auth/*` | Staff dashboard (cookie) | Better Auth **admin surface**: `sign-in/email`, `change-password`, `two-factor/*`, `token` (10-min JWT, `aud=ride-admin`) |
 | `/api/identity/*` | Staff dashboard (staff JWT) | Guests, staff accounts, role requests/approvals/revocation, suspension, organisation verification |
 | `/internal/*` | Other services (`INTERNAL_SERVICE_TOKEN`) | Driver role on activation. Never routed by Kong |
+| `/api/dev/*` | Web app dev sign-in, **development only** | `accounts` (the `seed:dev` roster) and `code` (current TOTP of a dev staff account, last console OTP of a phone). Mounted only with `DEV_LOGIN=on`, which config refuses in production; never routed by Kong |
 
 Only allowlisted Better Auth endpoints are served (`src/auth/allowlist.ts`). Everything else is 404, including every admin-plugin endpoint. The full route table is in [Auth.md §17](../../docs/design/Auth.md#identity-api).
 
@@ -70,6 +74,7 @@ src/
 ├── outbox/         outbox writes and the Kafka relay (FOR UPDATE SKIP LOCKED)
 ├── lib/            errors, Redis secondary storage, deny/pv security signals
 ├── cli/            bootstrap-super-admin
+├── dev/            development-only accounts, seed:dev (DEV_LOGIN)
 ├── config/         env → typed config (Zod). Refuses insecure settings in production
 ├── middlewares/    error handler (registered before routes)
 ├── generated/      Prisma client output (gitignored, created by `prisma generate`)
@@ -91,6 +96,7 @@ src/
 | `pnpm test:integration` | Integration tests against a throwaway `auth_service_test` database (needs Postgres: `make infra-up`) |
 | `pnpm lint` / `pnpm typecheck` | ESLint / type-check only |
 | `pnpm bootstrap:super-admin --email … --name …` | Create one of the first two super admins |
+| `pnpm seed:dev` | Development accounts (staff with password + authenticator and roles, fleet and company partners) for the web app's dev sign-in. Runs only with `NODE_ENV=development`; run again to reset them |
 | `pnpm prisma migrate dev --name <change>` | New migration after editing `schema.prisma` |
 | `pnpm prisma studio` | Open Prisma DB browser |
 

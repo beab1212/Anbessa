@@ -1,21 +1,28 @@
-import { useState, type FormEvent, type ReactNode } from "react";
+import { lazy, Suspense, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Building2, ShieldCheck } from "lucide-react";
-import { authCall } from "../lib/api";
+import { authCall, type Surface } from "../lib/api";
 import { phone as fmtPhone, toE164 } from "../lib/format";
 import { useSession } from "../lib/session";
 import { CityMap } from "../components/map/CityMap";
 import { Brand, Field, Problem } from "../components/ui";
 
-function Frame({ children }: { children: ReactNode }) {
+// One-click sign-in as the seed:dev accounts. `import.meta.env.DEV` is false in production
+// builds, so the module and its chunk are left out of them entirely.
+const DevSignIn = import.meta.env.DEV ? lazy(() => import("../dev/DevSignIn")) : null;
+
+function Frame({ dev, children }: { dev?: Surface; children: ReactNode }) {
   return (
     <div className="signin">
       <div className="backdrop" aria-hidden="true">
         <CityMap cityId="addis-ababa" interactive={false} />
       </div>
-      <div className="card pad">
-        <Brand subtitle="Operations console" />
-        {children}
+      <div className="signin-stack">
+        <div className="card pad">
+          <Brand subtitle="Operations console" />
+          {children}
+        </div>
+        {DevSignIn ? <Suspense fallback={null}><DevSignIn initial={dev} /></Suspense> : null}
       </div>
     </div>
   );
@@ -91,7 +98,7 @@ export function StaffSignIn() {
   }
 
   return (
-    <Frame>
+    <Frame dev="staff">
       <p className="xs muted" style={{ marginBottom: "0.5rem" }}><Link to="/sign-in">Sign in</Link> / staff</p>
       {stage === "password" ? (
         <form onSubmit={submitPassword}>
@@ -157,7 +164,7 @@ export function PartnerSignIn() {
   }
 
   return (
-    <Frame>
+    <Frame dev="partner">
       <p className="xs muted" style={{ marginBottom: "0.5rem" }}><Link to="/sign-in">Sign in</Link> / fleet or company</p>
       {stage === "phone" ? (
         <form onSubmit={send}>

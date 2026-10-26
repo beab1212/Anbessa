@@ -1,0 +1,64 @@
+/* Development sign-in panel (src/dev): bundled only with the dev-only module. */
+
+.dev-signin {
+  border-style: dashed;
+  border-color: var(--accent);
+}
+
+.dev-accounts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.dev-accounts button {
+  appearance: none;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--surface);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--ease), background-color var(--ease);
+}
+
+.dev-accounts button:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.dev-accounts button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.dev-accounts button > span {
+  display: grid;
+  min-width: 0;
+}
+
+.dev-accounts strong {
+  font-size: 0.875rem;
+}
+
+.dev-accounts .muted {
+  font-size: 0.75rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dev-accounts svg {
+  width: 1rem;
+  height: 1rem;
+  flex: none;
+  color: var(--accent-strong);
+}

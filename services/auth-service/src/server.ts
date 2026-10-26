@@ -14,6 +14,7 @@ async function main() {
   if (relay) await relay.start();
   else logger.warn("KAFKA_BROKERS not set: identity events stay in the outbox table until a relay runs");
   if (config.OTP_DELIVERY === "console") logger.warn("OTP_DELIVERY=console: OTP codes are logged (development only)");
+  if (config.DEV_LOGIN === "on") logger.warn("DEV_LOGIN=on: /api/dev/* hands out sign-in codes for the seed:dev accounts (development only)");
 
   await app.listen({ port: config.PORT, host: "0.0.0.0" });
 

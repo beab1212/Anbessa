@@ -53,17 +53,25 @@ describe("config", () => {
   it("refuses insecure production settings", () => {
     const err = (() => {
       try {
-        loadConfig({ ...base, NODE_ENV: "production", OTP_DELIVERY: "console", AUTH_RATE_LIMIT: "off" });
+        loadConfig({ ...base, NODE_ENV: "production", OTP_DELIVERY: "console", AUTH_RATE_LIMIT: "off", DEV_LOGIN: "on" });
       } catch (e) {
         return String(e);
       }
     })();
-    for (const key of ["OTP_DELIVERY", "REDIS_URL", "KAFKA_BROKERS", "INTERNAL_SERVICE_TOKEN", "AUTH_RATE_LIMIT", "AUTH_BASE_URL"]) {
+    for (const key of ["OTP_DELIVERY", "REDIS_URL", "KAFKA_BROKERS", "INTERNAL_SERVICE_TOKEN", "AUTH_RATE_LIMIT", "AUTH_BASE_URL", "DEV_LOGIN"]) {
       expect(err).toContain(key);
     }
   });
 
   it("requires notification-service settings for real OTP delivery", () => {
     expect(() => loadConfig({ ...base, OTP_DELIVERY: "notification" })).toThrow(/NOTIFICATION_INTERNAL_URL/);
+  });
+
+  it("keeps development sign-in off unless asked, and only with console OTPs", () => {
+    expect(loadConfig(base).DEV_LOGIN).toBe("off");
+    expect(loadConfig({ ...base, DEV_LOGIN: "on" }).DEV_LOGIN).toBe("on");
+    expect(() =>
+      loadConfig({ ...base, DEV_LOGIN: "on", OTP_DELIVERY: "notification", NOTIFICATION_INTERNAL_URL: "http://n:3006", INTERNAL_SERVICE_TOKEN: "t".repeat(32) }),
+    ).toThrow(/DEV_LOGIN/);
   });
 });

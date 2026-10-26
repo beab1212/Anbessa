@@ -6,9 +6,11 @@ import type { Config } from "./config/index.js";
 import type { Db } from "./db.js";
 import type { AdminAuth, AppAuth } from "./auth/instances.js";
 import { mountBetterAuth } from "./http/better-auth.routes.js";
+import { registerDevRoutes } from "./http/dev.routes.js";
 import { registerIdentityRoutes } from "./http/identity.routes.js";
 import type { RequirePrincipal } from "./http/principal.js";
 import type { IdentityService } from "./identity/service.js";
+import type { OtpInbox } from "./dev/accounts.js";
 import { registerErrorHandler } from "./middlewares/error-handler.js";
 
 export interface AppDeps {
@@ -18,6 +20,8 @@ export interface AppDeps {
   adminAuth: AdminAuth;
   identity: IdentityService;
   requirePrincipal: RequirePrincipal;
+  /** Set only when DEV_LOGIN=on (refused in production). */
+  devInbox?: OtpInbox;
   logger?: FastifyServerOptions["loggerInstance"];
 }
 
@@ -56,6 +60,7 @@ export async function buildApp(deps: AppDeps) {
     requirePrincipal: deps.requirePrincipal,
     internalToken: deps.config.INTERNAL_SERVICE_TOKEN,
   });
+  if (deps.config.DEV_LOGIN === "on" && deps.devInbox) registerDevRoutes(app, { db: deps.db, inbox: deps.devInbox });
 
   return app;
 }

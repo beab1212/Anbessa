@@ -68,6 +68,18 @@ pnpm --filter @ride-app/auth-service bootstrap:super-admin -- --email you@anbess
 
 It prints a one-time temporary password. Sign in at `/api/admin-auth/sign-in/email`, change the password and enrol TOTP. Until both are done, your access token carries no roles. After that, every other staff role goes through maker–checker: one super admin requests (`POST /api/identity/staff-role-requests`), the other approves.
 
+### Ready-made accounts (web app dev sign-in)
+
+For day-to-day work you don't need to go through bootstrap, setup and maker–checker each time:
+
+```bash
+pnpm --filter @ride-app/auth-service seed:dev
+```
+
+It creates (or resets) staff accounts with a fixed password, an authenticator already enrolled and their roles in Addis Ababa (two super admins, dispatcher, call center, onboarding, safety, an all-round "ops floor" account), plus partners: a verified fleet with its owner, a verified company account with its admin, travel desk and an employee, and a partner with no company yet. The list is in `services/auth-service/src/dev/accounts.ts`.
+
+With `DEV_LOGIN=on` in `services/auth-service/.env` (the `.env.example` default; `make secrets` adds it), the web app's sign-in page shows a **Sign in as…** panel: one click signs in through the normal endpoints, with auth-service's `/api/dev/code` supplying the authenticator or SMS code. None of it exists in production: config refuses `DEV_LOGIN=on` there, `seed:dev` refuses anything but `NODE_ENV=development`, Kong has no `/api/dev` route, and the panel is left out of `vite build`. It needs the web app's Vite proxy (not Kong), and it shares the normal sign-in rate limits (5 a minute); set `AUTH_RATE_LIMIT=off` locally if you switch accounts a lot.
+
 ### Phone sign-in during development
 
 `OTP_DELIVERY=console` (the default in `.env.example`) logs the code instead of sending it:

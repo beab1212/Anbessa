@@ -417,6 +417,14 @@
   background: linear-gradient(to bottom, rgb(245 246 248 / 0.55), rgb(245 246 248 / 0.85));
 }
 
+.signin-stack {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 1rem;
+  width: min(26rem, 100%);
+}
+
 .signin .card {
   position: relative;
   z-index: 1;

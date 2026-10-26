@@ -105,6 +105,7 @@ Production values that differ from dev:
 | `OTP_DELIVERY` / `NOTIFICATION_INTERNAL_URL` | auth-service: `notification` / in-cluster notification-service URL. `console` is refused in production |
 | `INTERNAL_SERVICE_TOKEN` | auth-service and its internal callers. Required in production |
 | `AUTH_RATE_LIMIT` | leave unset (`on`). `off` is refused in production |
+| `DEV_LOGIN` | leave unset (`off`). `on` is refused in production. Never run `seed:dev` against a real database: it refuses unless `NODE_ENV=development` |
 | `PHONE_HASH_KEY` / `OTP_ENCRYPTION_KEY` | notification-service only, 32 random bytes as hex each, from Secrets Manager. Rotating `PHONE_HASH_KEY` only breaks the resend lookup for codes in flight; rotating `OTP_ENCRYPTION_KEY` drops codes in flight (users request a new one) |
 | `OTP_CHANNELS` / `OTP_FALLBACK_SECONDS` | notification-service: `telegram,sms` / `20` |
 | `TELEGRAM_CALLBACK_URL` | notification-service: `https://api.anbessa.et/api/webhooks/telegram-gateway` (required, https) |

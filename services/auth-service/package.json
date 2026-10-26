@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit --customConditions development",
     "postinstall": "prisma generate",
     "bootstrap:super-admin": "tsx --conditions=development --env-file-if-exists=.env src/cli/bootstrap-super-admin.ts",
+    "seed:dev": "tsx --conditions=development --env-file-if-exists=.env src/dev/seed.ts",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "generate": "prisma generate"
   },
