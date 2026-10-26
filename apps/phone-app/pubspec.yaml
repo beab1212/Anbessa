@@ -1,5 +1,5 @@
 name: phone_app
-description: Ride-app phone app — rider and driver modes in one app.
+description: Anbessa phone app, rider and driver modes in one app.
 publish_to: "none"
 version: 1.0.0+1
 resolution: workspace
@@ -10,15 +10,28 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
   ride_app_core:
     path: ../../packages/core
   flutter_riverpod: ^3.4.3
+  go_router: ^18.1.1
   dio: ^5.11.1
-  socket_io_client: ^3.1.6
-  flutter_map: ^8.3.2          # free OSM tile rendering, no API key required
+  socket_io_client: ^3.1.6     # realtime-gateway is Socket.io v4
+  flutter_map: ^8.3.2          # raster tiles from the self-hosted tile stack (OSM fallback in dev)
   latlong2: ^0.10.1
   flutter_secure_storage: ^11.2.0
-  geolocator: ^14.1.2          # driver mode: GPS for sending location pings
+  shared_preferences: ^2.5.6
+  geolocator: ^14.1.2          # driver mode: GPS every ~4 s, Android foreground service while online
+  url_launcher: ^6.3.3         # payment pages (Custom Tabs), tel:, navigation
+  package_info_plus: ^10.2.2   # the minimum-version gate
+  intl: ^0.20.2
+  firebase_core: ^5.1.0        # push; initialised only when FIREBASE_* defines are set
+  firebase_messaging: ^17.0.1
+  flutter_local_notifications: ^22.3.3
+  image_picker: ^1.2.4         # driver documents
+  crypto: ^3.0.7               # sha256 of uploads
+  uuid: ^4.6.0                 # idempotency keys
 
 dev_dependencies:
   flutter_test:
@@ -27,3 +40,12 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  generate: true
+  assets:
+    - assets/fonts/OFL.txt
+  fonts:
+    - family: NotoSansEthiopic
+      fonts:
+        - asset: assets/fonts/NotoSansEthiopic-Regular.ttf
+        - asset: assets/fonts/NotoSansEthiopic-Bold.ttf
+          weight: 700

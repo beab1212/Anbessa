@@ -23,6 +23,8 @@ export const envSchema = z
     AUTH_JWKS_URL: z.string().url().default("http://localhost:3001/api/auth/jwks"),
     LOCATION_INTERNAL_URL: z.string().url().default("http://localhost:3003"),
     MAPPING_INTERNAL_URL: z.string().url().default("http://localhost:3007"),
+    // names and cars for GET /api/trips/:id/parties (auth names come from AUTH_INTERNAL_URL)
+    FLEET_INTERNAL_URL: z.string().url().default("http://localhost:3008"),
 
     // Quotes: "service" = pricing-service (GET /internal/quotes/:id; riders get estimates from
     // POST /api/pricing/estimates); "builtin" = the old in-process stand-in, kept for tests and for

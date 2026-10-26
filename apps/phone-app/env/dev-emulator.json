@@ -1,0 +1,8 @@
+{
+  "API_MODE": "host",
+  "HOST_BASE": "http://10.0.2.2",
+  "WS_URL": "ws://10.0.2.2:3000",
+  "TILE_URL": "",
+  "DEV_LOGIN": "on",
+  "FAKE_LOCATION": "off"
+}

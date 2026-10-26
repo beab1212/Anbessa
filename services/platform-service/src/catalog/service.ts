@@ -175,7 +175,11 @@ export function createCatalogService(deps: { db: Db; identity: IdentitySync; pub
         version: snap.version,
         cities: snap.cityList.filter((c) => c.enabled).map(({ id, name, timezone, bbox }) => ({ id, name, timezone, bbox })),
         vehicleTypes: snap.vehicleTypes.filter((t) => t.enabled).map(({ code, name, seatsMin, seatsMax, cities }) => ({ code, name, seatsMin, seatsMax, cities })),
-        features: { phoneBooking: get("features.phoneBooking"), corporateBooking: get("features.corporateBooking"), tripPin: get("trip.pinRequired") },
+        features: {
+          phoneBooking: get("features.phoneBooking"), corporateBooking: get("features.corporateBooking"), tripPin: get("trip.pinRequired"),
+          scheduledRides: get("features.scheduledRides"), sos: get("features.sos"), support: get("features.support"),
+          promos: get("features.promos"), accountDeletion: get("features.accountDeletion"),
+        },
         maintenance: { newTripsPaused: get("maintenance.newTrips"), message: get("maintenance.message") },
         minAppVersions: {
           rider: { android: get("apps.minVersion.rider.android"), ios: get("apps.minVersion.rider.ios") },

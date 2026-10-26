@@ -1,0 +1,18 @@
+{
+  "accountId": "01a17852-6ea4-7000-8000-00000000a0b1",
+  "beneficiary": { "type": "INDIVIDUAL", "id": "01a17851-bb2a-77fc-836d-caa38f1dcb41" },
+  "cityId": "addis-ababa",
+  "balanceMinor": -52440,
+  "currency": "ETB",
+  "state": "CASH_BLOCKED",
+  "cashAllowed": false,
+  "stateChangedAt": "2026-10-26T13:07:40.000Z",
+  "overdueSince": null,
+  "referenceCode": "ANB-9P7N8H",
+  "payoutMethod": { "provider": "telebirr", "destination": "•••3344" },
+  "suggestedTopUpMinor": 22500,
+  "policy": { "mode": "POSTPAID", "warningMinor": -30000, "cashLimitMinor": -50000, "hardLimitMinor": -100000, "prepaidMinimumMinor": 10000, "minPayoutMinor": 10000, "dueDays": 3, "builtIn": true },
+  "dues": [
+    { "id": "01a17852-7000-7000-8000-000000000d01", "cycleEnd": "2026-10-26", "amountMinor": 34500, "minimumMinor": 17250, "paidMinor": 0, "dueAt": "2026-10-29T00:00:00.000Z", "status": "OPEN" }
+  ]
+}

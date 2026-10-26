@@ -228,17 +228,28 @@ Map tiles come from OpenFreeMap by default (`VITE_MAP_STYLE_URL` in `apps/web/.e
 
 ```bash
 make setup-mobile                 # dart pub get (root pub workspace)
-make dev-mobile                   # flutter run in apps/phone-app
+make dev-services                 # the backend, on ports 3000–3011 (section 3)
+make dev-mobile                   # flutter run with env/dev-host.json
+make dev-mobile ENV=dev-emulator  # Android emulator: the backend is 10.0.2.2
 ```
 
-- There is one app, `apps/phone-app`. The login screen offers **Continue as rider** / **Continue as driver** until the OTP screens are wired to the API. After that, the JWT's `roles` claim (`RIDER`, `DRIVER`) picks the mode.
-- Backend URLs come from `--dart-define` (`lib/core/config/env.dart`):
-  ```bash
-  flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8000 --dart-define=WS_URL=ws://10.0.2.2:3000
-  ```
-  On the Android emulator, `10.0.2.2` is your machine; `localhost` is the emulator itself.
-- Driver mode needs location permission. On an emulator, set a simulated location.
-- Shared Dart code lives in `packages/core`. Both resolve together through the root `pubspec.yaml` workspace.
+- One app, `apps/phone-app`, with a rider mode and a driver mode. Sign-in is phone OTP; the JWT's `roles` claim decides which modes you get, and people with both roles pick one (switchable in Account). Architecture, screens and the feature-flagged modules: [apps/phone-app/README.md](../../apps/phone-app/README.md).
+- **Configuration** is compile-time, from `--dart-define-from-file=env/<name>.json` (`lib/core/config/env.dart`):
+
+  | File | Backend | Notes |
+  |---|---|---|
+  | `env/dev-host.json` | `make dev-services` on this machine (no Kong: `/api/<prefix>` goes straight to the service's port) | Dev sign-in panel on, fake location on |
+  | `env/dev-emulator.json` | the same, from the Android emulator (`10.0.2.2` is your machine) | Real GPS (set it in the emulator's extended controls) |
+  | `env/stack.json` | `make stack-up` through Kong on `:8000` | No dev sign-in (Kong doesn't route `/api/dev`) |
+  | `env/staging.json` | staging | |
+
+- **Run it on Linux** while you work: `cd apps/phone-app && flutter run -d linux --dart-define-from-file=env/dev-host.json`. Location is simulated there (a panel on the driver screens moves the car, or drives it to the pickup for the 150 m arrival check). Open two windows to play rider and driver.
+- **Dev sign-in**: debug builds with `DEV_LOGIN=on` list the ready-made phone accounts (rider `+251900000501`, approved driver `+251900000402`, applicant `+251900000401`, fleet driver `+251900000102`) and sign in through the real OTP endpoints. The drivers need fleet data: `pnpm --filter @ride-app/fleet-service seed:dev` after auth-service's `seed:dev`.
+- **Map tiles**: `TILE_URL` (a `{z}/{x}/{y}` raster URL, e.g. TileServer GL from `make dev-infra`). Empty means OpenStreetMap's tiles, fine for development only.
+- **Push**: off unless the `FIREBASE_*` defines are set (Android/iOS only). notification-service's console provider logs pushes in development.
+- **Localisations** (`lib/core/l10n/app_en.arb`, `app_am.arb`) are generated into `lib/core/l10n/generated/` (not committed). `flutter run/build/test` generate them; `melos run gen` does it for `flutter analyze`.
+- Shared Dart code (models, API client, theme, widgets) lives in `packages/core`. Both resolve together through the root `pubspec.yaml` workspace.
+- Checks: `dart run melos run analyze` and `dart run melos run test`; `flutter build apk --debug --dart-define-from-file=env/dev-emulator.json` for an installable build.
 
 ---
 
@@ -316,6 +327,10 @@ Formatting: `.editorconfig` everywhere; Prettier (`pnpm format`) for TS/JSON/MD;
 
 | Symptom | Fix |
 |---------|-----|
+| `make dev-services` starts some services but not others (no log lines at all from, say, trip-service) | turbo runs 10 tasks at a time unless told otherwise, and every service is a never-ending dev task. The Makefile passes `--concurrency=32`; if you call turbo yourself, do the same |
+| Phone app: `Too many attempts` on sign-in | The OTP send limit (per number, per minute). Wait a minute |
+| Phone app: the driver has no profile or car in development | Run `pnpm --filter @ride-app/fleet-service seed:dev` (after auth-service's `seed:dev`) |
+| Phone app: grey map | The tile server isn't reachable. Leave `TILE_URL` empty to use OpenStreetMap's tiles in development |
 | `Bind for 0.0.0.0:6379 failed: port is already allocated` | Another Redis (often another project's container) owns the port. Stop it, or change the host port in `infra/docker/docker-compose.yml`. |
 | Postgres container exits right after an upgrade | The old Postgres 16 volume won't start on 18. Run `make infra-reset` (wipes local data). |
 | `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY` | pnpm wants to rebuild `node_modules` in a non-interactive shell. Run `CI=true pnpm install`. |

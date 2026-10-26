@@ -7,6 +7,7 @@ import { Prisma } from "../generated/prisma/client.js";
 import { withIdempotency } from "../lib/idempotency.js";
 import { notFound, unauthorized } from "../lib/errors.js";
 import type { builtinQuotes } from "../quotes.js";
+import type { PartiesService } from "../trips/parties.js";
 import { tripView, type TripService } from "../trips/service.js";
 
 const id = z.object({ id: z.string().uuid() });
@@ -17,6 +18,7 @@ const CANCEL_REASONS = ["CHANGED_PLANS", "DRIVER_TOO_FAR", "DRIVER_ASKED_TO_CANC
 export interface RouteDeps {
   db: Db;
   trips: TripService;
+  parties: PartiesService;
   verifyAccessToken: VerifyAccessToken;
   internalToken: string;
   /** the development quote stand-in (PRICING=builtin) */
@@ -116,6 +118,12 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
   app.get("/api/trips/:id", async (req) => {
     const p = await principal(req);
     return tripView(await trips.readable(p, id.parse(req.params).id), p);
+  });
+
+  // names and the car, for whoever may read the trip (the rider sees the driver and car, the driver the rider)
+  app.get("/api/trips/:id/parties", async (req) => {
+    const p = await principal(req);
+    return deps.parties.forTrip(await trips.readable(p, id.parse(req.params).id), p);
   });
 
   // ── offers ──────────────────────────────────────────────────────────────────

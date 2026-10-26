@@ -208,6 +208,13 @@ export function registerIdentityRoutes(
     return { pending: Number(row?.pending ?? 0), oldestAt: row?.oldest?.toISOString() ?? null };
   });
 
+  // trip-service (GET /api/trips/:id/parties): the name the other side of a trip sees
+  app.get("/internal/users/:id", async (req) => {
+    internal(req);
+    const { id } = z.object({ id: uuid }).parse(req.params);
+    return identity.publicNameForService(id);
+  });
+
   app.get("/internal/organizations/:id", async (req) => {
     internal(req);
     const { id } = z.object({ id: uuid }).parse(req.params);

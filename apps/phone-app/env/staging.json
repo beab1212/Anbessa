@@ -1,0 +1,9 @@
+{
+  "API_MODE": "gateway",
+  "API_BASE_URL": "https://api.staging.anbessa.et",
+  "WS_URL": "wss://ws.staging.anbessa.et",
+  "TILE_URL": "https://tiles.staging.anbessa.et/styles/basic/{z}/{x}/{y}.png",
+  "DEV_LOGIN": "off",
+  "FAKE_LOCATION": "off",
+  "APP_LINK_HOST": "app.anbessa.et"
+}

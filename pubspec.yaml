@@ -15,7 +15,11 @@ dev_dependencies:
 
 melos:
   scripts:
+    # generated sources that aren't committed (apps/phone-app localisations); flutter run/build/test
+    # regenerate them on their own, flutter analyze doesn't
+    gen:
+      run: melos exec --file-exists=l10n.yaml -- flutter gen-l10n
     analyze:
-      run: melos exec -- flutter analyze
+      run: melos run gen && melos exec -- flutter analyze
     test:
       run: melos exec --dir-exists=test -- flutter test

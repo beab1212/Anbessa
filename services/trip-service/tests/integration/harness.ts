@@ -11,7 +11,7 @@ import { getDriverState, goOnline, haversineMeters, nearbyAvailable, recordPing,
 import { buildApp } from "../../src/app.js";
 import { loadConfig } from "../../src/config/index.js";
 import { createContainer } from "../../src/container.js";
-import type { LocationClient, MappingClient } from "../../src/lib/clients.js";
+import type { LocationClient, MappingClient, PartiesClient } from "../../src/lib/clients.js";
 import { TEST_DATABASE_URL, TEST_REDIS_URL } from "./global-setup.js";
 
 const ISSUER = "http://localhost:3001";
@@ -37,6 +37,18 @@ export async function createHarness() {
       return { durations: sources.map((s) => [Math.round(Math.abs(s.lat - BOLE.lat) * 1e5)]), approximate: false };
     },
   };
+  // auth names and fleet cars for /parties; tests set names and can take the upstreams down
+  const partiesState = { names: new Map<string, string>(), down: false };
+  const parties: PartiesClient = {
+    async userName(id) {
+      if (partiesState.down) throw new Error("auth 503");
+      return partiesState.names.get(id) ?? null;
+    },
+    async vehicle(id) {
+      if (partiesState.down) throw new Error("fleet 503");
+      return { id, plateNumber: "3-A40402", vehicleType: "economy", make: "Toyota", model: "Vitz", color: "White" };
+    },
+  };
   const location: LocationClient = {
     nearby: (q) => nearbyAvailable(redis, q, clock.now),
     driver: (id) => getDriverState(redis, id) as never,
@@ -56,7 +68,7 @@ export async function createHarness() {
   // the admin dashboard's live settings, changeable by tests
   const settings = staticSettings({ "match.timeoutSeconds": 120, "match.offerSeconds": 15 });
   const c = createContainer(config, pino({ level: "silent" }), {
-    redis, location, mapping, settings, now: () => new Date(clock.now),
+    redis, location, mapping, parties, settings, now: () => new Date(clock.now),
     realtime: { toUser: (userId, event, payload) => void pushes.push({ userId, event, payload: payload as Record<string, unknown> }) },
     verifyAccessToken: createTokenVerifier({ issuer: ISSUER, keySet: createLocalJWKSet({ keys: [jwk as never] }) }),
   });
@@ -127,7 +139,7 @@ export async function createHarness() {
   }
 
   return {
-    app, c, redis, clock, pushes, mappingState, settings, token, rider, staff, driver, req, quote, requestTrip, offerFor, matchedTrip,
+    app, c, redis, clock, pushes, mappingState, partiesState, settings, token, rider, staff, driver, req, quote, requestTrip, offerFor, matchedTrip,
     close: async () => {
       await app.close();
       await c.close();

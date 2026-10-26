@@ -5,10 +5,11 @@ import { createTokenVerifier, type VerifyAccessToken } from "@ride-app/shared-au
 import type { Logger } from "@ride-app/shared-utils";
 import type { Config } from "./config/index.js";
 import { createDb, type Db } from "./db.js";
-import { locationClient, mappingClient, type LocationClient, type MappingClient } from "./lib/clients.js";
+import { locationClient, mappingClient, partiesClient, type LocationClient, type MappingClient, type PartiesClient } from "./lib/clients.js";
 import { socketEmitter, type Realtime } from "./lib/realtime.js";
 import { createMatcher } from "./matching/matcher.js";
 import { builtinQuotes, pricingQuotes, type QuoteProvider } from "./quotes.js";
+import { createParties } from "./trips/parties.js";
 import { createTripService } from "./trips/service.js";
 import { createSettingsClient, fetchSettingsSnapshotFrom, type SettingsReader } from "@ride-app/shared-settings";
 
@@ -17,6 +18,7 @@ export interface ContainerOptions {
   redis?: Redis;
   location?: LocationClient;
   mapping?: MappingClient;
+  parties?: PartiesClient;
   quotes?: QuoteProvider;
   realtime?: Realtime;
   verifyAccessToken?: VerifyAccessToken;
@@ -31,6 +33,10 @@ export function createContainer(config: Config, logger: Logger, opts: ContainerO
   const location = opts.location ?? locationClient(config.LOCATION_INTERNAL_URL, config.INTERNAL_SERVICE_TOKEN);
   const mapping = opts.mapping ?? mappingClient(config.MAPPING_INTERNAL_URL, config.INTERNAL_SERVICE_TOKEN);
   const realtime = opts.realtime ?? socketEmitter(redis);
+  const parties = createParties({
+    redis, logger,
+    client: opts.parties ?? partiesClient(config.AUTH_INTERNAL_URL, config.FLEET_INTERNAL_URL, config.INTERNAL_SERVICE_TOKEN),
+  });
   const now = opts.now ?? (() => new Date());
 
   // live settings; this service's env values are the defaults until an admin changes them
@@ -78,7 +84,7 @@ export function createContainer(config: Config, logger: Logger, opts: ContainerO
     });
 
   return {
-    config, db, redis, trips, matcher, devQuotes, verifyAccessToken, settings, settingsClient,
+    config, db, redis, trips, parties, matcher, devQuotes, verifyAccessToken, settings, settingsClient,
     internalToken: config.INTERNAL_SERVICE_TOKEN,
     async close() {
       matcher.stop();

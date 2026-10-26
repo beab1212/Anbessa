@@ -1,0 +1,28 @@
+{
+  "driver": {
+    "userId": "01a17851-bb2a-77fc-836d-caa38f1dcb41",
+    "status": "ACTIVE",
+    "statusReason": null,
+    "reviewNote": null,
+    "fullName": "Almaz Tadesse",
+    "licenseNumber": "AA123456",
+    "cityId": "addis-ababa",
+    "submittedAt": "2026-10-20T08:00:00.000Z",
+    "activatedAt": "2026-10-21T09:30:00.000Z",
+    "createdAt": "2026-10-20T07:55:00.000Z",
+    "documents": [
+      { "kind": "LICENSE", "required": true, "expires": true, "document": { "id": "d1", "subjectType": "DRIVER", "subjectId": "x", "kind": "LICENSE", "status": "APPROVED", "contentType": "image/jpeg", "sizeBytes": 12345, "expiresAt": "2027-10-20", "expiringSoon": false, "rejectReason": null, "createdAt": "2026-10-20T08:00:00.000Z" } },
+      { "kind": "NATIONAL_ID", "required": true, "expires": false, "document": { "id": "d2", "kind": "NATIONAL_ID", "status": "APPROVED", "expiresAt": null, "expiringSoon": false, "rejectReason": null, "createdAt": "2026-10-20T08:00:00.000Z" } },
+      { "kind": "PHOTO", "required": true, "expires": false, "document": null }
+    ],
+    "missingForSubmit": ["PHOTO"],
+    "missingForApproval": ["PHOTO"]
+  },
+  "vehicles": [
+    { "id": "01a17851-cd5d-7ee6-a96b-baa5d206fe95", "plateNumber": "3-A40402", "ownerType": "INDIVIDUAL", "ownerUserId": "01a17851-bb2a-77fc-836d-caa38f1dcb41", "ownerOrgId": null, "vehicleType": "economy", "make": "Toyota", "model": "Vitz", "year": 2018, "color": "White", "seats": 4, "status": "VERIFIED", "statusReason": null, "reviewNote": null, "cityId": "addis-ababa", "submittedAt": "2026-10-20T08:10:00.000Z", "verifiedAt": "2026-10-21T09:35:00.000Z", "createdAt": "2026-10-20T08:05:00.000Z" }
+  ],
+  "fleetVehicles": [
+    { "id": "01a17851-b000-7000-8000-000000000b01", "plateNumber": "3-B10201", "ownerType": "ORGANIZATION", "ownerUserId": null, "ownerOrgId": "01a17851-b865-70ca-b46d-66b3936ea4a0", "vehicleType": "comfort", "make": "Hyundai", "model": "Elantra", "year": 2020, "color": "Silver", "seats": 4, "status": "VERIFIED", "statusReason": null, "reviewNote": null, "cityId": "addis-ababa", "submittedAt": null, "verifiedAt": "2026-10-21T09:35:00.000Z", "createdAt": "2026-10-20T08:05:00.000Z", "authorization": { "validUntil": null } }
+  ],
+  "session": { "id": "01a17852-0000-7000-8000-00000000s001", "driverUserId": "01a17851-bb2a-77fc-836d-caa38f1dcb41", "vehicleId": "01a17851-cd5d-7ee6-a96b-baa5d206fe95", "startedAt": "2026-10-26T13:00:00.000Z", "endedAt": null, "endReason": null }
+}

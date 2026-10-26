@@ -315,6 +315,37 @@ describe("cancellations (workflow 07)", () => {
 });
 
 describe("reading trips", () => {
+  it("parties: the rider sees the driver's name and car, the driver the rider's name, never a phone number", async () => {
+    const { r, d, tripId } = await h.matchedTrip();
+    h.partiesState.names.set(d.id, "Dawit Bekele");
+    h.partiesState.names.set(r.id, "+251900000501");
+
+    const asRider = await h.req("GET", `/api/trips/${tripId}/parties`, r);
+    expect(asRider.statusCode).toBe(200);
+    expect(asRider.json()).toEqual({
+      tripId, driver: { name: "Dawit Bekele", rating: null }, rider: null,
+      vehicle: { plateNumber: "3-A40402", vehicleType: "economy", make: "Toyota", model: "Vitz", color: "White" },
+    });
+
+    // the rider's name is still the sign-up placeholder (their phone number): not shown
+    const asDriver = await h.req("GET", `/api/trips/${tripId}/parties`, d);
+    expect(asDriver.json()).toMatchObject({ driver: null, vehicle: null, rider: { name: null } });
+
+    expect((await h.req("GET", `/api/trips/${tripId}/parties`, await h.rider())).statusCode).toBe(404);
+  });
+
+  it("parties: unreachable auth/fleet degrade to nulls, not an error", async () => {
+    const { r, tripId } = await h.matchedTrip();
+    h.partiesState.down = true;
+    try {
+      const res = await h.req("GET", `/api/trips/${tripId}/parties`, r);
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ driver: { name: null }, vehicle: null });
+    } finally {
+      h.partiesState.down = false;
+    }
+  });
+
   it("rider, driver and staff of the city can read; others get 404", async () => {
     const fleetOrgId = uuid();
     const { r, d, tripId } = await h.matchedTrip({ driverOpts: { fleetOrgId } });

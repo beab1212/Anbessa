@@ -97,6 +97,12 @@ export const SETTINGS: readonly SettingDef[] = [
   // ── feature flags ───────────────────────────────────────────────────────────
   { key: "features.phoneBooking", group: "Feature flags", label: "Call center can book by phone", description: "Off: trip-service refuses phone bookings and the page is hidden.", type: "bool", default: true, scope: "global", owner: "trip-service" },
   { key: "features.corporateBooking", group: "Feature flags", label: "Company accounts can book rides", description: "Off: company coordinators can't book; existing trips continue.", type: "bool", default: true, scope: "global", owner: "trip-service" },
+  // phone-app modules built ahead of their services: the app hides them while these are off
+  { key: "features.scheduledRides", group: "Feature flags", label: "Riders can schedule rides", description: "Phone app: the Scheduled rides screens. Turn on once trip scheduling is live.", type: "bool", default: false, scope: "global", owner: "platform-service" },
+  { key: "features.sos", group: "Feature flags", label: "SOS button during trips", description: "Phone app: call the police and alert the safety team from an active trip.", type: "bool", default: false, scope: "global", owner: "platform-service" },
+  { key: "features.support", group: "Feature flags", label: "In-app support tickets", description: "Phone app: open and follow support tickets.", type: "bool", default: false, scope: "global", owner: "platform-service" },
+  { key: "features.promos", group: "Feature flags", label: "Promo codes", description: "Phone app: redeem promo codes and apply them at the quote.", type: "bool", default: false, scope: "global", owner: "platform-service" },
+  { key: "features.accountDeletion", group: "Feature flags", label: "Self-service account deletion", description: "Phone app: people can ask to delete their account from Account settings.", type: "bool", default: false, scope: "global", owner: "platform-service" },
 ];
 
 const byKey = new Map(SETTINGS.map((d) => [d.key, d]));

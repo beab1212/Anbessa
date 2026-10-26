@@ -1,0 +1,18 @@
+{
+  "version": 7,
+  "cities": [
+    { "id": "addis-ababa", "name": "Addis Ababa", "timezone": "Africa/Addis_Ababa", "bbox": { "minLat": 8.83, "minLng": 38.63, "maxLat": 9.1, "maxLng": 38.92 } },
+    { "id": "hawassa", "name": "Hawassa", "timezone": "Africa/Addis_Ababa", "bbox": { "minLat": 6.98, "minLng": 38.42, "maxLat": 7.12, "maxLng": 38.54 } }
+  ],
+  "vehicleTypes": [
+    { "code": "economy", "name": "Economy", "seatsMin": 1, "seatsMax": 4, "cities": [] },
+    { "code": "comfort", "name": "Comfort", "seatsMin": 1, "seatsMax": 4, "cities": ["addis-ababa"] },
+    { "code": "minivan", "name": "Minivan", "seatsMin": 1, "seatsMax": 7, "cities": ["addis-ababa"] }
+  ],
+  "features": { "phoneBooking": true, "corporateBooking": true, "tripPin": false, "sos": true },
+  "maintenance": { "newTripsPaused": false, "message": "Anbessa is briefly unavailable for maintenance. Please try again in a few minutes." },
+  "minAppVersions": { "rider": { "android": "1.0.0", "ios": "1.0.0" }, "driver": { "android": "1.2.0", "ios": "1.0.0" } },
+  "announcements": [
+    { "id": "01a17900-0000-7000-8000-000000000001", "title": "Fuel prices", "body": "Fares in Addis Ababa change on Monday.", "severity": "info", "audiences": ["rider", "driver"], "cities": ["addis-ababa"], "startsAt": "2026-10-26T00:00:00.000Z", "endsAt": null }
+  ]
+}

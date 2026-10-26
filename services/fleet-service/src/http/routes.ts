@@ -234,4 +234,13 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
     if (!s) throw notFound("session");
     return { sessionId: s.id, vehicleId: s.vehicleId, vehicleType: s.vehicle.vehicleType, ownerType: s.vehicle.ownerType, beneficiaryId: s.vehicle.ownerOrgId ?? s.vehicle.ownerUserId };
   });
+
+  // trip-service (GET /api/trips/:id/parties): what a rider sees of the car coming for them
+  app.get("/internal/vehicles/:id", async (req) => {
+    internal(req);
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const v = await db.vehicle.findUnique({ where: { id }, select: { id: true, plateNumber: true, vehicleType: true, make: true, model: true, color: true } });
+    if (!v) throw notFound("vehicle");
+    return v;
+  });
 }

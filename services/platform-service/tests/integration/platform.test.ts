@@ -84,9 +84,12 @@ describe("cities, vehicle types, client configuration", () => {
     const res = await h.req("PUT", "/api/platform/vehicle-types/electric", a, { name: "Electric", seatsMin: 3, seatsMax: 4, enabled: true, cities: ["addis-ababa"] });
     expect(res.statusCode, res.body).toBe(200);
     await h.req("PUT", "/api/platform/settings/features.phoneBooking", a, { value: false, reason: "call center closed today" });
-    const cfg = (await h.app.inject({ method: "GET", url: "/api/platform/client-config" })).json<{ vehicleTypes: { code: string }[]; features: { phoneBooking: boolean }; maintenance: { newTripsPaused: boolean } }>();
+    await h.req("PUT", "/api/platform/settings/features.sos", a, { value: true, reason: "safety desk staffed" });
+    const cfg = (await h.app.inject({ method: "GET", url: "/api/platform/client-config" })).json<{ vehicleTypes: { code: string }[]; features: Record<string, boolean>; maintenance: { newTripsPaused: boolean } }>();
     expect(cfg.vehicleTypes.map((t) => t.code)).toContain("electric");
     expect(cfg.features.phoneBooking).toBe(false);
+    // the phone app's modules built ahead of their services stay hidden until switched on
+    expect(cfg.features).toMatchObject({ sos: true, scheduledRides: false, support: false, promos: false, accountDeletion: false });
     expect(cfg.maintenance.newTripsPaused).toBe(false);
   });
 

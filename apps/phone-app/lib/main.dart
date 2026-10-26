@@ -1,31 +1,19 @@
+// Boot: preferences, local notifications and push (where supported), then the app. Everything
+// else is built lazily by Riverpod from core/network/providers.dart.
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'core/session/session.dart';
-import 'core/theme/app_theme.dart';
-import 'features/auth/presentation/login_screen.dart';
-import 'features/driver/presentation/driver_home_screen.dart';
-import 'features/rider/presentation/rider_home_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'app.dart';
+import 'core/network/providers.dart';
+import 'core/push/local_notifications.dart';
+import 'core/push/push_service.dart';
 
-void main() {
-  runApp(const ProviderScope(child: RideApp()));
-}
-
-/// One app for both riders and drivers — the signed-in user's role decides
-/// which home screen (and theme) they get.
-class RideApp extends ConsumerWidget {
-  const RideApp({super.key});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final role = ref.watch(sessionRoleProvider);
-    return MaterialApp(
-      title: 'Ride',
-      theme: role == AppRole.driver ? driverTheme : riderTheme,
-      home: switch (role) {
-        null => const LoginScreen(),
-        AppRole.rider => const RiderHomeScreen(),
-        AppRole.driver => const DriverHomeScreen(),
-      },
-    );
-  }
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final prefs = await SharedPreferences.getInstance();
+  final container = ProviderContainer(overrides: [prefsProvider.overrideWithValue(prefs)]);
+  await container.read(localNotificationsProvider).init();
+  await container.read(pushServiceProvider).init();
+  runApp(UncontrolledProviderScope(container: container, child: const AnbessaApp()));
 }

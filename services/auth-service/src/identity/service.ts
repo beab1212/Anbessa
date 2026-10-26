@@ -519,6 +519,13 @@ export function createIdentityService(deps: IdentityDeps) {
     },
 
     /** For other services (fleet-service): an organisation's kind, status, city and legal name. */
+    /** For other services: the name shown to the other side of a trip (no phone number). */
+    async publicNameForService(id: string) {
+      const u = await db.user.findUnique({ where: { id }, select: { id: true, name: true } });
+      if (!u) throw notFound("user");
+      return u;
+    },
+
     async organizationForService(id: string) {
       const org = await db.organization.findUnique({ where: { id }, select: { id: true, name: true, kind: true, cityId: true, legalName: true, status: true } });
       if (!org) throw notFound("organization");

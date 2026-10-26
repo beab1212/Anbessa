@@ -119,15 +119,19 @@ map-data:
 	@bash scripts/map-data.sh
 
 # ── dev ────────────────────────────────────────────────────────────────────────
+# --concurrency: turbo runs 10 tasks at a time by default and every service + web is a
+# persistent dev task (12 today), so the rest would silently never start.
 dev-services: secrets
-	pnpm turbo run dev --parallel
+	pnpm turbo run dev --parallel --concurrency=32
 
 dev-svc: secrets
 	@[ -n "$(SVC)" ] || (echo "Usage: make dev-svc SVC=auth-service" && exit 1)
 	pnpm --filter @ride-app/$(SVC) dev
 
+# ENV=dev-host (default: desktop/emulator against `make dev-services`), dev-emulator (Android
+# emulator → 10.0.2.2), stack (`make stack-up`, through Kong) or staging; see apps/phone-app/env/
 dev-mobile:
-	cd apps/phone-app && flutter run
+	cd apps/phone-app && flutter run --dart-define-from-file=env/$(or $(ENV),dev-host).json
 
 dev-web:
 	cd apps/web && pnpm dev

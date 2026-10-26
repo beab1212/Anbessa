@@ -32,11 +32,12 @@ const PROVIDER: Record<string, string> = { telebirr: "telebirr", cbebirr: "CBE B
 const METHOD: Record<string, string> = { CASH: "cash", MOBILE_MONEY: "mobile money", CARD: "card", CORPORATE: "company account" };
 
 /** payment.action_required → push to the rider: approve with the provider. */
-export function approvePaymentPush(amountMinor: number, provider: string, purpose: string, checkoutUrl: string | null): PushMessage {
+export function approvePaymentPush(amountMinor: number, provider: string, purpose: string, checkoutUrl: string | null, tripId?: string): PushMessage {
   return {
     title: purpose === "CANCELLATION_FEE" ? "Approve the cancellation fee" : "Approve your trip payment",
     body: `Approve ${etb(amountMinor)} to Anbessa in ${PROVIDER[provider] ?? provider}.`,
-    data: { type: "payment.action_required", ...(checkoutUrl ? { checkoutUrl } : {}) },
+    // tripId: the app opens that trip's pay screen when the notification is tapped
+    data: { type: "payment.action_required", ...(tripId ? { tripId } : {}), ...(checkoutUrl ? { checkoutUrl } : {}) },
   };
 }
 
@@ -50,13 +51,13 @@ export function receiptPush(fareMinor: number, method: string, purpose: string, 
 }
 
 /** payment.failed → push to the rider. */
-export function paymentFailedPush(amountMinor: number, final: boolean): PushMessage {
+export function paymentFailedPush(amountMinor: number, final: boolean, tripId?: string): PushMessage {
   return {
     title: "Payment didn't go through",
     body: final
       ? `${etb(amountMinor)} is still owed for your trip. Pay it from your trips in the app.`
       : `We couldn't collect ${etb(amountMinor)}. We'll ask again shortly, or pay now from the app.`,
-    data: { type: "payment.failed" },
+    data: { type: "payment.failed", ...(tripId ? { tripId } : {}) },
   };
 }
 

@@ -1,5 +1,5 @@
 name: ride_app_core
-description: Shared Dart models, API client base, and design tokens used by the phone app (rider + driver modes).
+description: Contracts and pure logic for the Anbessa phone app - API models mirrored from libs/shared-types, the typed API client, realtime event parsing, money/time/phone helpers, and the design system (theme and widgets). No Riverpod, no platform plugins.
 publish_to: "none"
 version: 1.0.0
 resolution: workspace
@@ -10,8 +10,15 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  dio: ^5.11.1
+  intl: ^0.20.2
+  crypto: ^3.0.7
+  meta: ^1.16.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

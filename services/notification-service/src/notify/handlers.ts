@@ -49,7 +49,7 @@ export function createHandlers(notifier: Notifier): Record<string, Handler> {
     "payment.action_required": async (e) => {
       const rider = str(e.riderId);
       if (!rider) return;
-      return notifier.push(e.eventId, "payment_approve", rider, approvePaymentPush(num(e.amountMinor), str(e.provider) ?? "", str(e.purpose) ?? "", str(e.checkoutUrl) ?? null));
+      return notifier.push(e.eventId, "payment_approve", rider, approvePaymentPush(num(e.amountMinor), str(e.provider) ?? "", str(e.purpose) ?? "", str(e.checkoutUrl) ?? null, str(e.tripId)));
     },
     "trip.settled": async (e) => {
       const rider = str(e.riderId);
@@ -59,7 +59,7 @@ export function createHandlers(notifier: Notifier): Record<string, Handler> {
     "payment.failed": async (e) => {
       const rider = str(e.riderId);
       if (!rider) return;
-      return notifier.push(e.eventId, "payment_failed", rider, paymentFailedPush(num(e.amountMinor), e.final === true));
+      return notifier.push(e.eventId, "payment_failed", rider, paymentFailedPush(num(e.amountMinor), e.final === true, str(e.tripId)));
     },
     "refund.succeeded": async (e) => {
       const rider = str(e.riderId);

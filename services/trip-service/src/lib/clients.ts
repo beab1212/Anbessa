@@ -76,3 +76,33 @@ export function mappingClient(base: string, token: string): MappingClient {
     route: (points) => call(base, token, "/internal/route", { method: "POST", body: JSON.stringify({ points }) }),
   };
 }
+
+export interface PublicVehicle {
+  id: string;
+  plateNumber: string;
+  vehicleType: string;
+  make: string;
+  model: string;
+  color: string;
+}
+
+/** Who is on the other side of a trip: auth-service names, fleet-service cars. */
+export interface PartiesClient {
+  userName(userId: string): Promise<string | null>;
+  vehicle(vehicleId: string): Promise<PublicVehicle | null>;
+}
+
+export function partiesClient(authBase: string, fleetBase: string, token: string): PartiesClient {
+  const orNull = async <T>(p: Promise<T>) => {
+    try {
+      return await p;
+    } catch (err) {
+      if (err instanceof NotFoundUpstream) return null;
+      throw err;
+    }
+  };
+  return {
+    userName: async (userId) => (await orNull(call<{ name: string }>(authBase, token, `/internal/users/${userId}`)))?.name ?? null,
+    vehicle: (vehicleId) => orNull(call<PublicVehicle>(fleetBase, token, `/internal/vehicles/${vehicleId}`)),
+  };
+}

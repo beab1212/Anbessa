@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | ✅ Implemented (v1) in `services/auth-service` and `libs/shared-authz`. Phone app and dashboard screens still to do. What changed while building it: [§17](#17-implementation-notes-v1) |
+| **Status** | ✅ Implemented (v1) in `services/auth-service` and `libs/shared-authz`, with the phone app's and web app's sign-in screens. What changed while building it: [§17](#17-implementation-notes-v1) |
 | **Scope** | How Anbessa authenticates riders, drivers, partners and staff with **[Better Auth](https://better-auth.com)**: plugins, configuration, how the 18 roles and their scopes map onto Better Auth, sessions vs JWTs, verification in other services, data model, security, migration from the current auth-service |
 | **Out of scope** | *What* each role may do. That stays in [Role.md](Role.md) and `libs/shared-authz` |
 | **Related** | [← Design home](README.md) · [Role.md](Role.md) · [Database.md](Database.md) · [Payment.md](Payment.md) |
@@ -820,7 +820,7 @@ Today, auth-service has hand-written `register`/`login` (both currently broken, 
 | **3. Data migration** ✅ | `User` → `user` (+ `phoneNumber`), `passwordHash` → `account` (`providerId = "credential"`, argon2 kept), `role` → `user.role` (`RIDER → rider`, `DRIVER → driver`, `ADMIN → super_admin`, flagged for review). Seed `STAFF_CITY` org `staff-addis-ababa` | Existing users keep working |
 | **4. Switch auth-service** ✅ | Mount both Better Auth surfaces. Delete the hand-written routes, `jose` signing and `JWT_PRIVATE_KEY_PATH`. Add `/api/identity/*` for guests and staff grants | Login works (fixes today's bugs) |
 | **5. Switch verifiers** ✅ (gateway; other services as they get routes) | `libs/shared-authz` `verifyAccessToken` in realtime-gateway and services. Remove the `jwt` plugin from Kong | One verification path |
-| **6. Clients** | Phone app (`apps/phone-app`): OTP screens + bearer + `/token` refresh (replaces the login placeholder and the rider/driver buttons). Web app (`apps/web`): phone OTP for the fleet and corporate portals, password + TOTP for the staff dashboard | End-to-end |
+| **6. Clients** ✅ | Phone app (`apps/phone-app`): OTP screens, session token in secure storage sent as a bearer, `/token` refresh 60 s before expiry and on `token_outdated`/`token_revoked` (one refresh at a time), roles from the JWT pick the mode, sign-out removes the push token first. Web app (`apps/web`): phone OTP for the fleet and corporate portals, password + TOTP for the staff dashboard | End-to-end |
 | **7. Hardening** (partly: integration tests for ban, pv, OTP lockout) | OTP abuse controls, key-rotation drill, ban → denylist test, audit events | Production-ready |
 
 ---
@@ -918,7 +918,6 @@ Errors are JSON `{ error, message }`: 400 `validation_error`, 401 `invalid_token
 - `act` claim for call-center actions on behalf of a rider.
 - Sign-in success/failure `audit.recorded` events, CAPTCHA after repeated OTP sends.
 - Staff password reset (v1: a super admin creates a new account, or resets it in the database with an audited script).
-- Phone app OTP screens and dashboard password + TOTP screens.
 
 ### notification-service (OTP delivery)
 

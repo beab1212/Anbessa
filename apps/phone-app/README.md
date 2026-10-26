@@ -1,130 +1,101 @@
-# phone-app — the Anbessa phone app (rider + driver)
+# phone-app: the Anbessa phone app (rider + driver)
 
-One Flutter app for **both** sides of a trip:
+One Flutter app for both sides of a trip:
 
-- **Rider mode**: book trips, track the driver live, pay.
-- **Driver mode**: go online, accept trip requests, navigate, send live GPS, track earnings.
+- **Rider mode**: pick a pickup and a drop-off, compare fares, request, follow the driver live, pay (cash, mobile money, card, company account), rate, see receipts.
+- **Driver mode**: apply and upload documents, register a car, go online, take trip offers, drive the trip (arrival is geofenced, the PIN starts it), see the balance, top up, set the payout method.
 
-The signed-in user's roles decide the mode. auth-service puts a `roles` claim
-(`[{ "r": "RIDER" }, { "r": "DRIVER" }]`) in the JWT; after login it is stored in
-`sessionRoleProvider` (`lib/core/session/session.dart`), and `RideApp` in
-`lib/main.dart` shows the matching home screen and theme (indigo for rider,
-teal for driver). Until login is wired to the API, the login screen has
-**Continue as rider** / **Continue as driver** buttons so you can work on either side.
+Sign-in is phone OTP. The JWT's `roles` claim decides the modes: riders get rider mode, drivers get both and choose (switchable in Account). Android is the first target; iOS is configured but not built yet.
 
 ## Quick start
 
 ```bash
-# 1. Make sure Flutter is installed
-flutter --version   # needs 3.44+ (Dart 3.12+)
-#    Install: https://docs.flutter.dev/get-started/install
+make setup-mobile                      # from the repo root: dart pub get for the workspace
+make dev-services                      # the backend (ports 3000–3011)
+make dev-mobile                        # flutter run --dart-define-from-file=env/dev-host.json
+make dev-mobile ENV=dev-emulator       # Android emulator (backend at 10.0.2.2)
 
-# 2. Install dependencies — from the repo root (Dart pub workspace)
-dart pub get        # or: make setup-mobile
-
-# 3. Run on a connected device or emulator
-flutter run         # or, from the root: make dev-mobile
-#    List available devices first: flutter devices
-
-# 4. Run tests
-flutter test
+# on this machine, without a phone: two windows, one rider and one driver
+flutter run -d linux --dart-define-from-file=env/dev-host.json
 ```
 
-Platforms: **Android** and **iOS** (`android/`, `ios/`). iOS builds need macOS.
-Before the first Android build, accept the SDK licenses once with `flutter doctor --android-licenses`.
+Debug builds with `DEV_LOGIN=on` show the ready-made accounts on the welcome screen: rider `+251900000501`, approved driver `+251900000402`, applicant `+251900000401`, fleet driver `+251900000102`. Drivers need fleet data (`pnpm --filter @ride-app/fleet-service seed:dev`). On Linux, or with `FAKE_LOCATION=on`, location is simulated: the driver screens get a panel that moves the car or drives it to the pickup.
 
-> **No backend needed for initial UI development.**
-> The API and WebSocket URLs are compile-time constants in
-> `lib/core/config/env.dart`, set with `--dart-define`. They default to the
-> local docker-compose stack (`http://localhost:8000`, `ws://localhost:3000`).
+Checks, from the root: `dart run melos run analyze` and `dart run melos run test`. An installable build: `flutter build apk --debug --dart-define-from-file=env/dev-emulator.json`.
 
-> **GPS note (driver mode):** live location pings go through
-> `lib/core/network/location_pinger.dart`. Location permissions are declared in
-> `android/app/src/main/AndroidManifest.xml` and `ios/Runner/Info.plist`.
-> On an emulator, use its simulated-location feature.
+## Configuration (`env/*.json`, read by `lib/core/config/env.dart`)
 
----
+| Define | Meaning |
+|---|---|
+| `API_MODE` | `host`: `/api/<prefix>` goes straight to the service's port (`make dev-services`, no Kong). `gateway`: everything through `API_BASE_URL` (Kong) |
+| `API_BASE_URL`, `HOST_BASE` | Kong's URL, or the host for the per-service ports |
+| `WS_URL` | realtime-gateway (Socket.io) |
+| `TILE_URL`, `TILE_ATTRIBUTION` | raster tiles `{z}/{x}/{y}`; empty = OpenStreetMap's (development only) |
+| `DEV_LOGIN` | `on`: the dev sign-in panel (debug builds only; the backend refuses it in production) |
+| `FAKE_LOCATION` | `on`: simulated location (always on for Linux desktop) |
+| `APP_LINK_HOST` | host of the `https://` app links (`app.anbessa.et`) |
+| `FIREBASE_*` | push; without them push is off and nothing else changes |
 
-## Running against a specific backend
-
-```bash
-# Local stack (after `make dev-services` from root)
-flutter run \
-  --dart-define=API_BASE_URL=http://localhost:8000 \
-  --dart-define=WS_URL=ws://localhost:3000
-
-# Staging
-flutter run \
-  --dart-define=API_BASE_URL=https://api.staging.ride-app.example \
-  --dart-define=WS_URL=wss://ws.staging.ride-app.example
-```
-
-On the Android emulator, `localhost` is the emulator itself. Use `10.0.2.2` to reach your machine.
-
----
-
-## Project layout
+## How it is built
 
 ```
-lib/
-├── main.dart                    RideApp: picks rider/driver home + theme from the session role
-├── core/                        shared by both modes
-│   ├── config/env.dart          API_BASE_URL / WS_URL (--dart-define)
-│   ├── network/
-│   │   ├── api_client.dart      Dio wrapper, attaches the JWT
-│   │   ├── socket_client.dart   Socket.io: subscribe to live trip updates
-│   │   └── location_pinger.dart Socket.io: driver GPS pings → realtime-gateway
-│   ├── session/session.dart     AppRole + sessionRoleProvider (Riverpod Notifier)
-│   └── theme/app_theme.dart     riderTheme / driverTheme
-└── features/
-    ├── auth/                    shared login (data / domain / presentation)
-    ├── rider/
-    │   ├── presentation/        RiderHomeScreen
-    │   ├── map/                 Live map (flutter_map + OSM tiles)
-    │   ├── trip/                Request ride, trip status, trip history
-    │   └── payment/             Payment methods, receipt
-    └── driver/
-        ├── presentation/        DriverHomeScreen
-        ├── map/                 Navigation map during a trip
-        ├── trip/                Accept/reject requests, trip lifecycle
-        └── earnings/            Daily/weekly earnings summary
+packages/core (ride_app_core)        no Riverpod, no plugins: contracts and pure logic
+  models/     Trip, TripOffer, Quote, Place, ClientConfig (+ feature flags), Claims, Payment,
+              Balance, fleet (DriverHome, Vehicle, Checklist…): hand-written fromJson,
+              unknown enum values map to `unknown` so a new backend status can't crash old apps
+  api/        ApiClient (Dio): host-mode routing, bearer + one refresh-and-replay on 401,
+              Idempotency-Key, retries for GETs and idempotent POSTs, every failure → AppError;
+              one class per service (AuthApi, TripsApi, PaymentsApi, FleetApi…)
+  realtime/   socket event names and the sealed RealtimeEvent
+  domain/     trip stages, money (birr), Addis time, phone formats, semver, geo helpers
+  ui/         the theme (the web app's tokens) and shared widgets
+
+apps/phone-app
+  lib/core/       env, session (secure store, TokenManager, SessionController, mode), network
+                  providers, realtime hub, location sources, push and local notifications,
+                  router (routes + guards), l10n
+  lib/features/   auth, bootstrap (splash, forced update, banners), config, shell, maps,
+                  rider/{home, booking, trip, payments, rating, history},
+                  driver/{onboarding, shift, offers, trip, earnings}, profile, flagged
 ```
 
-Each feature follows the same **data / domain / presentation** split, with
-`features/auth` as the worked example. `domain/` defines the abstract repository
-contract, `data/` implements it, and `presentation/` holds screens and Riverpod
-providers that call `domain/`. You can build and test the UI with a mock
-repository and no backend running.
+- **State**: Riverpod 3. The load-bearing providers: `sessionProvider`, `effectiveModeProvider`, `clientConfigProvider` / `featureProvider(flag)`, `realtimeHubProvider`, `activeTripProvider`, `tripProvider(id)`, `tripPartiesProvider(id)`, `driverLiveProvider(id)`, `shiftProvider`, `offerProvider`, `balanceProvider`, `routerProvider`.
+- **Session** (`lib/core/session`): the session token from OTP sign-in lives in secure storage and is sent as a bearer to auth-service; `TokenManager` turns it into the 15-minute JWT (`GET /api/auth/token`), refreshes it 60 s before expiry or when a service answers `token_outdated` / `token_revoked`, and runs one refresh at a time. A refused session signs out with a reason.
+- **Routing** (`lib/core/router/app_router.dart`): one go_router table, redirects in this order: still loading → splash; too old a version → update required; signed out → welcome; both roles and no choice → mode; driver mode without an approved profile → onboarding; an active trip takes over (SOS, support and account screens excepted). Deep links `anbessa://trip/<id>` and `https://app.anbessa.et/pay/<tripId>` resolve to the current mode.
+- **Realtime** (`lib/core/realtime/realtime_hub.dart`): one Socket.io connection while signed in. A fresh JWT before every (re)connect (the gateway only checks it at the handshake), trip rooms re-joined after reconnects, three refusals sign out. Without the socket, the rider's view of the driver falls back to polling, and the active trip is refetched on reconnect and on resume.
+- **Location** (`lib/core/location`): `GeolocatorSource` (on Android a foreground service keeps pings going while the driver is online) or `FakeLocationSource`. Online drivers ping every 4 s when moving and 10 s when still; the gateway's acks are counted on the home screen.
+- **Maps** (`lib/features/maps`): flutter_map with raster tiles, pickup/drop-off pins, the driver's car (turned by heading, greyed when its position is older than 20 s), a dashed straight line (quotes carry no route geometry yet), and a place picker (search, common places, pick on the map, current location).
+- **Money**: amounts are minor units (santim) everywhere; `birr()` formats them per locale. Mobile money and card are charged after the trip; the pay screen follows `payment:action_required` / `captured` / `failed` and opens the provider's page. The providers are simulated by payment-service until the real integrations land.
+- **Languages**: English and Amharic (`lib/core/l10n/app_*.arb`, Noto Sans Ethiopic bundled under the OFL). The generated code in `lib/core/l10n/generated/` isn't committed: `flutter run/build/test` regenerate it, `melos run gen` before `flutter analyze`.
+- **Push**: FCM through notification-service. Tokens are registered after sign-in and removed before sign-out; a tap routes by the payload's `type`. Trip offers that arrive while the app is in the background raise a local notification.
 
-Code that both modes need (networking, session, theme, shared widgets from
-`packages/core`) lives in `core/`. Mode-specific code stays under
-`features/rider` or `features/driver`.
+## Feature flags and modules built ahead of their services
 
----
+Client-config (`GET /api/platform/client-config`) carries `features`. Admins switch them in the web app under Settings → Feature flags.
 
-## Common commands
+| Flag | What the app does with it | Backend |
+|---|---|---|
+| `corporateBooking` | company-account payment at the quote, for company employees | live |
+| `tripPin` | the rider sees the PIN; the driver must enter it | live |
+| `scheduledRides` | Scheduled rides (home, account) | not yet: screens, models and `ScheduledRidesRepository` exist |
+| `sos` | SOS button on active trips (call 991, alert the safety team) | calling works; alerting needs the safety service |
+| `support` | Support tickets (account) | not yet: `SupportRepository` |
+| `promos` | Promo codes (home, account) | not yet: `PromosRepository` |
+| `accountDeletion` | Delete account (account) | not yet: `AccountRepository` |
 
-| Command | What it does |
-|---------|-------------|
-| `flutter run` | Run on connected device |
-| `flutter test` | Run unit + widget tests |
-| `flutter analyze` | Static analysis (flutter_lints 6) |
-| `flutter build apk` | Build Android release APK |
-| `flutter build ios` | Build iOS release (macOS only) |
-| `dart pub get` (repo root) | Install / sync the whole workspace |
-| `dart pub upgrade` (repo root) | Upgrade dependencies |
-| `dart run melos run analyze` / `test` (repo root) | Analyze / test every Flutter package |
+These modules live in `lib/features/flagged/flagged_modules.dart`. Each repository's stand-in answers `not_available`, so turning a flag on early shows "not available yet" rather than breaking. When a service lands, implement the repository against it and override its provider.
 
----
+## Changing the contracts
 
-## Key dependencies
+The Dart models mirror `libs/shared-types` and the services' views by hand. A change to a response shape updates the model in `packages/core/lib/src/models/` and its fixture in `packages/core/test/fixtures/` in the same change.
 
-| Package | Purpose |
-|---------|---------|
-| `flutter_riverpod` 3 | State management (session role, feature providers) |
-| `flutter_map` 8 + `latlong2` | OSM map rendering (no API key) |
-| `dio` 5 | HTTP client |
-| `socket_io_client` 3 | Live trip/location WebSocket |
-| `flutter_secure_storage` 11 | Token storage |
-| `geolocator` 14 | Driver-mode GPS |
-| `ride_app_core` | Shared models + widgets (`packages/core`) |
+## Tests
+
+- `packages/core/test`: model fixtures, the API client against a fake HTTP adapter (auth refresh and replay, idempotency, error mapping), domain helpers.
+- `apps/phone-app/test`: TokenManager, OfferController (fake socket), the router's guard order, and a smoke test that boots the app on a 360 dp screen at 1.3× text in English and Amharic.
+
+## Platforms
+
+- **Android**: location, foreground-service, notification and camera permissions; debug-only cleartext HTTP for the dev stack; `anbessa://` and `https://app.anbessa.et` links (the latter needs `assetlinks.json` served there); core library desugaring for local notifications.
+- **iOS**: location (when in use and always), camera and photo descriptions, background modes `location` and `remote-notification`, the `anbessa` URL scheme. Not built yet (needs a Mac).
+- **Linux desktop**: development only, with simulated location.

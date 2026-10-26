@@ -1,0 +1,8 @@
+{
+  "API_MODE": "host",
+  "HOST_BASE": "http://localhost",
+  "WS_URL": "ws://localhost:3000",
+  "TILE_URL": "",
+  "DEV_LOGIN": "on",
+  "FAKE_LOCATION": "on"
+}
