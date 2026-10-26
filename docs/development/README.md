@@ -153,10 +153,28 @@ Every service exposes `GET /health`.
 | | `make infra-up` + `make dev-services` | `make stack-up` |
 |---|---|---|
 | Services run | on your machine, hot reload | in containers built from each `Dockerfile` |
-| Kong (`:8000`) | not started (Kong routes to container hostnames) | yes, in front of auth/trip/pricing/payment |
+| Kong (`:8000`) | optional: `make dev-gateway` (below) | yes, in front of every service |
 | Use it for | day-to-day coding | checking the production images and Kong routing |
 
 Both use ports 3000–3007, so stop one (`make infra-down`) before starting the other.
+
+### Kong in front of `make dev-services`
+
+To call the services the way production does (one origin, Kong's routes, rate limits and body-size limits):
+
+```bash
+make dev-services        # as usual
+make dev-gateway         # Kong on :8000 → the services on your machine
+make dev-gateway-down    # stop it
+```
+
+- `scripts/kong-dev-config.sh` writes `infra/kong/kong.dev.yml` from `infra/kong/kong.yml` (not committed): the same routes and plugins, with every upstream on `host.docker.internal:<port>`, plus `/api/dev` for the dev sign-in panels. Change routes in `kong.yml` and rerun `make dev-gateway`.
+- Kong runs in Docker (`infra/kong/docker-compose.dev.yml`); the admin API is on `localhost:8001` (`curl localhost:8001/routes`).
+- `/internal/*` isn't routed, so through Kong it answers 404, as in production. Kong doesn't check tokens: the services do.
+- realtime-gateway (Socket.io, `:3000`) isn't behind Kong; apps connect to it directly.
+- Web app through Kong: `GATEWAY_URL=http://localhost:8000 pnpm --filter @ride-app/web dev`. Phone app: `flutter run --dart-define-from-file=env/dev-kong.json`.
+- Rate limits apply (60 sign-in requests a minute for the auth routes, for everyone together, since they all come from your machine).
+- Don't run it alongside `make stack-up`: both use port 8000.
 
 ### Working on one service in isolation
 
@@ -240,7 +258,8 @@ make dev-mobile ENV=dev-emulator  # Android emulator: the backend is 10.0.2.2
   |---|---|---|
   | `env/dev-host.json` | `make dev-services` on this machine (no Kong: `/api/<prefix>` goes straight to the service's port) | Dev sign-in panel on, fake location on |
   | `env/dev-emulator.json` | the same, from the Android emulator (`10.0.2.2` is your machine) | Real GPS (set it in the emulator's extended controls) |
-  | `env/stack.json` | `make stack-up` through Kong on `:8000` | No dev sign-in (Kong doesn't route `/api/dev`) |
+  | `env/dev-kong.json` | `make dev-services` behind `make dev-gateway` (Kong on `:8000`) | Dev sign-in panel on, fake location on |
+  | `env/stack.json` | `make stack-up` through Kong on `:8000` | No dev sign-in (that Kong doesn't route `/api/dev`) |
   | `env/staging.json` | staging | |
 
 - **Run it on Linux** while you work: `cd apps/phone-app && flutter run -d linux --dart-define-from-file=env/dev-host.json`. Location is simulated there (a panel on the driver screens moves the car, or drives it to the pickup for the 150 m arrival check). Open two windows to play rider and driver.

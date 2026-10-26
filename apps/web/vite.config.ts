@@ -5,7 +5,8 @@ import react from "@vitejs/plugin-react";
 // service (no CORS, and the auth cookies stay first-party); in production Kong does the same.
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
-  const target = (name: string, port: number) => env[name] ?? `http://localhost:${port}`;
+  // GATEWAY_URL=http://localhost:8000 sends everything through Kong (`make dev-gateway`)
+  const target = (name: string, port: number) => env[name] ?? env.GATEWAY_URL ?? `http://localhost:${port}`;
   const auth = target("AUTH_URL", 3001);
   return {
     plugins: [react()],

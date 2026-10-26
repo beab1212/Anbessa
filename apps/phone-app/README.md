@@ -14,6 +14,7 @@ make setup-mobile                      # from the repo root: dart pub get for th
 make dev-services                      # the backend (ports 3000–3011)
 make dev-mobile                        # flutter run --dart-define-from-file=env/dev-host.json
 make dev-mobile ENV=dev-emulator       # Android emulator (backend at 10.0.2.2)
+make dev-mobile ENV=dev-kong           # through Kong (`make dev-gateway`), as in production
 
 # on this machine, without a phone: two windows, one rider and one driver
 flutter run -d linux --dart-define-from-file=env/dev-host.json

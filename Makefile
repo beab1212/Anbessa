@@ -11,7 +11,7 @@
 
 .DEFAULT_GOAL := help
 .PHONY: help setup setup-mobile setup-services setup-web setup-infra \
-        dev-services dev-mobile dev-web dev-infra \
+        dev-services dev-mobile dev-web dev-infra dev-gateway dev-gateway-down \
         stack-up secrets map-data test lint typecheck clean
 
 SHELL := /bin/bash
@@ -42,6 +42,7 @@ help:
 	@echo ""
 	@echo "$(CYAN)Day-to-day dev:$(RESET)"
 	@echo "  make dev-services     Start all services in watch mode (hot reload)"
+	@echo "  make dev-gateway      Kong on :8000 in front of dev-services (dev-gateway-down stops it)"
 	@echo "  make dev-mobile       Flutter run the phone app (rider + driver modes)"
 	@echo "  make dev-web          Start the web app dev server"
 	@echo "  make dev-infra        Start the local mapping stack"
@@ -129,12 +130,22 @@ dev-svc: secrets
 	pnpm --filter @ride-app/$(SVC) dev
 
 # ENV=dev-host (default: desktop/emulator against `make dev-services`), dev-emulator (Android
-# emulator → 10.0.2.2), stack (`make stack-up`, through Kong) or staging; see apps/phone-app/env/
+# emulator → 10.0.2.2), dev-kong (dev-services behind `make dev-gateway`), stack (`make stack-up`, through Kong) or staging; see apps/phone-app/env/
 dev-mobile:
 	cd apps/phone-app && flutter run --dart-define-from-file=env/$(or $(ENV),dev-host).json
 
 dev-web:
 	cd apps/web && pnpm dev
+
+# Kong (:8000) in front of `make dev-services`, with kong.yml's routes and limits
+dev-gateway:
+	@bash scripts/kong-dev-config.sh
+	docker compose -f infra/kong/docker-compose.dev.yml up -d
+	@until curl -s -o /dev/null http://localhost:8001/status; do sleep 1; done
+	@echo "$(GREEN)✔  Kong on http://localhost:8000 → services on this machine (routes: curl localhost:8001/routes)$(RESET)"
+
+dev-gateway-down:
+	docker compose -f infra/kong/docker-compose.dev.yml down
 
 dev-infra:
 	docker compose -f infra/mapping-stack/docker-compose.mapping.yml up
