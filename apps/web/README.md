@@ -66,7 +66,7 @@ Without Nominatim, place search falls back to a list of common Addis Ababa place
 
 ```
 src/
-├── lib/          api (tokens per surface, errors), session, hooks, formatting
+├── lib/          api (axios clients: Better Auth calls, service calls with the surface token, ApiError), session, hooks, formatting
 ├── components/   Shell (sidebar + top bar), ui (pills, fields, notices, drawer), CityPicker, PlacePicker
 │   └── map/      CityMap (MapLibre + context), markers (driver, pickup, drop-off, trip line)
 ├── dev/          development-only sign-in panel (left out of production builds)
@@ -81,5 +81,5 @@ src/
 |---|---|
 | `pnpm dev` | Vite dev server |
 | `pnpm build` | Type-check, then build to `dist/` |
-| `pnpm test` | Logic tests: phone parsing, money, placeholder emails, role → navigation |
+| `pnpm test` | Logic tests: phone parsing, money, placeholder emails, role → navigation, the API client (token, retry, errors) |
 | `pnpm lint` / `pnpm typecheck` | |

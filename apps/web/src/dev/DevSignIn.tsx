@@ -7,7 +7,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { LogIn } from "lucide-react";
-import { ApiError, authCall, type Surface } from "../lib/api";
+import { ApiError, authCall, http, type Surface } from "../lib/api";
 import { phone as fmtPhone } from "../lib/format";
 import { useSession } from "../lib/session";
 import { Pill, Problem } from "../components/ui";
@@ -24,11 +24,7 @@ interface DevAccount {
   seeded: boolean;
 }
 
-async function devGet<T>(path: string): Promise<T> {
-  const res = await fetch(`/api/dev${path}`);
-  if (!res.ok) throw new ApiError(res.status, "dev", res.status === 404 ? "Not found" : `Request failed (${res.status})`);
-  return (await res.json()) as T;
-}
+const devGet = <T,>(path: string) => http.get<T>(`/api/dev${path}`).then((r) => r.data);
 
 const devCode = (q: Record<string, string>) => devGet<{ code: string }>(`/code?${new URLSearchParams(q)}`).then((r) => r.code);
 

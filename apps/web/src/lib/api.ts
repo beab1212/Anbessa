@@ -2,6 +2,7 @@
 // partners the app surface (/api/auth, phone code). Each keeps its own session cookie; the
 // short-lived access token (10 or 15 min) is fetched from /token and kept in memory only.
 
+import axios, { AxiosError } from "axios";
 import { can, parseRoleClaims, type Audience, type Permission, type Principal, type ResourceScope } from "@ride-app/shared-authz";
 
 export type Surface = "staff" | "partner";
@@ -9,31 +10,41 @@ export type Surface = "staff" | "partner";
 const AUTH: Record<Surface, string> = { staff: "/api/admin-auth", partner: "/api/auth" };
 const AUDIENCE: Record<Surface, Audience> = { staff: "ride-admin", partner: "ride-app" };
 
+declare module "axios" {
+  interface AxiosRequestConfig {
+    /** Send the surface's bearer token (service calls). */
+    surface?: Surface;
+    /** Internal: this is the one retry after a 401. */
+    retried?: boolean;
+  }
+}
+
 export class ApiError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) {
     super(message);
   }
 }
 
-async function parse<T>(res: Response): Promise<T> {
-  if (res.status === 204) return undefined as T;
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const b = body as { error?: string; code?: string; message?: string };
-    throw new ApiError(res.status, b.error ?? b.code ?? "error", b.message ?? `Request failed (${res.status})`);
+/** Every failure leaves this module as an ApiError: status, a code, and a message a person can read. */
+function toApiError(err: unknown): ApiError {
+  if (err instanceof ApiError) return err;
+  if (err instanceof AxiosError && err.response) {
+    const b = (err.response.data ?? {}) as { error?: string; code?: string; message?: string };
+    return new ApiError(err.response.status, b.error ?? b.code ?? "error", b.message ?? `Request failed (${err.response.status})`);
   }
-  return body as T;
+  return new ApiError(0, "network", "Can't reach the server. Check your connection and try again.");
 }
 
-/** Better Auth endpoints: cookie session, same origin. */
+const dataOf = <T>(res: { status: number; data: unknown }) => (res.status === 204 ? undefined : res.data) as T;
+
+// Better Auth endpoints: cookie session, same origin.
+export const authHttp = axios.create({ withCredentials: true });
+authHttp.interceptors.response.use(undefined, (err) => Promise.reject(toApiError(err)));
+
+/** Better Auth call on a surface (GET without a body, POST with one). */
 export async function authCall<T = unknown>(surface: Surface, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${AUTH[surface]}${path}`, {
-    method: body === undefined ? "GET" : "POST",
-    credentials: "include",
-    headers: body === undefined ? {} : { "content-type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  return parse<T>(res);
+  const url = `${AUTH[surface]}${path}`;
+  return dataOf<T>(body === undefined ? await authHttp.get(url) : await authHttp.post(url, body));
 }
 
 // ── access tokens ───────────────────────────────────────────────────────────
@@ -58,20 +69,47 @@ export function decodeClaims(token: string): Claims {
 export async function accessToken(surface: Surface, force = false): Promise<{ token: string; claims: Claims } | null> {
   const hit = cache[surface];
   if (!force && hit && hit.claims.exp * 1000 - Date.now() > 60_000) return hit;
-  const res = await fetch(`${AUTH[surface]}/token`, { credentials: "include" });
-  if (res.status === 401 || res.status === 403) {
-    delete cache[surface];
-    return null;
+  try {
+    const { token } = await authCall<{ token: string }>(surface, "/token");
+    const entry = { token, claims: decodeClaims(token) };
+    cache[surface] = entry;
+    return entry;
+  } catch (err) {
+    if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+      delete cache[surface];
+      return null;
+    }
+    throw err;
   }
-  const { token } = await parse<{ token: string }>(res);
-  const entry = { token, claims: decodeClaims(token) };
-  cache[surface] = entry;
-  return entry;
 }
 
 export function forgetTokens(surface: Surface) {
   delete cache[surface];
 }
+
+// ── service calls ───────────────────────────────────────────────────────────
+
+const signedOut = () => new ApiError(401, "signed_out", "Your session ended. Sign in again.");
+
+/** Same-origin /api/* client. With `surface` set it sends that surface's bearer token. */
+export const http = axios.create();
+
+http.interceptors.request.use(async (config) => {
+  if (!config.surface) return config;
+  const t = await accessToken(config.surface, config.retried);
+  if (!t) throw signedOut();
+  config.headers.set("Authorization", `Bearer ${t.token}`);
+  return config;
+});
+
+http.interceptors.response.use(undefined, async (err) => {
+  const config = err instanceof AxiosError ? err.config : undefined;
+  if (config?.surface && err.response?.status === 401) {
+    if (config.retried) throw signedOut();
+    return http.request({ ...config, retried: true }); // role changed (pv) or token expired: refresh once
+  }
+  throw toApiError(err);
+});
 
 /** A service call with the surface's bearer token. Retries once with a fresh token on 401. */
 export async function api<T = unknown>(
@@ -79,22 +117,14 @@ export async function api<T = unknown>(
   path: string,
   init: { method?: string; body?: unknown; idempotencyKey?: string } = {},
 ): Promise<T> {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const t = await accessToken(surface, attempt > 0);
-    if (!t) throw new ApiError(401, "signed_out", "Your session ended. Sign in again.");
-    const res = await fetch(path, {
-      method: init.method ?? (init.body === undefined ? "GET" : "POST"),
-      headers: {
-        authorization: `Bearer ${t.token}`,
-        ...(init.body !== undefined ? { "content-type": "application/json" } : {}),
-        ...(init.idempotencyKey ? { "idempotency-key": init.idempotencyKey } : {}),
-      },
-      body: init.body === undefined ? undefined : JSON.stringify(init.body),
-    });
-    if (res.status === 401 && attempt === 0) continue; // role changed (pv) or token expired: refresh once
-    return parse<T>(res);
-  }
-  throw new ApiError(401, "signed_out", "Your session ended. Sign in again.");
+  const res = await http.request({
+    url: path,
+    method: init.method ?? (init.body === undefined ? "GET" : "POST"),
+    data: init.body,
+    surface,
+    headers: init.idempotencyKey ? { "Idempotency-Key": init.idempotencyKey } : undefined,
+  });
+  return dataOf<T>(res);
 }
 
 // ── who is this ─────────────────────────────────────────────────────────────

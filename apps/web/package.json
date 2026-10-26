@@ -16,6 +16,7 @@
     "@ride-app/shared-location": "workspace:*",
     "@ride-app/shared-types": "workspace:*",
     "@tanstack/react-query": "^5.104.5",
+    "axios": "^1.20.0",
     "lucide-react": "^1.61.0",
     "maplibre-gl": "^6.16.0",
     "qrcode": "^1.5.4",
