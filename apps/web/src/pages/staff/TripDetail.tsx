@@ -10,6 +10,8 @@ import { useSession } from "../../lib/session";
 import { CityMap } from "../../components/map/CityMap";
 import { DriverMarker, DropoffMarker, PickupMarker, TripLine } from "../../components/map/markers";
 import { Pill, Problem, TripStatus, tripTone } from "../../components/ui";
+import { PAYMENT_LABEL, paymentTone, PROVIDER_LABEL, type Payment } from "../../lib/money";
+import { PaymentDrawer } from "../money/Payments";
 
 /** Find a trip by id, and read it like a log entry: what happened when, and what it cost. */
 export function TripDetail() {
@@ -113,9 +115,42 @@ function TripSheet({ id }: { id: string }) {
               {t.cancellation ? <><dt>Cancellation fee</dt><dd className="num mono">{birr(t.cancellation.feeMinor)}</dd><dt className="small">to the driver</dt><dd className="num mono small">{birr(t.cancellation.driverCompensationMinor)}</dd></> : null}
             </dl>
             <p className="small muted" style={{ marginTop: "0.9rem" }}>Paid by <strong>{t.paymentMethod.toLowerCase().replace("_", " ")}</strong>{t.billing.type === "CORPORATE" ? " on a company account" : ""}.</p>
+            {t.status === "completed" || t.cancellation?.feeMinor ? <TripPayments tripId={t.id} /> : null}
           </div>
         </div>
       </div>
     </article>
+  );
+}
+
+interface TripMoney {
+  payments: Payment[];
+  settlements: { purpose: string; paymentMethod: string; fareMinor: number; commissionMinor: number; vatMinor: number; earningsMinor: number; settledAt: string; beneficiaryAccountId: string | null }[];
+}
+
+/** payment-service's side of the trip: the charge (if digital) and how it was settled. */
+function TripPayments({ tripId }: { tripId: string }) {
+  const [open, setOpen] = useState<string | null>(null);
+  const q = useQuery({ queryKey: ["money", "trip", tripId], refetchInterval: 10_000, retry: false, queryFn: () => api<TripMoney>("staff", `/api/payments/trips/${tripId}`) });
+  if (q.error) return <p className="xs muted">Payment details aren't available{q.error instanceof Error && q.error.message ? `: ${q.error.message}` : ""}.</p>;
+  if (!q.data) return null;
+  return (
+    <div style={{ marginTop: "0.9rem", paddingTop: "0.9rem", borderTop: "1px solid var(--border)" }}>
+      {q.data.payments.map((p) => (
+        <p key={p.id} className="small" style={{ margin: "0 0 0.4rem" }}>
+          <button className="link" onClick={() => setOpen(p.id)}>{p.purpose === "TRIP_FARE" ? "Fare" : "Fee"} by {PROVIDER_LABEL[p.provider] ?? p.provider}</button>{" "}
+          <Pill tone={paymentTone(p.status)}>{PAYMENT_LABEL[p.status] ?? p.status}</Pill>
+        </p>
+      ))}
+      {q.data.settlements.map((s) => (
+        <dl key={s.purpose} className="kv" style={{ gridTemplateColumns: "1fr auto", margin: "0.4rem 0 0" }}>
+          <dt className="small">Commission</dt><dd className="num mono small">{birr(s.commissionMinor)}</dd>
+          {s.vatMinor ? <><dt className="small">VAT</dt><dd className="num mono small">{birr(s.vatMinor)}</dd></> : null}
+          <dt className="small">Driver's balance</dt><dd className="num mono small">{s.earningsMinor > 0 ? "+" : ""}{birr(s.earningsMinor)}</dd>
+        </dl>
+      ))}
+      {q.data.payments.length === 0 && q.data.settlements.length === 0 ? <p className="xs muted" style={{ margin: 0 }}>Not settled yet.</p> : null}
+      {open ? <PaymentDrawer id={open} onClose={() => setOpen(null)} /> : null}
+    </div>
   );
 }

@@ -53,3 +53,33 @@ export function authClient(baseUrl: string, token: string): AuthClient {
     },
   };
 }
+
+// payment-service internal API: the authoritative balance state when a driver goes online
+// (Payment.md §14). A failure answers null: the session starts, and location-service still applies
+// the latest published state from Redis.
+
+export interface BalanceState {
+  state: "OK" | "WARNING" | "CASH_BLOCKED" | "BLOCKED";
+  cashAllowed: boolean;
+}
+
+export interface BalanceClient {
+  state(type: "INDIVIDUAL" | "ORGANIZATION", ownerId: string): Promise<BalanceState | null>;
+}
+
+export function balanceClient(baseUrl: string, token: string): BalanceClient {
+  return {
+    async state(type, ownerId) {
+      try {
+        const res = await fetch(new URL(`/internal/balances/state?type=${type}&ownerId=${ownerId}`, baseUrl), {
+          headers: { authorization: `Bearer ${token}`, "x-service-name": "fleet-service" },
+          signal: AbortSignal.timeout(2000),
+        });
+        if (!res.ok) return null;
+        return (await res.json()) as BalanceState;
+      } catch {
+        return null;
+      }
+    },
+  };
+}

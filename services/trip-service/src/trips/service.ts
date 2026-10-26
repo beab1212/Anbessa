@@ -184,6 +184,7 @@ export function createTripService(deps: TripServiceDeps) {
     }
     if (!live || live.status !== "available" || live.stale) throw conflict("the driver is not available", "driver_unavailable");
     if (live.cityId !== t.cityId || live.vehicleType !== t.vehicleType) throw conflict("the driver's vehicle doesn't match this trip", "driver_unavailable");
+    if (live.balanceState === "BLOCKED") throw conflict("the driver's balance is blocked", "driver_unavailable");
     if (t.paymentMethod === "CASH" && !live.cashAllowed) throw conflict("the driver can't take cash trips right now", "driver_unavailable");
 
     const ownerType = live.fleetOrgId ? "ORGANIZATION" : "INDIVIDUAL";
@@ -228,6 +229,7 @@ export function createTripService(deps: TripServiceDeps) {
           tripId: u.id, riderId: u.riderUserId, ...(u.driverUserId ? { driverId: u.driverUserId } : {}), cityId: u.cityId,
           by, reason, paymentMethod: u.paymentMethod as PaymentMethod, feeMinor: Number(fee.feeMinor),
           driverCompensationMinor: Number(fee.compensationMinor), ...(beneficiaryOf(u) ? { beneficiary: beneficiaryOf(u)! } : {}), currency: u.currency,
+          ...(u.billingOrgId ? { billingOrgId: u.billingOrgId } : {}),
         },
       }),
       async (tx) => {
@@ -283,6 +285,10 @@ export function createTripService(deps: TripServiceDeps) {
       if (deps.settings.get<boolean>("maintenance.newTrips")) throw new AppError(503, deps.settings.get<string>("maintenance.message"), "maintenance");
       if (channel === "PHONE" && !deps.settings.get<boolean>("features.phoneBooking")) throw new AppError(403, "phone booking is turned off", "feature_disabled");
       if (input.billingOrgId && !deps.settings.get<boolean>("features.corporateBooking")) throw new AppError(403, "company account bookings are turned off", "feature_disabled");
+      // payment methods offered in the city (admin settings → Payments); company accounts are always billed
+      if (!corporate && !deps.settings.get<string[]>("payments.methods", quote.cityId).includes(input.paymentMethod)) {
+        throw new AppError(403, `${input.paymentMethod.toLowerCase().replace("_", " ")} payments aren't available in this city right now`, "payment_method_unavailable");
+      }
 
       try {
         const trip = await db.$transaction(async (tx) => {

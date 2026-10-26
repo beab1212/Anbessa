@@ -1,0 +1,408 @@
+// Payment database (docs/design/Payment.md, Database.md §7.4). Tables and columns are snake_case
+// via @map. What Prisma can't express is in the SQL migrations: the deferred trigger that makes
+// every journal entry balance, the triggers that make the ledger append-only, CHECK constraints
+// and the exclusion constraint that stops commission rules from overlapping.
+
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+// ── ledger ────────────────────────────────────────────────────────────────────
+
+/// One account per owner and kind (Payment.md §5). `code` names it, e.g.
+/// BENEFICIARY_BALANCE:INDIVIDUAL:<userId>, COMMISSION_REVENUE:addis-ababa, PROVIDER_CLEARING:telebirr.
+model LedgerAccount {
+  id           String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  code         String   @unique
+  kind         String
+  /// USER | ORGANIZATION | PLATFORM | PROVIDER
+  ownerType    String   @map("owner_type")
+  ownerId      String?  @map("owner_id")
+  cityId       String?  @map("city_id")
+  currency     String   @default("ETB") @db.Char(3)
+  /// cached Σ postings, updated in the same transaction as each posting
+  balanceMinor BigInt   @default(0) @map("balance_minor")
+  version      Int      @default(0)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  postings    Posting[]
+  beneficiary Beneficiary?
+
+  @@index([kind])
+  @@map("ledger_account")
+}
+
+/// A money movement. Its postings sum to zero (deferred trigger) and it never changes.
+model JournalEntry {
+  id             String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  /// TRIP_SETTLEMENT, CANCELLATION_FEE, TOP_UP, PAYOUT, PAYOUT_REVERSAL, REFUND, RECEIVABLE_COLLECTION
+  kind           String
+  referenceType  String   @map("reference_type")
+  referenceId    String   @map("reference_id")
+  /// e.g. trip-settlement:<tripId>: a retry can't post twice
+  idempotencyKey String   @unique @map("idempotency_key")
+  memo           String?
+  createdBy      String?  @map("created_by") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  postings Posting[]
+
+  @@index([referenceType, referenceId])
+  @@map("journal_entry")
+}
+
+model Posting {
+  id             String        @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  journalEntryId String        @map("journal_entry_id") @db.Uuid
+  journalEntry   JournalEntry  @relation(fields: [journalEntryId], references: [id])
+  accountId      String        @map("account_id") @db.Uuid
+  account        LedgerAccount @relation(fields: [accountId], references: [id])
+  /// + credit, − debit (santim)
+  amountMinor    BigInt        @map("amount_minor")
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([accountId, createdAt(sort: Desc)], map: "ix_posting_account")
+  @@index([journalEntryId], map: "ix_posting_entry")
+  @@map("posting")
+}
+
+// ── beneficiaries and their balance (Payment.md §5, §8) ────────────────────────
+
+/// The driver (INDIVIDUAL vehicles) or fleet company (ORGANIZATION vehicles) that earns trips.
+model Beneficiary {
+  accountId         String        @id @map("account_id") @db.Uuid
+  account           LedgerAccount @relation(fields: [accountId], references: [id])
+  type              String
+  ownerId           String        @map("owner_id") @db.Uuid
+  cityId            String        @map("city_id")
+  /// OK | WARNING | CASH_BLOCKED | BLOCKED, recomputed with every posting
+  state             String        @default("OK")
+  overdueSince      DateTime?     @map("overdue_since") @db.Timestamptz
+  stateChangedAt    DateTime      @default(now()) @map("state_changed_at") @db.Timestamptz
+  /// bank transfers quote it (ANB-7K2Q9X)
+  referenceCode     String        @unique @map("reference_code")
+  payoutProvider    String?       @map("payout_provider")
+  payoutDestination String?       @map("payout_destination")
+  createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([type, ownerId])
+  @@index([state])
+  @@map("beneficiary")
+}
+
+/// Commission rules, versioned by validity (Payment.md §7). No two overlap for the same city,
+/// vehicle type and beneficiary (exclusion constraint in the migration).
+model CommissionRule {
+  id            String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  cityId        String    @map("city_id")
+  vehicleType   String?   @map("vehicle_type")
+  beneficiaryId String?   @map("beneficiary_id") @db.Uuid
+  /// PERCENT | FIXED_PER_TRIP | ZERO
+  model         String
+  rateBp        Int?      @map("rate_bp")
+  fixedMinor    BigInt?   @map("fixed_minor")
+  minMinor      BigInt?   @map("min_minor")
+  maxMinor      BigInt?   @map("max_minor")
+  validFrom     DateTime  @map("valid_from") @db.Timestamptz
+  validTo       DateTime? @map("valid_to") @db.Timestamptz
+  proposedBy    String    @map("proposed_by") @db.Uuid
+  approvedBy    String    @map("approved_by") @db.Uuid
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([cityId, validFrom])
+  @@map("commission_rule")
+}
+
+/// Limits and settlement settings per city; the latest valid_from ≤ now applies (Payment.md §8).
+model BalancePolicy {
+  cityId              String   @map("city_id")
+  validFrom           DateTime @map("valid_from") @db.Timestamptz
+  /// POSTPAID | PREPAID
+  mode                String   @default("POSTPAID")
+  warningMinor        BigInt   @map("warning_minor")
+  cashLimitMinor      BigInt   @map("cash_limit_minor")
+  hardLimitMinor      BigInt   @map("hard_limit_minor")
+  prepaidMinimumMinor BigInt   @default(0) @map("prepaid_minimum_minor")
+  dueDays             Int      @default(3) @map("due_days")
+  minPaymentBp        Int      @default(5000) @map("min_payment_bp")
+  minPayoutMinor      BigInt   @default(10000) @map("min_payout_minor")
+  /// COMMISSION | FULL_FARE
+  taxBasis            String   @default("COMMISSION") @map("tax_basis")
+  vatRateBp           Int      @default(1500) @map("vat_rate_bp")
+  proposedBy          String   @map("proposed_by") @db.Uuid
+  approvedBy          String   @map("approved_by") @db.Uuid
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@id([cityId, validFrom])
+  @@map("balance_policy")
+}
+
+/// Maker–checker for commission rules and balance policies (Role.md §11).
+model RuleChange {
+  id             String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  /// COMMISSION_RULE | BALANCE_POLICY
+  kind           String
+  cityId         String    @map("city_id")
+  payload        Json
+  reason         String
+  makerId        String    @map("maker_id") @db.Uuid
+  checkerId      String?   @map("checker_id") @db.Uuid
+  /// PENDING | EXECUTED | REJECTED | CANCELLED | EXPIRED
+  status         String    @default("PENDING")
+  decisionReason String?   @map("decision_reason")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  decidedAt      DateTime? @map("decided_at") @db.Timestamptz
+  expiresAt      DateTime  @map("expires_at") @db.Timestamptz
+
+  @@index([status, createdAt])
+  @@map("rule_change")
+}
+
+// ── rider payments (workflow 08) ──────────────────────────────────────────────
+
+/// A charge to a rider through a payment provider: a trip fare or a cancellation fee.
+model Payment {
+  id                   String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  /// TRIP_FARE | CANCELLATION_FEE
+  purpose              String
+  tripId               String    @map("trip_id") @db.Uuid
+  riderId              String    @map("rider_id") @db.Uuid
+  cityId               String    @map("city_id")
+  /// MOBILE_MONEY | CARD
+  method               String
+  provider             String
+  amountMinor          BigInt    @map("amount_minor")
+  currency             String    @default("ETB") @db.Char(3)
+  /// PENDING → ACTION_REQUIRED → SUCCEEDED | RETRY_SCHEDULED → … | FAILED; then REFUNDED / PARTIALLY_REFUNDED
+  status               String    @default("PENDING")
+  providerRef          String?   @unique @map("provider_ref")
+  providerTxnId        String?   @unique @map("provider_txn_id")
+  checkoutUrl          String?   @map("checkout_url")
+  attempts             Int       @default(0)
+  nextAttemptAt        DateTime? @map("next_attempt_at") @db.Timestamptz
+  lastError            String?   @map("last_error")
+  refundedMinor        BigInt    @default(0) @map("refunded_minor")
+  /// what the settlement needs (TripCompletedEvent / TripCancelledEvent facts)
+  settlement           Json
+  /// settled through a rider receivable after the last retry failed
+  settledAsReceivable  Boolean   @default(false) @map("settled_as_receivable")
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  completedAt          DateTime? @map("completed_at") @db.Timestamptz
+
+  refunds Refund[]
+
+  @@unique([tripId, purpose])
+  @@index([status, updatedAt])
+  @@index([riderId, createdAt(sort: Desc)])
+  @@map("payment")
+}
+
+/// The commission snapshot of a settled trip (Payment.md D3).
+model TripSettlement {
+  tripId               String   @map("trip_id") @db.Uuid
+  /// TRIP_FARE | CANCELLATION_FEE
+  purpose              String
+  paymentMethod        String   @map("payment_method")
+  cityId               String   @map("city_id")
+  vehicleType          String?  @map("vehicle_type")
+  driverId             String?  @map("driver_id") @db.Uuid
+  riderId              String   @map("rider_id") @db.Uuid
+  beneficiaryAccountId String?  @map("beneficiary_account_id") @db.Uuid
+  fareMinor            BigInt   @map("fare_minor")
+  commissionMinor      BigInt   @map("commission_minor")
+  vatMinor             BigInt   @map("vat_minor")
+  commissionRuleId     String?  @map("commission_rule_id") @db.Uuid
+  /// what the beneficiary's balance moved by
+  earningsMinor        BigInt   @map("earnings_minor")
+  journalEntryId       String   @map("journal_entry_id") @db.Uuid
+  settledAt            DateTime @default(now()) @map("settled_at") @db.Timestamptz
+
+  @@id([tripId, purpose])
+  @@index([beneficiaryAccountId, settledAt(sort: Desc)])
+  @@map("trip_settlement")
+}
+
+/// Mobile money preference of a rider (which provider asks them to approve).
+model PayerPreference {
+  userId              String   @id @map("user_id") @db.Uuid
+  mobileMoneyProvider String   @map("mobile_money_provider")
+  updatedAt           DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("payer_preference")
+}
+
+model Refund {
+  id             String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  paymentId      String    @map("payment_id") @db.Uuid
+  payment        Payment   @relation(fields: [paymentId], references: [id])
+  amountMinor    BigInt    @map("amount_minor")
+  reason         String
+  /// the driver's balance pays for it; otherwise it's platform goodwill
+  driverAtFault  Boolean   @map("driver_at_fault")
+  /// PENDING_APPROVAL → PROCESSING → SUCCEEDED | FAILED; or REJECTED
+  status         String    @default("PENDING_APPROVAL")
+  requestedBy    String    @map("requested_by") @db.Uuid
+  approvedBy     String?   @map("approved_by") @db.Uuid
+  decisionReason String?   @map("decision_reason")
+  providerRef    String?   @unique @map("provider_ref")
+  failure        String?
+  journalEntryId String?   @map("journal_entry_id") @db.Uuid
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  decidedAt      DateTime? @map("decided_at") @db.Timestamptz
+  completedAt    DateTime? @map("completed_at") @db.Timestamptz
+
+  @@index([status, createdAt])
+  @@map("refund")
+}
+
+// ── top-ups, dues and payouts (workflow 09) ───────────────────────────────────
+
+model TopUp {
+  id                   String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  beneficiaryAccountId String    @map("beneficiary_account_id") @db.Uuid
+  /// MOBILE_MONEY | BANK_TRANSFER | OFFICE_CASH
+  channel              String
+  provider             String?
+  amountMinor          BigInt    @map("amount_minor")
+  /// PENDING → ACTION_REQUIRED → SUCCEEDED | FAILED; office cash and bank: PENDING_APPROVAL → SUCCEEDED | REJECTED
+  status               String    @default("PENDING")
+  providerRef          String?   @unique @map("provider_ref")
+  providerTxnId        String?   @unique @map("provider_txn_id")
+  checkoutUrl          String?   @map("checkout_url")
+  createdBy            String    @map("created_by") @db.Uuid
+  approvedBy           String?   @map("approved_by") @db.Uuid
+  /// office receipt number or bank transaction id
+  receiptNo            String?   @map("receipt_no")
+  note                 String?
+  failure              String?
+  journalEntryId       String?   @map("journal_entry_id") @db.Uuid
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  completedAt          DateTime? @map("completed_at") @db.Timestamptz
+
+  @@index([beneficiaryAccountId, createdAt(sort: Desc)])
+  @@index([status, updatedAt])
+  @@map("top_up")
+}
+
+model PaymentDue {
+  id                   String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  beneficiaryAccountId String   @map("beneficiary_account_id") @db.Uuid
+  cycleEnd             DateTime @map("cycle_end") @db.Date
+  amountMinor          BigInt   @map("amount_minor")
+  minimumMinor         BigInt   @map("minimum_minor")
+  /// credits to the balance since the notice
+  paidMinor            BigInt   @default(0) @map("paid_minor")
+  dueAt                DateTime @map("due_at") @db.Timestamptz
+  /// OPEN | MIN_PAID | PAID | OVERDUE | WRITTEN_OFF
+  status               String   @default("OPEN")
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([beneficiaryAccountId, cycleEnd])
+  @@index([status, dueAt])
+  @@map("payment_due")
+}
+
+/// One weekly (or manual) settlement run per day: payouts for positive balances, dues for negative ones.
+model PayoutBatch {
+  id           String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  cycleEnd     DateTime  @unique @map("cycle_end") @db.Date
+  /// PENDING_APPROVAL → SENDING → COMPLETED; or REJECTED
+  status       String    @default("PENDING_APPROVAL")
+  preparedBy   String?   @map("prepared_by") @db.Uuid
+  approvedBy   String?   @map("approved_by") @db.Uuid
+  rejectReason String?   @map("reject_reason")
+  totalMinor   BigInt    @default(0) @map("total_minor")
+  lineCount    Int       @default(0) @map("line_count")
+  duesCreated  Int       @default(0) @map("dues_created")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  decidedAt    DateTime? @map("decided_at") @db.Timestamptz
+
+  lines PayoutLine[]
+
+  @@map("payout_batch")
+}
+
+model PayoutLine {
+  id                   String      @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  batchId              String      @map("batch_id") @db.Uuid
+  batch                PayoutBatch @relation(fields: [batchId], references: [id])
+  beneficiaryAccountId String      @map("beneficiary_account_id") @db.Uuid
+  amountMinor          BigInt      @map("amount_minor")
+  provider             String?
+  destination          String?
+  /// PENDING → SENT → SUCCEEDED | FAILED; SKIPPED (no payout method, or nothing left to pay)
+  status               String      @default("PENDING")
+  providerRef          String?     @unique @map("provider_ref")
+  providerTxnId        String?     @unique @map("provider_txn_id")
+  failure              String?
+  journalEntryId       String?     @map("journal_entry_id") @db.Uuid
+  reversalEntryId      String?     @map("reversal_entry_id") @db.Uuid
+  createdAt            DateTime    @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@unique([batchId, beneficiaryAccountId])
+  @@index([status, updatedAt])
+  @@map("payout_line")
+}
+
+// ── providers, messaging, HTTP retries ─────────────────────────────────────────
+
+/// Every provider callback as received, signature checked or not (support and reconciliation).
+model WebhookEvent {
+  id          String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  provider    String
+  /// the provider's id for this notification; a redelivery has the same key
+  eventKey    String    @map("event_key")
+  signatureOk Boolean   @map("signature_ok")
+  payload     Json
+  outcome     String?
+  receivedAt  DateTime  @default(now()) @map("received_at") @db.Timestamptz
+  processedAt DateTime? @map("processed_at") @db.Timestamptz
+
+  @@unique([provider, eventKey])
+  @@index([receivedAt(sort: Desc)])
+  @@map("webhook_event")
+}
+
+/// Kafka events already handled (consumer dedupe).
+model Inbox {
+  eventId     String   @id @map("event_id")
+  topic       String
+  processedAt DateTime @default(now()) @map("processed_at") @db.Timestamptz
+
+  @@map("inbox")
+}
+
+/// HTTP idempotency keys (Database.md §9): top-ups, refunds, cash records.
+model IdempotencyKey {
+  userId      String   @map("user_id") @db.Uuid
+  key         String
+  requestHash Bytes    @map("request_hash")
+  status      String   @default("IN_PROGRESS")
+  statusCode  Int?     @map("status_code")
+  response    Json?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@id([userId, key])
+  @@map("idempotency_key")
+}
+
+/// Transactional outbox (Database.md §8). Published to Kafka by the relay.
+model Outbox {
+  id          String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  topic       String
+  key         String
+  payload     Json
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  publishedAt DateTime? @map("published_at") @db.Timestamptz
+
+  @@index([createdAt], map: "ix_outbox_unpublished")
+  @@map("outbox")
+}

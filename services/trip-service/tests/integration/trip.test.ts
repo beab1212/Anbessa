@@ -138,6 +138,20 @@ describe("matching (workflow 05, parts D–E)", () => {
     expect((await h.offerFor(tripId))?.driverUserId).toBe(ok.id);
   });
 
+  it("drivers whose balance is blocked get no trips at all", async () => {
+    await h.driver(near(BOLE, 100), { cashAllowed: false, balanceState: "BLOCKED" });
+    const ok = await h.driver(near(BOLE, 500));
+    const tripId = (await h.requestTrip(await h.rider(), { paymentMethod: "CARD" })).json<{ id: string }>().id;
+    expect((await h.offerFor(tripId))?.driverUserId).toBe(ok.id);
+  });
+
+  it("refuses payment methods turned off in the city (Settings → Payments)", async () => {
+    h.settings.set("payments.methods", ["CASH", "MOBILE_MONEY"], "addis-ababa");
+    const r = await h.requestTrip(await h.rider(), { paymentMethod: "CARD" });
+    expect(r.json()).toMatchObject({ error: "payment_method_unavailable" });
+    h.settings.set("payments.methods", ["CASH", "MOBILE_MONEY", "CARD"], "addis-ababa");
+  });
+
   it("ranks by distance when mapping-service is down", async () => {
     h.mappingState.down = true;
     const close = await h.driver(near(BOLE, 150));

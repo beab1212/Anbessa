@@ -20,6 +20,12 @@ export interface SystemReport {
     routing: Record<string, string> | null;
     locationStream: { published: number; dropped: number } | null;
     documentStorage: { kind: string; ok: boolean; detail?: string; error?: string } | null;
+    payments?: {
+      mode?: string;
+      providers?: { provider: string; label: string; methods: string[]; openCharges: number; callbacks24h: number; rejected24h: number }[];
+      unprocessedCallbacks?: number;
+      error?: string;
+    } | null;
   };
 }
 
@@ -39,6 +45,8 @@ export function systemAlerts(r: SystemReport | undefined, now = Date.now()): str
   const otp = r.integrations.messaging?.otp;
   if (otp?.smsFallbackRate !== null && otp?.smsFallbackRate !== undefined && otp.smsFallbackRate > 0.5) out.push("over half of login codes fall back to SMS");
   if (r.integrations.documentStorage && !r.integrations.documentStorage.ok) out.push("document storage is unreachable");
+  if ((r.integrations.payments?.unprocessedCallbacks ?? 0) > 0) out.push("payment provider callbacks are waiting to be processed");
+  for (const p of r.integrations.payments?.providers ?? []) if (p.rejected24h > 0) out.push(`${p.label}: ${p.rejected24h} callbacks with a bad signature in 24 h`);
   return out;
 }
 
@@ -134,6 +142,19 @@ export function SystemPage() {
                 <dd>{r.integrations.routing ? Object.entries(r.integrations.routing).map(([k, v]) => <span key={k} style={{ marginRight: "0.5rem" }}>{k} <Pill tone={v === "ok" ? "green" : "amber"}>{v === "ok" ? "ok" : "estimating"}</Pill></span>) : <span className="muted">mapping-service unreachable</span>}</dd>
                 <dt>Document storage</dt>
                 <dd>{r.integrations.documentStorage ? <>{r.integrations.documentStorage.kind ?? ""} <Pill tone={r.integrations.documentStorage.ok ? "green" : "red"}>{r.integrations.documentStorage.ok ? "ok" : "unreachable"}</Pill> <span className="xs muted">{r.integrations.documentStorage.detail ?? r.integrations.documentStorage.error}</span></> : <span className="muted">fleet-service unreachable</span>}</dd>
+                <dt>Payment providers</dt>
+                <dd>
+                  {r.integrations.payments?.providers ? (
+                    <>
+                      {r.integrations.payments.mode === "simulated" ? <Pill tone="amber">simulated</Pill> : null}
+                      {r.integrations.payments.providers.map((p) => (
+                        <div key={p.provider} className="xs" style={{ marginTop: "0.2rem" }}>
+                          <strong>{p.label}</strong> <span className="muted">{p.methods.join(", ").toLowerCase().replace("_", " ")} · {p.openCharges} waiting for the payer · {p.callbacks24h} callbacks in 24 h{p.rejected24h ? ` · ${p.rejected24h} rejected` : ""}</span>
+                        </div>
+                      ))}
+                    </>
+                  ) : <span className="muted">{r.integrations.payments?.error ?? "payment-service unreachable"}</span>}
+                </dd>
                 <dt>Live locations to Kafka</dt>
                 <dd>{r.integrations.locationStream ? `${r.integrations.locationStream.published} published · ${r.integrations.locationStream.dropped} dropped` : <span className="muted">realtime-gateway unreachable</span>}</dd>
               </dl>

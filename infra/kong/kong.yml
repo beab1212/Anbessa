@@ -118,14 +118,27 @@ services:
   - name: pricing-service
     url: http://pricing-service:3004
     routes:
+      # estimates (signed in) and the public fare card; /internal/quotes is never routed
       - name: pricing-routes
         paths: ["/api/pricing"]
+        strip_path: false
+    plugins:
+      - name: rate-limiting
+        config: { minute: 120, policy: local }
 
   - name: payment-service
     url: http://payment-service:3005
     routes:
       - name: payment-routes
         paths: ["/api/payments"]
+        strip_path: false
+      # provider callbacks (telebirr, CBE Birr, Chapa): public, verified by each provider's signature
+      - name: payment-webhooks
+        paths: ["/api/payments/webhooks"]
+        methods: ["POST"]
+        strip_path: false
     plugins:
       - name: rate-limiting
-        config: { minute: 20, policy: local }
+        config: { minute: 120, policy: local }
+      - name: request-size-limiting
+        config: { allowed_payload_size: 64, size_unit: kilobytes }

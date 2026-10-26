@@ -69,7 +69,7 @@ export function PhoneBooking() {
 
   const getQuote = () =>
     run(async () => {
-      const r = await api<{ quotes: Quote[] }>("staff", "/api/trips/estimates", {
+      const r = await api<{ quotes: Quote[] }>("staff", "/api/pricing/estimates", {
         body: { pickup, dropoff, vehicleTypes: [vehicle], pickupAddress: pickup!.name, dropoffAddress: dropoff!.name },
       });
       setQuote(r.quotes[0] ?? null);

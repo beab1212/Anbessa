@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | 👀 In review (proposal) |
+| **Status** | ✅ Implemented in payment-service ([§20](#20-implementation)), with **simulated** providers until the real telebirr, CBE Birr and Chapa integrations exist |
 | **Scope** | How the platform earns its commission on **every** trip, including when the rider pays the driver directly in cash: the beneficiary balance, settlement per payment method, limits and blocking, top-ups, payouts, fleet-company settlement, commission models, taxes |
 | **Out of scope** | Payment-provider integration details (card/mobile-money APIs), corporate invoicing layout |
 | **Related** | [← Design home](README.md) · [Role.md §6 (vehicle ownership)](Role.md#6-vehicle-ownership) · [Database.md §7.4 (ledger)](Database.md#74-payment-ledger-payment-service) |
@@ -30,6 +30,7 @@
 17. [Reporting and controls](#17-reporting-and-controls)
 18. [Rollout plan](#18-rollout-plan)
 19. [Open questions](#19-open-questions)
+20. [Implementation](#20-implementation)
 
 ---
 
@@ -650,3 +651,27 @@ New permissions, added to the catalog in [Role.md §7](Role.md#7-permission-cata
 | Q6 | Who carries the loss when a post-trip card charge fails: platform or driver? | Platform |
 | Q7 | Which mobile-money and bank providers for top-ups and payouts? | Mobile money first |
 | Q8 | How long before unpaid debt is written off? | 90 days after the account is blocked |
+
+---
+
+## 20. Implementation
+
+`services/payment-service` (port 3005, database `payment_service`). The defaults of [§19](#19-open-questions) are what runs until finance approves something else.
+
+| Design | Where | Notes |
+|---|---|---|
+| Ledger, balanced and append-only ([§5](#5-the-beneficiary-balance), Database.md §7.4) | `src/ledger/ledger.ts`, migration | A deferred trigger checks every entry balances; triggers refuse `UPDATE`/`DELETE` on `journal_entry` and `posting`. Account rows are locked in id order. `posting` isn't partitioned yet |
+| Settlement per payment method ([§6](#6-settlement-per-payment-method)) | `src/money/settlement.ts` | Cash, card / mobile money (on capture), corporate, failed charge → rider receivable, cancellation fees. VAT is charged to the beneficiary on top of the commission (Q4). Promo funding (§6.4) and tips wait for pricing promotions |
+| Commission rules ([§7](#7-commission-models)) | `src/money/rules.ts`, `rule-changes.ts` | `PERCENT`, `FIXED_PER_TRIP`, `ZERO`; most specific first (beneficiary contract → vehicle type → city → default 15%, min 10 ETB). Resolved at the trip's completion time (the trip event has no start time yet). Proposed with `commission_rule:propose`, approved by someone else with `commission_rule:approve`. Subscriptions (phase 6) aren't built |
+| Balance limits and states ([§8](#8-balance-limits-and-blocking)) | `src/money/balances.ts` | Recomputed in the transaction of every posting; `balance.state_changed` → location-service updates every online car of the beneficiary (`applyBalanceState`), matching skips `BLOCKED` drivers and, for cash trips, `CASH_BLOCKED` ones. fleet-service asks the authoritative state at session start and refuses `BLOCKED`. The projected-overshoot guard isn't built |
+| Top-ups ([§9](#9-top-ups-and-repayments)) | `src/money/topups.ts` | Mobile money through the provider (webhook credits it); office cash and bank transfers (by reference code) recorded by a finance officer, credited when a finance manager approves. Bank statement import isn't built |
+| Payouts and dues ([§10](#10-payouts-and-netting)) | `src/money/payouts.ts`, `src/jobs.ts` | Weekly run (Monday 00:00 Addis) or "run now"; one batch per day; payout lines need `payout:approve` by someone other than the preparer; a failed payout is reversed. Dues: minimum 50% within 3 days; overdue blocks; paying the minimum lifts it. Holds: refunds waiting to be charged to the balance |
+| Fleet companies ([§11](#11-fleet-companies)) | beneficiary `ORGANIZATION` | One balance per fleet; the fleet owner sees it, tops up and sets the payout method on the company page. Per-driver fleet statements aren't built |
+| Refunds ([§16](#16-edge-cases)) | `src/money/payments.ts` | `refund:request` → `refund:approve` (different people); the provider refunds; driver at fault → their balance, else platform goodwill (`GOODWILL_EXPENSE`) |
+| Consistency ([§14](#14-consistency-and-concurrency)) | inbox, idempotency keys, outbox | Kafka inbox dedupe; journal idempotency keys (`trip-settlement:`, `top-up:`, `payout:`, `refund:`); webhooks deduped per provider notification; HTTP `Idempotency-Key` on top-ups and refunds |
+| Reporting ([§17](#17-reporting-and-controls)) | `GET /api/payments/overview`, `/ledger/integrity` | Hourly integrity check logs loudly on any mismatch. Aging and collection-rate reports aren't built |
+| Write-offs, adjustments, overrides | — | Not built (permissions exist in the catalog) |
+
+**Providers** (`src/gateways/`): each adapter (`telebirr.ts`, `cbebirr.ts`, `chapa.ts`) parses that provider's callback format and checks its signature; requests go to `simulator.ts`, which answers like the provider and posts the signed callback to the webhook. Going live replaces the four request methods in an adapter with the provider's HTTP API (the file header lists the endpoints) and keeps the parser; config refuses `GATEWAY_MODE=simulated` in production.
+
+**Web**: staff Money section (overview, balances, rider payments, money approvals, payouts, commission and limits, payment providers), the payment panel on a trip, and the Balance tab on a fleet's company page. **Phone app**: the API is there (`/api/payments/balances/me`, top-ups, `/api/payments/trips/:id`, `payment:action_required` over the socket); the Flutter screens aren't built yet.

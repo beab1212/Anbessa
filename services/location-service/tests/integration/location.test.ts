@@ -58,9 +58,12 @@ beforeEach(async () => {
   mapping.calls = 0;
 });
 
-async function onlineDriver(at = BOLE, opts: { vehicleType?: string; cashAllowed?: boolean; fleetOrgId?: string } = {}) {
+async function onlineDriver(at = BOLE, opts: { vehicleType?: string; cashAllowed?: boolean; fleetOrgId?: string; beneficiaryId?: string } = {}) {
   const driverId = uuid();
-  await goOnline(redis, { driverId, cityId: CITY, vehicleType: opts.vehicleType ?? "economy", vehicleId: "v-1", cashAllowed: opts.cashAllowed ?? true, fleetOrgId: opts.fleetOrgId });
+  await goOnline(redis, {
+    driverId, cityId: CITY, vehicleType: opts.vehicleType ?? "economy", vehicleId: "v-1", cashAllowed: opts.cashAllowed ?? true,
+    fleetOrgId: opts.fleetOrgId, beneficiaryId: opts.beneficiaryId ?? opts.fleetOrgId ?? driverId,
+  });
   const r = await recordPing(redis, driverId, { ...at, at: clock, accuracy: 10 }, clock);
   expect(r.accepted).toBe(true);
   return driverId;
@@ -105,6 +108,30 @@ describe("pings and the geo index", () => {
     expect(all).toEqual([cashOk, digitalOnly]);
     const cash = (await nearby({ cashOnly: "true" })).json<{ drivers: { driverId: string }[] }>().drivers.map((d) => d.driverId);
     expect(cash).toEqual([cashOk]);
+  });
+
+  it("follows the beneficiary's balance: a fleet's cash limit pauses cash for all its cars, blocked stops everything", async () => {
+    const fleet = uuid();
+    const a = await onlineDriver(near(100), { fleetOrgId: fleet });
+    const b = await onlineDriver(near(120), { fleetOrgId: fleet });
+    const own = await onlineDriver(near(140));
+    const handlers = createHandlers(redis);
+    const change = (id: string, type: "INDIVIDUAL" | "ORGANIZATION", state: string, cashAllowed: boolean) =>
+      handlers["balance.state_changed"]({ eventId: uuid(), beneficiary: { type, id }, state, cashAllowed, previousState: "OK", balanceMinor: -1 });
+    const ids = async (q: Record<string, string> = {}) => (await nearby(q)).json<{ drivers: { driverId: string }[] }>().drivers.map((d) => d.driverId);
+
+    await change(fleet, "ORGANIZATION", "CASH_BLOCKED", false);
+    expect(await ids({ cashOnly: "true" })).toEqual([own]);
+    expect(await ids()).toEqual([a, b, own]);
+
+    await change(own, "INDIVIDUAL", "BLOCKED", false);
+    expect(await ids()).toEqual([a, b]);
+
+    // a car of the fleet going online later starts with the published state
+    const c = await onlineDriver(near(160), { fleetOrgId: fleet });
+    expect((await getDriverState(redis, c))).toMatchObject({ balanceState: "CASH_BLOCKED", cashAllowed: false });
+    await change(fleet, "ORGANIZATION", "OK", true);
+    expect(await ids({ cashOnly: "true" })).toEqual([a, b, c]);
   });
 
   it("switching vehicle type leaves the old set", async () => {

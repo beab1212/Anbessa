@@ -1,6 +1,6 @@
 import { useEffect, useState, type ComponentType, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { Activity, Building2, CarFront, CheckCheck, ClipboardCheck, Gauge, IdCard, KeyRound, LayoutDashboard, LogOut, Map as MapIcon, MapPinned, Megaphone, Phone, ScrollText, Search, ShieldAlert, SlidersHorizontal, UserCog, Users, UsersRound, type LucideProps } from "lucide-react";
+import { Activity, Banknote, Building2, CarFront, CheckCheck, ClipboardCheck, CreditCard, Gauge, HandCoins, IdCard, KeyRound, Landmark, LayoutDashboard, LogOut, Map as MapIcon, MapPinned, Megaphone, Percent, Phone, PlugZap, ScrollText, Search, ShieldAlert, SlidersHorizontal, UserCog, Users, UsersRound, Wallet, type LucideProps } from "lucide-react";
 import { roleInfo, type Principal } from "@ride-app/shared-authz";
 import { useClientConfig } from "../lib/platform";
 import type { Surface } from "../lib/api";
@@ -34,6 +34,13 @@ export const ICONS: Record<string, ComponentType<LucideProps>> = {
   "/staff/onboarding": Building2,
   "/staff/safety": ShieldAlert,
   "/staff/people": UserCog,
+  "/staff/money": Landmark,
+  "/staff/money/balances": Wallet,
+  "/staff/money/payments": CreditCard,
+  "/staff/money/approvals": HandCoins,
+  "/staff/money/payouts": Banknote,
+  "/staff/money/rules": Percent,
+  "/staff/money/providers": PlugZap,
   "/partner/register": Building2,
 };
 

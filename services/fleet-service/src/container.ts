@@ -6,7 +6,7 @@ import { createTokenVerifier, type VerifyAccessToken } from "@ride-app/shared-au
 import type { Logger } from "@ride-app/shared-utils";
 import type { Config } from "./config/index.js";
 import { createDb, type Db } from "./db.js";
-import { authClient, type AuthClient } from "./lib/clients.js";
+import { authClient, balanceClient, type AuthClient, type BalanceClient } from "./lib/clients.js";
 import { piiCrypto, signer } from "./lib/crypto.js";
 import { localStore, s3Store, type ObjectStore } from "./lib/storage.js";
 import { createFleetService } from "./fleet/service.js";
@@ -15,6 +15,7 @@ import { createSettingsClient, fetchSettingsSnapshotFrom, type SettingsReader } 
 export interface ContainerOptions {
   db?: Db;
   auth?: AuthClient;
+  balances?: BalanceClient;
   store?: ObjectStore;
   verifyAccessToken?: VerifyAccessToken;
   settings?: SettingsReader;
@@ -44,8 +45,9 @@ export function createContainer(config: Config, logger: Logger, opts: ContainerO
   });
   const settings: SettingsReader = opts.settings ?? settingsClient!;
 
+  const balances = opts.balances ?? balanceClient(config.PAYMENT_INTERNAL_URL, config.INTERNAL_SERVICE_TOKEN);
   const fleet = createFleetService({
-    settings,
+    settings, balances,
     db, store, tickets, auth, logger, now,
     pii: piiCrypto(config.PII_ENCRYPTION_KEY, config.PII_BLIND_INDEX_KEY),
     expiryWarningDays: config.EXPIRY_WARNING_DAYS,

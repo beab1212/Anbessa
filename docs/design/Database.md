@@ -506,7 +506,7 @@ CREATE CONSTRAINT TRIGGER trg_posting_balanced AFTER INSERT ON posting
 REVOKE UPDATE, DELETE ON journal_entry, posting FROM payment_app;
 ```
 
-Cash trips, limits, top-ups, commission rules and fleet settlement are designed in [Payment.md](Payment.md). Supporting tables: `payment` (provider intents with `status`, `provider_ref`, `idempotency_key UNIQUE`), `refund` and `payout` (linked to `approval_request`, [Role.md §11](Role.md#11-approvals-makerchecker)), `invoice` / `invoice_line` (corporate monthly billing), and `provider_reconciliation` (daily statement matching).
+**Implemented** (database `payment_service`, [Payment.md §20](Payment.md#20-implementation)): the ledger above (`posting` not partitioned yet; append-only by trigger as well as by grants), plus `beneficiary` (balance state, reference code, payout method), `payment`, `trip_settlement` (the commission snapshot), `top_up`, `payment_due`, `payout_batch` / `payout_line`, `refund`, `commission_rule` (exclusion constraint), `balance_policy`, `rule_change` (maker–checker), `webhook_event`, `inbox`, `outbox`. Cash trips, limits, top-ups, commission rules and fleet settlement are designed in [Payment.md](Payment.md). Supporting tables: `payment` (provider intents with `status`, `provider_ref`, `idempotency_key UNIQUE`), `refund` and `payout` (linked to `approval_request`, [Role.md §11](Role.md#11-approvals-makerchecker)), `invoice` / `invoice_line` (corporate monthly billing), and `provider_reconciliation` (daily statement matching).
 
 | Rule | How |
 |---|---|

@@ -50,8 +50,10 @@ export async function createHarness() {
     new SignJWT({ roles, pv: 0, amr: ["otp"] }).setProtectedHeader({ alg: "ES256", kid: "k" })
       .setSubject(sub).setIssuer(ISSUER).setAudience(aud).setIssuedAt().setExpirationTime("15m").sign(privateKey);
 
+  const balanceStates = new Map<string, "OK" | "WARNING" | "CASH_BLOCKED" | "BLOCKED">();
   const c = createContainer(config, pino({ level: "silent" }), {
     auth, now: () => new Date(clock.now),
+    balances: { state: async (_type, ownerId) => { const s = balanceStates.get(ownerId); return s ? { state: s, cashAllowed: s === "OK" || s === "WARNING" } : null; } },
     verifyAccessToken: createTokenVerifier({ issuer: ISSUER, keySet: createLocalJWKSet({ keys: [jwk as never] }) }),
   });
   const app = await buildApp(c);
@@ -139,7 +141,7 @@ export async function createHarness() {
   }
 
   return {
-    app, c, clock, orgs, members, roleCalls, authState, person, staff, officer, fleetOrg, addMember, req, ok, upload, future,
+    app, c, clock, orgs, members, roleCalls, authState, balanceStates, person, staff, officer, fleetOrg, addMember, req, ok, upload, future,
     applicant, approveDocs, activeDriver, car, verifiedVehicle,
     outbox: (key: string, topic: string) => c.db.outbox.findMany({ where: { key, topic }, orderBy: { createdAt: "asc" } }).then((rows) => rows.map((r) => r.payload as Record<string, unknown>)),
     close: async () => {

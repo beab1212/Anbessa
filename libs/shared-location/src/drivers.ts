@@ -22,6 +22,8 @@ export interface DriverState {
   vehicleId: string;
   /** fleet organisation that owns the vehicle, if any (for location:read_live @ ORG) */
   fleetOrgId?: string;
+  /** who earns the trips (Payment.md D1): the fleet, else the driver */
+  beneficiaryId?: string;
   tripId?: string;
   cashAllowed: boolean;
   balanceState?: string;
@@ -59,6 +61,7 @@ function parseState(driverId: string, h: Record<string, string>): DriverState | 
     vehicleType: h.vehicleType,
     vehicleId: h.vehicleId ?? "",
     fleetOrgId: h.fleetOrgId || undefined,
+    beneficiaryId: h.beneficiaryId || undefined,
     tripId: h.tripId || undefined,
     cashAllowed: h.cashAllowed === "1",
     balanceState: h.balanceState || undefined,
@@ -116,13 +119,24 @@ export interface OnlineInput {
   vehicleType: string;
   vehicleId: string;
   fleetOrgId?: string;
+  beneficiaryId?: string;
   cashAllowed: boolean;
   balanceState?: string;
 }
 
-/** driver.online: the driver is visible to matching from their first ping. */
+/** Balance states that keep a driver out of matching altogether (Payment.md §8). */
+const NO_REQUESTS = new Set(["BLOCKED"]);
+
+/**
+ * driver.online: the driver is visible to matching from their first ping. A balance state that
+ * payment-service published after fleet-service looked it up wins (it's newer).
+ */
 export async function goOnline(redis: Redis, input: OnlineInput): Promise<void> {
   const previous = await getDriverState(redis, input.driverId);
+  if (input.beneficiaryId) {
+    const latest = await redis.hgetall(keys.balance(input.beneficiaryId));
+    if (latest.state) input = { ...input, balanceState: latest.state, cashAllowed: latest.cashAllowed === "1" };
+  }
   const p = redis.multi();
   if (previous && (previous.cityId !== input.cityId || previous.vehicleType !== input.vehicleType)) {
     // switched city or vehicle type: leave the old sets
@@ -137,6 +151,7 @@ export async function goOnline(redis: Redis, input: OnlineInput): Promise<void> 
       vehicleType: input.vehicleType,
       vehicleId: input.vehicleId,
       fleetOrgId: input.fleetOrgId ?? "",
+      beneficiaryId: input.beneficiaryId ?? "",
       tripId: previous?.status === "on_trip" ? (previous.tripId ?? "") : "",
       cashAllowed: input.cashAllowed ? "1" : "0",
       balanceState: input.balanceState ?? "",
@@ -145,7 +160,32 @@ export async function goOnline(redis: Redis, input: OnlineInput): Promise<void> 
     .expire(keys.driver(input.driverId), LOCATION_TIMING.stateTtlSeconds)
     .sadd(keys.cities(), input.cityId)
     .sadd(keys.vehicleTypes(input.cityId), input.vehicleType);
+  if (previous?.beneficiaryId && previous.beneficiaryId !== input.beneficiaryId) p.srem(keys.beneficiaryDrivers(previous.beneficiaryId), input.driverId);
+  if (input.beneficiaryId) p.sadd(keys.beneficiaryDrivers(input.beneficiaryId), input.driverId).expire(keys.beneficiaryDrivers(input.beneficiaryId), 86_400);
   await p.exec();
+}
+
+/**
+ * balance.state_changed (payment-service): every online driver earning for the beneficiary gets
+ * the new state at once; a driver going online later picks it up in goOnline.
+ */
+export async function applyBalanceState(redis: Redis, input: { beneficiaryId: string; state: string; cashAllowed: boolean }): Promise<number> {
+  await redis.multi()
+    .hset(keys.balance(input.beneficiaryId), { state: input.state, cashAllowed: input.cashAllowed ? "1" : "0", at: String(Date.now()) })
+    .expire(keys.balance(input.beneficiaryId), 30 * 86_400)
+    .exec();
+  const drivers = await redis.smembers(keys.beneficiaryDrivers(input.beneficiaryId));
+  let updated = 0;
+  for (const driverId of drivers) {
+    const state = await getDriverState(redis, driverId);
+    if (!state || state.beneficiaryId !== input.beneficiaryId) {
+      await redis.srem(keys.beneficiaryDrivers(input.beneficiaryId), driverId);
+      continue;
+    }
+    await redis.hset(keys.driver(driverId), { balanceState: input.state, cashAllowed: input.cashAllowed ? "1" : "0" });
+    updated++;
+  }
+  return updated;
 }
 
 async function leaveGeoSets(redis: Redis, state: DriverState) {
@@ -161,6 +201,7 @@ export async function goOffline(redis: Redis, driverId: string): Promise<void> {
   const state = await getDriverState(redis, driverId);
   if (!state) return;
   await leaveGeoSets(redis, state);
+  if (state.beneficiaryId) await redis.srem(keys.beneficiaryDrivers(state.beneficiaryId), driverId);
   await redis.pipeline()
     .hset(keys.driver(driverId), { status: "offline", tripId: "" })
     .expire(keys.driver(driverId), LOCATION_TIMING.stateTtlSeconds)
@@ -249,6 +290,7 @@ export async function nearbyAvailable(
     if (!state || state.status !== "available" || state.stale || offered) return;
     if (state.at === undefined || now - state.at > LOCATION_TIMING.staleAfterMs) return;
     if (q.cashOnly && !state.cashAllowed) return;
+    if (state.balanceState && NO_REQUESTS.has(state.balanceState)) return;
     out.push({
       driverId, lat: Number(lat), lng: Number(lng), distanceMeters: Math.round(Number(dist)),
       heading: state.heading, cashAllowed: state.cashAllowed, balanceState: state.balanceState,

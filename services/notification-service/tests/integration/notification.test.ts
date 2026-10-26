@@ -208,6 +208,26 @@ describe("devices and event notifications", () => {
     expect(h.pushes.length).toBe(1);
   });
 
+  it("payments: the rider is asked to approve and gets a receipt; owner-drivers hear about their balance, fleets don't", async () => {
+    const rider = "0192f7a8-0000-7000-8000-0000000000a1";
+    const driver = "0192f7a8-0000-7000-8000-0000000000a2";
+    for (const [user, token] of [[rider, "rider-device".padEnd(40, "r")], [driver, "driver-device".padEnd(40, "d")]] as const) {
+      await h.c.db.deviceToken.upsert({ where: { token }, create: { token, platform: "android", userId: user }, update: {} });
+    }
+    const env = () => ({ eventId: crypto.randomUUID(), version: 1, at: new Date().toISOString() });
+    const before = h.pushes.length;
+    await h.c.handlers["payment.action_required"]!({ ...env(), riderId: rider, amountMinor: 40_000, provider: "telebirr", purpose: "TRIP_FARE", checkoutUrl: "http://pay/x" });
+    await h.c.handlers["trip.settled"]!({ ...env(), riderId: rider, tripId: "t1", fareMinor: 40_000, paymentMethod: "CASH", purpose: "TRIP_FARE" });
+    await h.c.handlers["balance.state_changed"]!({ ...env(), beneficiary: { type: "INDIVIDUAL", id: driver }, state: "CASH_BLOCKED", balanceMinor: -52_000 });
+    await h.c.handlers["balance.state_changed"]!({ ...env(), beneficiary: { type: "ORGANIZATION", id: driver }, state: "BLOCKED", balanceMinor: -200_000 });
+    const sent = h.pushes.slice(before).map((p) => p.message.body);
+    expect(sent).toEqual([
+      "Approve 400 ETB to Anbessa in telebirr.",
+      "400 ETB paid by cash. Thanks for riding with Anbessa.",
+      "You owe 520 ETB. Cash trips are paused; card and mobile money trips continue and repay it.",
+    ]);
+  });
+
   it("a failing push is retried through redelivery, then recorded as FAILED", async () => {
     await h.c.db.deviceToken.upsert({ where: { token: "retry-token".padEnd(40, "r") }, create: { token: "retry-token".padEnd(40, "r"), platform: "ios", userId }, update: {} });
     h.pushState.fail = true;

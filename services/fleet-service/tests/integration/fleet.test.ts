@@ -112,6 +112,15 @@ describe("vehicles and sessions (workflow 04)", () => {
     await h.ok(h.req("DELETE", "/api/fleet/sessions/current", d));
     expect((await h.outbox(d.id, "driver.offline")).at(-1)).toMatchObject({ reason: "DRIVER" });
     expect((await h.ok<{ session: null }>(h.req("GET", "/api/fleet/sessions/current", d))).session).toBeNull();
+
+    // the balance (payment-service): cash-blocked goes online without cash trips; blocked can't go online
+    h.balanceStates.set(d.id, "CASH_BLOCKED");
+    await h.ok(h.req("POST", "/api/fleet/sessions", d, { vehicleId: v.id }), 201);
+    expect((await h.outbox(d.id, "driver.online")).at(-1)).toMatchObject({ balanceState: "CASH_BLOCKED", cashAllowed: false });
+    await h.ok(h.req("DELETE", "/api/fleet/sessions/current", d));
+    h.balanceStates.set(d.id, "BLOCKED");
+    expect((await h.req("POST", "/api/fleet/sessions", d, { vehicleId: v.id })).json()).toMatchObject({ error: "balance_blocked" });
+    h.balanceStates.delete(d.id);
   });
 
   it("plates are unique; vehicle types and seats are checked", async () => {

@@ -1,10 +1,42 @@
-import Fastify from "fastify";
+import { createAuthzSync, fetchAuthzSnapshotFrom } from "@ride-app/shared-authz";
+import { buildApp } from "./app.js";
+import { loadConfig } from "./config/index.js";
+import { createContainer } from "./container.js";
+import { serviceLogger } from "./utils/logger.js";
 
-// Same shape as auth-service (routes -> controllers -> services -> repositories).
-// Calculates fare estimates and surge multipliers from trip distance/duration (via mapping-service) and live demand signals.
-const app = Fastify({ logger: true });
-app.get("/health", async () => ({ status: "ok" }));
+async function main() {
+  const config = loadConfig();
+  const logger = serviceLogger(config.NODE_ENV, config.LOG_LEVEL);
+  const c = createContainer(config, logger);
+  const app = await buildApp({ ...c, logger, ready: async () => (await c.redis.ping()) === "PONG" });
 
-app.listen({ port: 3004, host: "0.0.0.0" }).then(() => {
-  console.log("pricing-service listening on :3004");
+  await c.settingsClient?.start();
+  // the permission matrix follows auth-service live (Role.md §8)
+  const authzSync = createAuthzSync({
+    fetchSnapshot: fetchAuthzSnapshotFrom(config.AUTH_INTERNAL_URL, config.INTERNAL_SERVICE_TOKEN),
+    redis: c.redis,
+    logger,
+  });
+  await authzSync.start();
+
+  await app.listen({ port: config.PORT, host: "0.0.0.0" });
+
+  let closing = false;
+  for (const signal of ["SIGTERM", "SIGINT"] as const) {
+    process.on(signal, async () => {
+      if (closing) return;
+      closing = true;
+      logger.info(`${signal} received, shutting down`);
+      await authzSync.stop();
+      await c.settingsClient?.stop();
+      await app.close();
+      await c.close();
+      process.exit(0);
+    });
+  }
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
 });

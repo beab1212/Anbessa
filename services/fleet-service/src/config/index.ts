@@ -39,6 +39,9 @@ export const envSchema = z
     S3_ENDPOINT: z.string().url().optional(),
     S3_FORCE_PATH_STYLE: z.enum(["true", "false"]).default("false").transform((v) => v === "true"),
 
+    // Balance state when a driver goes online (GET /internal/balances/state)
+    PAYMENT_INTERNAL_URL: z.string().url().default("http://localhost:3005"),
+
     // Live settings (admin dashboard): GET /internal/settings/snapshot
     PLATFORM_INTERNAL_URL: z.string().url().default("http://localhost:3011"),
 

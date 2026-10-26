@@ -40,7 +40,7 @@ export const envSchema = z
         "realtime-gateway=http://localhost:3000",
     ).transform(toTargets),
     // Kafka consumer groups whose lag the system page shows
-    CONSUMER_GROUPS: z.string().default("location-service,notification-service,fleet-service,audit-service").transform(list),
+    CONSUMER_GROUPS: z.string().default("location-service,notification-service,fleet-service,payment-service,audit-service").transform(list),
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV === "production") {

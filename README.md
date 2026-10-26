@@ -142,8 +142,8 @@ ride-app/
 │   ├── auth-service/         Identity, JWT  ← fully built, use as template
 │   ├── trip-service/         Ride lifecycle state machine + matching
 │   ├── location-service/     Geo queries backed by Redis
-│   ├── pricing-service/      Fare estimates + surge
-│   ├── payment-service/      Stripe Connect charges + driver payouts
+│   ├── pricing-service/      Quotes from the live fare card
+│   ├── payment-service/      Ledger, balances, rider charges, top-ups, payouts (telebirr, CBE Birr, Chapa; simulated for now)
 │   ├── notification-service/ Push (FCM) + SMS (Twilio), Kafka-driven
 │   └── mapping-service/      Wraps OSRM / Nominatim / tiles (free OSM stack)
 │
@@ -193,7 +193,7 @@ ride-app/
 | Event bus | Kafka / Redpanda | Durable, ordered event stream between services |
 | Routing / ETA | OSRM (self-hosted) | Free, production-grade, OSM-based |
 | Geocoding | Nominatim (self-hosted) | Free, OSM-based |
-| Payments | Stripe Connect | Handles the rider charge + driver payout split |
+| Payments | telebirr, CBE Birr (mobile money), Chapa (cards, bank payouts) | Local providers riders and drivers already use; simulated until the integrations are signed |
 | Container runtime | Docker + Kubernetes | Horizontal scaling, rolling deploys |
 | IaC | Terraform | Reproducible cloud infra |
 | ORM | Prisma 7 (`prisma-client` generator + `@prisma/adapter-pg`) | Typed queries, migrations |

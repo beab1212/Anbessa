@@ -184,7 +184,6 @@ pnpm prisma studio                                   # browse data
 - Commit the generated `prisma/migrations/*` folder; production applies exactly those.
 - If you edit a migration after it ran, Prisma refuses to continue ("was modified after it was applied"). Write a new migration instead.
 - Indexes written by hand in `migration.sql` also need a matching `@@index` / `@@unique` with `map:` in the schema, or `migrate dev` sees drift and asks for a new migration. trip-service's generated PostGIS columns can't be described in the schema, so there `migrate dev` always sees drift. Use `pnpm prisma migrate dev --create-only --name <change>`, delete the lines that drop the `pickup`/`dropoff` defaults and `ix_trip_pickup_gix`, then `pnpm prisma migrate deploy`.
-- payment-service has an empty `prisma/` folder. Copy auth-service's setup when it gets a schema, and add it to `PRISMA_SERVICES` in the `Makefile`.
 
 ### Shared contracts
 
@@ -272,16 +271,33 @@ With auth, location, mapping, trip and realtime-gateway running (`make dev-servi
 
 1. **Sign in** a rider and a driver with phone OTP (section 2), grant the driver role, and get fresh access tokens from `GET /api/auth/token`.
 2. **Put the driver online** with the location-service dev route above, connect the driver's socket to realtime-gateway (`auth: { token }`), and send `location:update` pings near the pickup.
-3. **Quote** (stand-in until pricing-service exists):
+3. **Quote** from pricing-service (trip-service with `PRICING=builtin` still serves `POST /api/trips/estimates` for running it alone):
    ```bash
-   curl -XPOST localhost:3002/api/trips/estimates -H "authorization: Bearer $RIDER" -H 'content-type: application/json' \
+   curl -XPOST localhost:3004/api/pricing/estimates -H "authorization: Bearer $RIDER" -H 'content-type: application/json' \
      -d '{"pickup":{"lat":8.9806,"lng":38.7578},"dropoff":{"lat":9.0333,"lng":38.75},"vehicleTypes":["economy"]}'
    ```
-4. **Request:** `POST localhost:3002/api/trips {"quoteId":"q_…","paymentMethod":"CASH"}` with `Idempotency-Key: <uuid>`.
+4. **Request:** `POST localhost:3002/api/trips {"quoteId":"q_…","paymentMethod":"CASH"}` with `Idempotency-Key: <uuid>`. `MOBILE_MONEY` or `CARD` are charged after drop-off (next section).
 5. The driver's socket receives **`trip:offer`** with an `offerId`. Accept it: `POST /api/trips/:id/accept {"offerId":"…"}` with the driver's token. The rider's socket receives `trip:status` `matched`.
 6. Drive it: `en-route` → ping within 150 m of the pickup → `arrive` → `start` → `complete`.
 
 Without location-service's view of the driver, matching finds nobody and the trip is cancelled with `NO_DRIVER_FOUND` after 120 s.
+
+### Payments (simulated providers)
+
+payment-service settles every completed trip ([Payment.md](../design/Payment.md)). The providers (telebirr, CBE Birr, Chapa) are **simulated** until the real integrations are written (`services/payment-service/src/gateways/*.ts` say what each real call is). The simulator answers like the provider and sends the provider's own signed callback to `/api/payments/webhooks/{provider}`, so webhooks, retries and reconciliation run the real code.
+
+| What happens | How to see it |
+|---|---|
+| **Cash trip** | Settles at once: the driver's balance goes down by commission + VAT (15% + 15% of it by default). The web's Money → Balances shows it |
+| **Mobile money or card trip** | A charge starts after drop-off; the rider gets `payment:action_required` (socket and push) with a payment page. With `SIM_AUTO_APPROVE_SECONDS=8` it approves itself after 8 s; with `0` open the page (`checkoutUrl`) and press **Pay**, **Decline** or **Insufficient funds** |
+| **Declined** | Tried again after each `PAYMENT_RETRY_SECONDS` delay, then settled as a rider receivable (the driver is still paid) |
+| **Lost callback** | `SIM_DROP_WEBHOOKS=0.5` drops half the callbacks; reconciliation asks the "provider" after `RECONCILE_AFTER_SECONDS` |
+| **Balance limits** | Enough cash trips push a driver to *cash paused* (−500 ETB by default): matching stops offering them cash trips. A card trip or a top-up brings them back |
+| **Top-up** | The fleet owner's company page → Balance → Top up (or `POST /api/payments/balances/:accountId/top-ups`) |
+| **Office cash** | Sign in as `finance-officer`, record it (Money → Balances); `finance-manager` approves it (Money approvals) |
+| **Payouts** | `finance-officer`: Money → Payouts → Run settlement now. `finance-manager` approves. A payout to a number ending in `0000` fails and goes back on the balance |
+| **Refund** | `support` asks from Money → Rider payments; `finance-manager` approves |
+| **Commission and limits** | `operations-manager` proposes (Money → Commission and limits); `finance-manager` approves |
 
 ---
 

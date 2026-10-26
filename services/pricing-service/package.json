@@ -12,13 +12,19 @@
     "typecheck": "tsc --noEmit --customConditions development"
   },
   "dependencies": {
-    "@ride-app/shared-config": "workspace:*",
-    "@ride-app/shared-types": "workspace:*",
+    "@fastify/helmet": "^13.2.0",
+    "@fastify/rate-limit": "^11.2.1",
+    "@ride-app/shared-authz": "workspace:*",
+    "@ride-app/shared-location": "workspace:*",
+    "@ride-app/shared-settings": "workspace:*",
     "@ride-app/shared-utils": "workspace:*",
     "fastify": "^5.12.7",
+    "ioredis": "^6.0.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "jose": "^6.2.13",
+    "pino": "^10.4.0",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"

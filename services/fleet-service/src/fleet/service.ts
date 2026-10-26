@@ -9,7 +9,7 @@ import type { SettingsReader } from "@ride-app/shared-settings";
 import type { Logger } from "@ride-app/shared-utils";
 import { Prisma } from "../generated/prisma/client.js";
 import type { Db } from "../db.js";
-import type { AuthClient } from "../lib/clients.js";
+import type { AuthClient, BalanceClient } from "../lib/clients.js";
 import type { PiiCrypto, Signer } from "../lib/crypto.js";
 import { AppError, badRequest, conflict, forbidden, notFound } from "../lib/errors.js";
 import { EXTENSION, MAX_UPLOAD_BYTES, type ObjectStore, type UploadType, UPLOAD_URL_SECONDS, VIEW_URL_SECONDS } from "../lib/storage.js";
@@ -33,6 +33,8 @@ export interface FleetDeps {
   store: ObjectStore;
   tickets: Signer;
   auth: AuthClient;
+  /** payment-service: a blocked balance can't go online (workflow 04 step 4) */
+  balances?: BalanceClient;
   logger: Logger;
   now?: () => Date;
   expiryWarningDays?: number;
@@ -705,14 +707,24 @@ export function createFleetService(deps: FleetDeps) {
     if (current) throw conflict("you're already online with another vehicle; go offline first", "already_online");
     const denial = await eligibility(p, v, d, d ? await licenceExpiredFor(p.userId) : false);
     if (denial) throw new AppError(denial === "vehicle_in_use" ? 409 : 403, DENIAL_MESSAGE[denial], denial);
+    const fleetOrgId = v.ownerType === "ORGANIZATION" ? v.ownerOrgId! : undefined;
+    // the balance earning for this car (Payment.md D1, §8): blocked can't go online
+    const balance = (await deps.balances?.state(fleetOrgId ? "ORGANIZATION" : "INDIVIDUAL", fleetOrgId ?? p.userId)) ?? null;
+    if (balance === null && deps.balances) logger.warn({ driverId: p.userId }, "payment-service unreachable at session start; matching uses the last published balance state");
+    if (balance?.state === "BLOCKED") {
+      throw new AppError(403, fleetOrgId
+        ? "Your fleet's balance is blocked: the fleet owner must pay what's owed before its cars can go online"
+        : "Your balance is blocked: pay what you owe to go online", "balance_blocked");
+    }
     try {
       return await db.$transaction(async (tx) => {
         const s = await tx.drivingSession.create({ data: { driverUserId: p.userId, vehicleId } });
-        const fleetOrgId = v.ownerType === "ORGANIZATION" ? v.ownerOrgId! : undefined;
-        // TODO(payment-service): balance state (workflow 04 step 4). Until it exists every driver may take cash.
         await writeOutbox(tx, {
           topic: "driver.online", key: p.userId,
-          payload: { driverId: p.userId, vehicleId, vehicleType: v.vehicleType, cityId: v.cityId, fleetOrgId, beneficiaryId: fleetOrgId ?? p.userId, balanceState: "OK", cashAllowed: true },
+          payload: {
+            driverId: p.userId, vehicleId, vehicleType: v.vehicleType, cityId: v.cityId, fleetOrgId, beneficiaryId: fleetOrgId ?? p.userId,
+            balanceState: balance?.state ?? "OK", cashAllowed: balance?.cashAllowed ?? true,
+          },
         });
         return sessionView(s);
       });

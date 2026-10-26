@@ -30,6 +30,7 @@ export const SETTING_GROUPS = [
   "Trip rules",
   "Cancellations and fees",
   "Fares",
+  "Payments",
   "Sign-in and OTP",
   "Documents",
   "Apps and maintenance",
@@ -44,8 +45,8 @@ const fare = (type: string, label: string, d: { base: number; perKm: number; per
   { key: `fares.${type}.minFareMinor`, label: `${label}: minimum fare`, default: d.min },
   { key: `fares.${type}.waitingPerMinMinor`, label: `${label}: waiting, per minute`, default: d.waiting },
 ].map((f) => ({
-  ...f, group: "Fares" as const, type: "money" as const, min: 0, max: 1_000_000, scope: "city" as const, sensitive: true, owner: "trip-service",
-  description: "In santim (1 birr = 100). Used for quotes until pricing-service takes over.",
+  ...f, group: "Fares" as const, type: "money" as const, min: 0, max: 1_000_000, scope: "city" as const, sensitive: true, owner: "pricing-service",
+  description: "In santim (1 birr = 100). Quotes use the fares in force when they're made; a quote keeps its fare.",
 }));
 
 export const SETTINGS: readonly SettingDef[] = [
@@ -71,6 +72,11 @@ export const SETTINGS: readonly SettingDef[] = [
   ...fare("economy", "Economy", { base: 5000, perKm: 1500, perMin: 200, min: 8000, waiting: 300 }),
   ...fare("comfort", "Comfort", { base: 7000, perKm: 2000, perMin: 300, min: 11000, waiting: 400 }),
   ...fare("minivan", "Minivan", { base: 9000, perKm: 2500, perMin: 350, min: 14000, waiting: 500 }),
+
+  // ── payments (workflow 08; commission and balance limits are finance's, in payment-service) ──
+  { key: "payments.methods", group: "Payments", label: "Payment methods riders can choose", description: "Turning one off refuses new trip requests with it; trips already booked keep theirs.", type: "enumList", options: ["CASH", "MOBILE_MONEY", "CARD"], default: ["CASH", "MOBILE_MONEY", "CARD"], scope: "city", sensitive: true, owner: "trip-service" },
+  { key: "payments.mobileMoneyProviders", group: "Payments", label: "Mobile money providers, in order", description: "The first one asks riders who haven't picked a provider. Only providers enabled in payment-service are used.", type: "enumList", options: ["telebirr", "cbebirr"], default: ["telebirr", "cbebirr"], scope: "global", owner: "payment-service" },
+  { key: "payments.cardProvider", group: "Payments", label: "Card payments go through", description: "The card provider (hosted checkout).", type: "enum", options: ["chapa"], default: "chapa", scope: "global", owner: "payment-service" },
 
   // ── sign-in (Auth.md §9.7) ──────────────────────────────────────────────────
   { key: "otp.channels", group: "Sign-in and OTP", label: "Login code channels, in order", description: "Telegram first is cheaper; SMS reaches everyone.", type: "enumList", options: ["telegram", "sms"], default: ["telegram", "sms"], scope: "global", owner: "notification-service" },

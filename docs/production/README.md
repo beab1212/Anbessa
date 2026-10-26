@@ -119,13 +119,18 @@ Production values that differ from dev:
 | `OSRM_URL` / `NOMINATIM_URL` | mapping-service only: the in-cluster engine URLs. Nothing else may reach the engines (network policy) |
 | `MAPPING_INTERNAL_URL` | location-service and trip-service: in-cluster mapping-service URL |
 | `LOCATION_INTERNAL_URL` | trip-service: in-cluster location-service URL |
-| `PRICING` / `PRICING_INTERNAL_URL` | trip-service: `service` / in-cluster pricing-service URL. `builtin` (the dev quote stand-in) is refused in production |
+| `PRICING` / `PRICING_INTERNAL_URL` | trip-service: `service` (the default) / in-cluster pricing-service URL. `builtin` (the in-process quote stand-in) is refused in production |
+| `REDIS_URL` (pricing-service) | quotes live in Redis until they expire; any Redis the service can reach |
 | `REDIS_URL` (trip-service) | must be the **same** Redis as realtime-gateway: trip-service pushes offers and status through Socket.io's Redis emitter |
 | `TELEGRAM_GATEWAY_TOKEN` | notification-service only. Telegram Gateway API token for login codes. Its SHA256 also verifies delivery-report signatures. The Gateway account is **prepaid**: finance tops it up, and an alert fires when the balance drops below 7 days of spend |
 | `DATABASE_URL` | RDS endpoint, one database per service (`auth_service`, `trip_service`, …), TLS on |
 | `REDIS_URL` | ElastiCache endpoint (`rediss://` for TLS) |
 | `KAFKA_BROKERS` | MSK bootstrap brokers, comma-separated |
-| `STRIPE_SECRET_KEY` | live key `sk_live_…`, never the test key |
+| `GATEWAY_MODE` | payment-service: only `simulated` exists today and it is **refused in production**. Going live means writing the real telebirr / CBE Birr / Chapa adapters (`services/payment-service/src/gateways/*.ts`) and adding a `live` mode |
+| `PAYMENT_PROVIDERS` / `PUBLIC_URL` | payment-service: the providers in use, and the public API base (`https://api.anbessa.et`). Providers call `PUBLIC_URL/api/payments/webhooks/{provider}`; register that URL in each provider's dashboard |
+| `TELEBIRR_WEBHOOK_SECRET` / `CBEBIRR_WEBHOOK_SECRET` / `CHAPA_WEBHOOK_SECRET` | payment-service, from Secrets Manager, each different: what each provider signs its callbacks with (Chapa: the dashboard's webhook secret; telebirr: replace with its RSA public key when the real adapter lands). A callback with a bad signature is refused and kept in `webhook_event` |
+| `PAYMENT_RETRY_SECONDS` / `RECONCILE_AFTER_SECONDS` / `SETTLEMENT_SCHEDULE` | payment-service: `60,600,3600` / `300` / `weekly` (Monday 00:00 Addis; payouts still need a finance manager's approval) |
+| `PAYMENT_INTERNAL_URL` | fleet-service: in-cluster payment-service URL (a blocked balance can't go online) |
 
 Config is validated with Zod at process start, so a missing or invalid variable crash-loops the pod immediately. auth-service also refuses to start in production without `REDIS_URL` (shared sessions cache, rate limits and the suspension denylist), `KAFKA_BROKERS` (outbox relay) and `INTERNAL_SERVICE_TOKEN`. Token lifetimes are fixed in code (app 15 min / 30-day session, admin 10 min / 12 h), not env vars.
 

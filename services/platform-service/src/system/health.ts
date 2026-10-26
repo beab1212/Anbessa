@@ -23,7 +23,7 @@ export interface ServiceHealth {
 }
 
 /** Services that keep a transactional outbox (they answer /internal/ops/outbox). */
-const OUTBOX_OWNERS = ["auth-service", "trip-service", "fleet-service"];
+const OUTBOX_OWNERS = ["auth-service", "trip-service", "fleet-service", "payment-service"];
 
 async function getJson(url: string, token?: string, timeoutMs = 2000): Promise<{ ok: boolean; status: number; body: unknown; ms: number }> {
   const started = Date.now();
@@ -143,7 +143,17 @@ export function createSystemHealth(deps: { db: Db; redis?: Redis; targets: Targe
         storage = { error: "unreachable" };
       }
     }
-    return { messaging: otp, routing: mapping, locationStream: realtime, documentStorage: storage };
+    const payment = deps.targets.find((t) => t.name === "payment-service");
+    let payments: unknown = null;
+    if (payment) {
+      try {
+        const r = await getJson(new URL("/internal/ops/integrations", payment.url).toString(), deps.token);
+        payments = r.ok ? r.body : { error: `HTTP ${r.status}` };
+      } catch {
+        payments = { error: "unreachable" };
+      }
+    }
+    return { messaging: otp, routing: mapping, locationStream: realtime, documentStorage: storage, payments };
   }
 
   return {

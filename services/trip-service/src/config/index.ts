@@ -24,9 +24,10 @@ export const envSchema = z
     LOCATION_INTERNAL_URL: z.string().url().default("http://localhost:3003"),
     MAPPING_INTERNAL_URL: z.string().url().default("http://localhost:3007"),
 
-    // Quotes: "service" = pricing-service (GET /internal/quotes/:id); "builtin" = the development
-    // stand-in until pricing-service exists (refused in production)
-    PRICING: z.enum(["service", "builtin"]).default("builtin"),
+    // Quotes: "service" = pricing-service (GET /internal/quotes/:id; riders get estimates from
+    // POST /api/pricing/estimates); "builtin" = the old in-process stand-in, kept for tests and for
+    // running trip-service alone (POST /api/trips/estimates; refused in production)
+    PRICING: z.enum(["service", "builtin"]).default("service"),
     PRICING_INTERNAL_URL: z.string().url().default("http://localhost:3004"),
 
     // Live settings (admin dashboard): GET /internal/settings/snapshot. The values below are only the

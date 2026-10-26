@@ -32,7 +32,7 @@ export interface DriverOnlineEvent extends EventEnvelope {
   /** fleet organisation owning the vehicle; absent for owner-drivers */
   fleetOrgId?: string;
   beneficiaryId?: string;
-  balanceState?: "OK" | "WARNING" | "CASH_BLOCKED" | "BLOCKED";
+  balanceState?: BalanceState;
   cashAllowed: boolean;
 }
 
@@ -123,6 +123,8 @@ export interface TripCancelledEvent extends TripEndedEvent {
   /** credited to the beneficiary out of the fee */
   driverCompensationMinor: number;
   beneficiary?: Beneficiary;
+  /** company account trips: the fee is billed to the company */
+  billingOrgId?: string;
   currency: string;
 }
 
@@ -131,4 +133,88 @@ export interface UserCreatedEvent extends EventEnvelope {
   userId: string;
   /** created by the call center (phone only, not yet claimed) */
   guest: boolean;
+}
+
+// ── payment-service (Payment.md, workflows 08–09) ─────────────────────────────
+
+export type BalanceState = "OK" | "WARNING" | "CASH_BLOCKED" | "BLOCKED";
+
+/** payment-service → `balance.state_changed` (key beneficiary id). location-service updates matching; notification tells the driver. */
+export interface BalanceStateChangedEvent extends EventEnvelope {
+  accountId: string;
+  beneficiary: Beneficiary;
+  cityId: string;
+  state: BalanceState;
+  previousState: BalanceState;
+  /** OK and WARNING may take cash trips */
+  cashAllowed: boolean;
+  balanceMinor: number;
+}
+
+/** payment-service → `payment.action_required` (key riderId): the rider must approve the charge with their provider. */
+export interface PaymentActionRequiredEvent extends EventEnvelope {
+  paymentId: string;
+  tripId: string;
+  riderId: string;
+  purpose: "TRIP_FARE" | "CANCELLATION_FEE";
+  provider: string;
+  amountMinor: number;
+  currency: string;
+  checkoutUrl: string | null;
+}
+
+/** payment-service → `payment.captured` / `payment.failed` (key riderId). */
+export interface PaymentOutcomeEvent extends EventEnvelope {
+  paymentId: string;
+  tripId: string;
+  riderId: string;
+  purpose: "TRIP_FARE" | "CANCELLATION_FEE";
+  provider: string;
+  method: PaymentMethod;
+  amountMinor: number;
+  currency: string;
+  /** payment.failed: no retry left (settled as a rider receivable) */
+  final?: boolean;
+  nextAttemptAt?: string;
+}
+
+/** payment-service → `trip.settled` (key tripId): the ledger entry for a trip, any payment method (the receipt). */
+export interface TripSettledEvent extends EventEnvelope {
+  tripId: string;
+  riderId: string;
+  driverId?: string;
+  beneficiary?: Beneficiary;
+  purpose: "TRIP_FARE" | "CANCELLATION_FEE";
+  paymentMethod: PaymentMethod;
+  fareMinor: number;
+  commissionMinor: number;
+  vatMinor: number;
+  /** what the beneficiary's balance moved by (negative on cash trips) */
+  earningsMinor: number;
+  currency: string;
+}
+
+/** payment-service → `balance.topped_up` / `balance.payment_due` / `payout.sent` / `payout.failed` (key beneficiary id). */
+export interface BalanceMoneyEvent extends EventEnvelope {
+  accountId: string;
+  beneficiary: Beneficiary;
+  amountMinor: number;
+  balanceMinor: number;
+  currency: string;
+  channel?: string;
+  provider?: string;
+  /** balance.payment_due */
+  minimumMinor?: number;
+  dueAt?: string;
+  failure?: string;
+}
+
+/** payment-service → `refund.succeeded` / `refund.failed` (key riderId). */
+export interface RefundOutcomeEvent extends EventEnvelope {
+  refundId: string;
+  paymentId: string;
+  tripId: string;
+  riderId: string;
+  amountMinor: number;
+  currency: string;
 }

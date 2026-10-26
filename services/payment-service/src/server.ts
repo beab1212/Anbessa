@@ -1,10 +1,66 @@
-import Fastify from "fastify";
+import { createAuthzSync, fetchAuthzSnapshotFrom } from "@ride-app/shared-authz";
+import { buildApp } from "./app.js";
+import { loadConfig } from "./config/index.js";
+import { createContainer } from "./container.js";
+import { createConsumer } from "./events/consumer.js";
+import { startJobs } from "./jobs.js";
+import { purgeIdempotencyKeys } from "./lib/idempotency.js";
+import { createOutboxRelay } from "./outbox/relay.js";
+import { serviceLogger } from "./utils/logger.js";
 
-// Same shape as auth-service (routes -> controllers -> services -> repositories).
-// Handles fare capture and driver payouts via Stripe Connect. Every charge call carries an idempotency key to survive client retries safely.
-const app = Fastify({ logger: true });
-app.get("/health", async () => ({ status: "ok" }));
+async function main() {
+  const config = loadConfig();
+  const logger = serviceLogger(config.NODE_ENV, config.LOG_LEVEL);
+  const c = createContainer(config, logger);
+  const app = await buildApp({ ...c, logger });
 
-app.listen({ port: 3005, host: "0.0.0.0" }).then(() => {
-  console.log("payment-service listening on :3005");
+  if (config.GATEWAY_MODE === "simulated") {
+    logger.warn({ providers: config.PAYMENT_PROVIDERS, autoApproveSeconds: config.SIM_AUTO_APPROVE_SECONDS }, "payment providers are SIMULATED: no real money moves (development only)");
+  }
+  if (!config.REDIS_URL) logger.warn("REDIS_URL not set: riders get no live payment prompts and suspensions take effect when tokens expire (development only)");
+
+  const relay = config.KAFKA_BROKERS ? createOutboxRelay(c.db, config.KAFKA_BROKERS, logger) : undefined;
+  const consumer = config.KAFKA_BROKERS
+    ? createConsumer({ brokers: config.KAFKA_BROKERS, payments: c.payments, logger, createTopics: config.NODE_ENV !== "production" })
+    : undefined;
+  if (relay) relay.start();
+  else logger.warn("KAFKA_BROKERS not set: trips are never settled and balance states don't reach matching");
+  await consumer?.start().catch((err) => logger.error({ err }, "Kafka consumer failed to start; trips won't be settled until it does"));
+
+  await c.settingsClient?.start();
+  const stopJobs = startJobs(c, logger);
+  const daily = setInterval(() => void purgeIdempotencyKeys(c.db).catch((err) => logger.error({ err }, "idempotency purge failed")), 24 * 3600 * 1000);
+
+  // the permission matrix follows auth-service live (Role.md §8)
+  const authzSync = createAuthzSync({
+    fetchSnapshot: fetchAuthzSnapshotFrom(config.AUTH_INTERNAL_URL, config.INTERNAL_SERVICE_TOKEN),
+    ...(c.redis ? { redis: c.redis } : {}),
+    logger,
+  });
+  await authzSync.start();
+
+  await app.listen({ port: config.PORT, host: "0.0.0.0" });
+
+  let closing = false;
+  for (const signal of ["SIGTERM", "SIGINT"] as const) {
+    process.on(signal, async () => {
+      if (closing) return;
+      closing = true;
+      logger.info(`${signal} received, shutting down`);
+      await authzSync.stop();
+      await c.settingsClient?.stop();
+      stopJobs();
+      clearInterval(daily);
+      await app.close();
+      await consumer?.stop().catch(() => undefined);
+      await relay?.stop();
+      await c.close();
+      process.exit(0);
+    });
+  }
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
 });

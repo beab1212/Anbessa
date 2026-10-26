@@ -35,6 +35,8 @@ export interface DriverLive {
   fleetOrgId?: string;
   tripId?: string;
   cashAllowed: boolean;
+  /** the beneficiary's balance state (payment-service); BLOCKED takes no trips at all */
+  balanceState?: string;
   lat?: number;
   lng?: number;
   at?: number;

@@ -11,6 +11,8 @@ import { CityMap } from "../../components/map/CityMap";
 import { DropoffMarker, PickupMarker, TripLine } from "../../components/map/markers";
 import { Empty, Field, Notice, PageHead, Pill, Problem, SelectField } from "../../components/ui";
 import { CompanyDocuments, DriverCell, FleetVehicles, useFleetOverview, type Member } from "./Fleet";
+import { BalancePanel } from "../money/BalancePanel";
+import type { Balance } from "../../lib/money";
 
 export interface Org {
   id: string;
@@ -148,7 +150,12 @@ export function OrgPage() {
   const chosenRole = role || inviteRoles[0]!;
   const e164 = toE164(raw);
   const pendingInvites = o.invitations.filter((i) => i.status === "pending");
-  const tabs = [["people", fleet ? "Drivers and people" : "People"], ...(fleet && allowed(p, "vehicle:read", { orgId: o.id }) ? [["vehicles", "Vehicles"]] : []), ...(allowed(p, "document:upload", { orgId: o.id }) ? [["documents", "Documents"]] : [])];
+  const tabs = [
+    ["people", fleet ? "Drivers and people" : "People"],
+    ...(fleet && allowed(p, "vehicle:read", { orgId: o.id }) ? [["vehicles", "Vehicles"]] : []),
+    ...(fleet && o.status === "VERIFIED" && allowed(p, "balance:read", { orgId: o.id }) ? [["balance", "Balance"]] : []),
+    ...(allowed(p, "document:upload", { orgId: o.id }) ? [["documents", "Documents"]] : []),
+  ];
   const tab = tabs.some(([t]) => t === params.get("tab")) ? params.get("tab")! : "people";
 
   return (
@@ -170,6 +177,7 @@ export function OrgPage() {
       ) : null}
       {tab === "vehicles" ? <FleetVehicles orgId={o.id} verified={o.status === "VERIFIED"} members={o.members} /> : null}
       {tab === "documents" ? <CompanyDocuments orgId={o.id} kind={o.kind} status={o.status} /> : null}
+      {tab === "balance" ? <FleetBalance orgId={o.id} cityId={o.cityId} owner={allowed(p, "topup:create", { orgId: o.id })} /> : null}
 
       {tab === "people" ? <div className="two-col wide-left">
         <section className="card">
@@ -259,7 +267,7 @@ export function CorporateBooking() {
   const [idemKey] = useState(newIdempotencyKey);
   const fit = useMemo(() => [pickup, dropoff].filter((x): x is Place => !!x), [pickup, dropoff]);
   const getQuote = useMutation({
-    mutationFn: () => api<{ quotes: { id: string; fareMinor: number; distanceMeters: number }[] }>("partner", "/api/trips/estimates", { body: { pickup, dropoff, vehicleTypes: ["economy"], pickupAddress: pickup!.name, dropoffAddress: dropoff!.name } }),
+    mutationFn: () => api<{ quotes: { id: string; fareMinor: number; distanceMeters: number }[] }>("partner", "/api/pricing/estimates", { body: { pickup, dropoff, vehicleTypes: ["economy"], pickupAddress: pickup!.name, dropoffAddress: dropoff!.name } }),
     onSuccess: (r) => setQuote(r.quotes[0] ?? null),
   });
   const book = useMutation({
@@ -316,6 +324,25 @@ export function CorporateBooking() {
           </CityMap>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** The fleet's one balance with the platform (Payment.md §11): every trip in its cars lands here. */
+function FleetBalance({ orgId, cityId, owner }: { orgId: string; cityId: string; owner: boolean }) {
+  const q = useQuery({
+    queryKey: ["money", "org-balance", orgId], refetchInterval: 15_000,
+    queryFn: () => api<Balance>("partner", `/api/payments/balances/org/${orgId}?cityId=${cityId}${owner ? "&open=true" : ""}`),
+  });
+  if (q.error) return <Problem error={q.error} />;
+  if (!q.data) return <p className="muted">Loading…</p>;
+  return (
+    <div className="stack" style={{ gap: "1rem" }}>
+      <p className="small muted" style={{ margin: 0 }}>
+        Card and mobile money trips in your cars add what the driver earned; cash trips add the commission you owe. They net out, and the balance is
+        settled weekly: paid out when positive, a payment due when negative. Cash trips pause for all your cars at the cash limit.
+      </p>
+      <BalancePanel surface="partner" balance={q.data} owner={owner} />
     </div>
   );
 }

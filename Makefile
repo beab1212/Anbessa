@@ -18,7 +18,7 @@ SHELL := /bin/bash
 SERVICES := auth-service trip-service location-service pricing-service \
             payment-service notification-service mapping-service realtime-gateway fleet-service \
             platform-service audit-service
-PRISMA_SERVICES := auth-service notification-service trip-service fleet-service platform-service audit-service
+PRISMA_SERVICES := auth-service notification-service trip-service fleet-service payment-service platform-service audit-service
 
 # ── colours ────────────────────────────────────────────────────────────────────
 BOLD  := \033[1m

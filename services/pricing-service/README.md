@@ -1,94 +1,34 @@
 # pricing-service
 
-## Quick start — standalone, no other services needed
+Quotes (workflow [05](../../docs/design/workflows/05-ride-booking-matching.md) part B). A rider, call center agent or company coordinator asks for an estimate. pricing-service then:
 
-Requires Node 24 (`nvm use`) and pnpm via `corepack enable` (see the root README's Toolchain table).
+1. gets the route from mapping-service;
+2. prices it with the city's live fare card (admin dashboard → Settings → Fares: base, per km, per minute, minimum; changes need a second super admin);
+3. keeps one quote per vehicle type in Redis for `quote.ttlSeconds` (10 minutes).
 
-```bash
-# 1. Start only the infra this service requires
-docker compose -f docker-compose.dev.yml up -d
+trip-service reads the quote by id when the trip is requested (`GET /internal/quotes/:id`). The rider pays the quoted fare even if fares change in between.
 
-# 2. Install dependencies (once)
-pnpm install
-
-# 3. Copy the env file
-cp .env.example .env
-
-# Start with hot reload (tsx watch — loads libs/* TypeScript source directly)
-pnpm dev
-```
-
-Service URL  : http://localhost:3004
-Health check : http://localhost:3004/health
-
-> **Working across the full stack?**
-> From the repo root, run `make dev-services` instead —
-> it starts all services together.
-
----
-
-## Project layout
-
-```
-src/
-├── config/         env → typed config object (Zod, fails fast at boot)
-├── routes/         HTTP route wiring → controller (no logic here)
-├── controllers/    parse request · call service · shape response
-├── services/       business logic lives here
-├── repositories/   the only layer that talks to Prisma / Redis
-├── models/         domain types (DB schema comes from prisma/schema.prisma)
-├── middlewares/    error handler, auth guard
-├── events/
-│   ├── producers/  Kafka publish
-│   └── consumers/  Kafka subscribe
-├── utils/          logger, small helpers
-├── app.ts          builds Fastify instance — no listen() call, fully testable
-└── server.ts       calls app.ts, listens, wires graceful shutdown
-```
-
----
-
-## Common commands
-
-| Command | What it does |
-|---------|-------------|
-| `pnpm dev` | Start with hot reload (tsx watch) |
-| `pnpm build` | Compile TypeScript → dist/ (build libs first: `pnpm turbo run build --filter=@ride-app/pricing-service...`) |
-| `pnpm start` | Run compiled output (production) |
-| `pnpm test` | Run all tests |
-| `pnpm vitest` | Tests in watch mode |
-| `pnpm lint` | ESLint |
-| `pnpm typecheck` | Type-check only, no emit (against lib source, no build needed) |
-
----
-
-## Running tests
+Port **3004**. There's no database: quotes live in Redis.
 
 ```bash
-pnpm test            # all tests once (passes when no test files exist yet)
-pnpm vitest          # watch mode during development
+make secrets   # INTERNAL_SERVICE_TOKEN in .env
+pnpm dev       # or `make dev-services` from the root
 ```
 
-- **Unit tests** (`tests/unit/`): mock the repository and Kafka boundaries,
-  assert on pure business logic only.
-- **Integration tests** (`tests/integration/`): spin up a real DB via
-  Testcontainers so migrations and queries run against an actual Postgres.
+| Endpoint | Who | What |
+|---|---|---|
+| `POST /api/pricing/estimates` | Anyone signed in (`ride-app` or `ride-admin`) | `{ pickup, dropoff, vehicleTypes?, pickupAddress?, dropoffAddress? }` → `{ quotes: [{ id, fareMinor, breakdown, distanceMeters, durationSeconds, approximate, expiresAt, … }] }`. Without `vehicleTypes`, every type offered in the city (admin → Cities and vehicles) |
+| `GET /api/pricing/fares?cityId=` | Public | The city's fare card per vehicle type (cached 60 s) |
+| `GET /internal/quotes/:id` | trip-service (service token) | The quote, or 404 when expired or unknown |
 
----
+How the fare is worked out: base + km × per km + minutes × per minute, rounded to whole birr, at least the minimum fare. When OSRM is down, mapping-service answers with a straight-line estimate and the quote is marked `approximate`; the rider still pays the quoted fare.
 
-## Docker image
-
-Build from the **repo root** so the workspace libs are in the build context:
+Not built yet (workflow 15):
+- versioned fare rules with scheduled changes;
+- zones (airport fees, no-pickup areas);
+- promotions;
+- surge pricing.
 
 ```bash
-docker build -f services/pricing-service/Dockerfile -t ride-app/pricing-service .
+pnpm test   # pricing and the HTTP API, with an in-memory quote store
 ```
-
-The image is `node:24-alpine`. The build stage uses pnpm (`pnpm deploy --prod`) and the runtime stage ships only `dist/` and production `node_modules`.
-
----
-
-## Environment variables
-
-See `.env.example` — every variable is documented there.
-Never commit a `.env` file with real secrets.

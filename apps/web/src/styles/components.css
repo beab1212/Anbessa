@@ -367,9 +367,16 @@
   gap: 1.25rem;
   border-bottom: 1px solid var(--border);
   margin-bottom: 1rem;
+  /* more tabs than fit on a phone scroll sideways instead of widening the page */
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
 
 .tabs button {
+  flex: none;
+  white-space: nowrap;
   appearance: none;
   border: 0;
   background: none;
@@ -425,6 +432,10 @@
 
 .table tbody tr:last-child td {
   border-bottom: 0;
+}
+
+.table tbody tr.clickable {
+  cursor: pointer;
 }
 
 .table tbody tr:hover td {

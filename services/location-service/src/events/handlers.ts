@@ -3,7 +3,7 @@
 
 import type { Redis } from "ioredis";
 import { z } from "zod";
-import { assertCity, assertVehicleType, endTrip, goOffline, goOnline, startTrip } from "@ride-app/shared-location";
+import { applyBalanceState, assertCity, assertVehicleType, endTrip, goOffline, goOnline, startTrip } from "@ride-app/shared-location";
 
 const id = z.string().uuid();
 const city = z.string().refine((c) => { try { assertCity(c); return true; } catch { return false; } }, "invalid city id");
@@ -12,12 +12,17 @@ const vehicleType = z.string().refine((t) => { try { assertVehicleType(t); retur
 export const schemas = {
   "driver.online": z.object({
     driverId: id, vehicleId: z.string().min(1).max(64), vehicleType, cityId: city,
-    fleetOrgId: id.optional(), cashAllowed: z.boolean(), balanceState: z.string().max(20).optional(),
+    fleetOrgId: id.optional(), beneficiaryId: id.optional(), cashAllowed: z.boolean(), balanceState: z.string().max(20).optional(),
   }),
   "driver.offline": z.object({ driverId: id, reason: z.string().max(40) }),
   "trip.matched": z.object({ tripId: id, riderId: id, driverId: id }),
   "trip.completed": z.object({ tripId: id, driverId: id.optional() }),
   "trip.cancelled": z.object({ tripId: id, driverId: id.optional() }),
+  // payment-service: cash trips pause at the cash limit, all trips when blocked (Payment.md §8)
+  "balance.state_changed": z.object({
+    beneficiary: z.object({ type: z.enum(["INDIVIDUAL", "ORGANIZATION"]), id }),
+    state: z.enum(["OK", "WARNING", "CASH_BLOCKED", "BLOCKED"]), cashAllowed: z.boolean(),
+  }),
 };
 
 export type Topic = keyof typeof schemas;
@@ -34,5 +39,9 @@ export function createHandlers(redis: Redis): Record<Topic, (payload: unknown) =
     "trip.matched": async (payload) => startTrip(redis, schemas["trip.matched"].parse(payload)),
     "trip.completed": ended,
     "trip.cancelled": ended,
+    "balance.state_changed": async (payload) => {
+      const e = schemas["balance.state_changed"].parse(payload);
+      await applyBalanceState(redis, { beneficiaryId: e.beneficiary.id, state: e.state, cashAllowed: e.cashAllowed });
+    },
   };
 }

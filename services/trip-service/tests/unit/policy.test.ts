@@ -44,7 +44,8 @@ describe("config", () => {
   const env = { DATABASE_URL: "postgresql://x@localhost/x", REDIS_URL: "redis://localhost:6379", INTERNAL_SERVICE_TOKEN: "t".repeat(64) };
 
   it("refuses the quote stand-in and missing Kafka in production", () => {
-    expect(() => loadConfig({ ...env, NODE_ENV: "production" })).toThrow(/PRICING[\s\S]*KAFKA_BROKERS|KAFKA_BROKERS[\s\S]*PRICING/);
+    expect(() => loadConfig({ ...env, NODE_ENV: "production", PRICING: "builtin" })).toThrow(/PRICING[\s\S]*KAFKA_BROKERS|KAFKA_BROKERS[\s\S]*PRICING/);
+    expect(loadConfig(env).PRICING).toBe("service");
     expect(() => loadConfig({ ...env, NODE_ENV: "production", PRICING: "service", KAFKA_BROKERS: "k:9092" })).not.toThrow();
   });
 

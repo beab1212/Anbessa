@@ -46,12 +46,26 @@ describe("claims → navigation (UI only; services check again)", () => {
 
   it("a super admin runs the platform (people, permissions, settings, health, audit), not trips", () => {
     expect(pages(staff([{ r: "SUPER_ADMIN", g: true }]))).toEqual([
+      "Payment providers",
       "Overview", "Users", "Staff and roles", "Roles and permissions", "Approvals", "Settings", "Cities and vehicles", "Announcements", "System", "Audit log",
     ]);
   });
 
   it("an auditor reads the matrix, settings, system and audit log, nothing else", () => {
-    expect(pages(staff([{ r: "AUDITOR", g: true }]))).toEqual(["Overview", "Roles and permissions", "Settings", "Cities and vehicles", "System", "Audit log"]);
+    expect(pages(staff([{ r: "AUDITOR", g: true }]))).toEqual(["Overview", "Payment providers", "Overview", "Roles and permissions", "Settings", "Cities and vehicles", "System", "Audit log"]);
+  });
+
+  it("finance: officers record and prepare, managers approve; both see every money page", () => {
+    const money = ["Overview", "Balances", "Rider payments", "Money approvals", "Payouts", "Commission and limits", "Payment providers"];
+    const moneyOf = (p: Principal) => staffSections(p).find((s) => s.title === "Money")!.items.map((i) => i.label);
+    expect(moneyOf(staff([{ r: "FINANCE_OFFICER" }]))).toEqual(money);
+    expect(moneyOf(staff([{ r: "FINANCE_MANAGER" }]))).toEqual(money);
+  });
+
+  it("support asks for refunds in their city; operations proposes commission and limits", () => {
+    expect(pages(staff([{ r: "SUPPORT_AGENT", city: "addis-ababa" }]))).toEqual(expect.arrayContaining(["Balances", "Rider payments", "Money approvals"]));
+    expect(pages(staff([{ r: "SUPPORT_AGENT", city: "addis-ababa" }]))).not.toContain("Payouts");
+    expect(pages(staff([{ r: "OPERATIONS_MANAGER", city: "addis-ababa" }]))).toEqual(expect.arrayContaining(["Money approvals", "Commission and limits"]));
   });
 
   it("the phone booking page disappears when its feature flag is off", () => {

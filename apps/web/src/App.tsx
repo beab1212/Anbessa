@@ -26,9 +26,23 @@ import { AnnouncementsPage } from "./pages/admin/Announcements";
 import { SystemPage } from "./pages/admin/System";
 import { AuditPage } from "./pages/admin/Audit";
 import { useClientConfig } from "./lib/platform";
+import { MoneyOverviewPage } from "./pages/money/Overview";
+import { BalancePage, BalancesPage } from "./pages/money/Balances";
+import { PaymentsPage } from "./pages/money/Payments";
+import { MoneyApprovalsPage } from "./pages/money/Approvals";
+import { PayoutsPage } from "./pages/money/Payouts";
+import { RulesPage } from "./pages/money/Rules";
+import { ProvidersPage } from "./pages/money/Providers";
 
 /** Who sees the Approvals inbox: anyone who asks for or decides maker–checker changes. */
 const APPROVERS: Permission[] = ["role:request", "role:approve", "staff:manage", "authz:propose", "authz:approve", "settings:propose", "settings:approve"];
+
+/** Who sees Money approvals: anyone who records, asks for or decides a money change (Payment.md §15). */
+const MONEY_APPROVERS: Permission[] = [
+  "topup:record_cash", "topup:approve_cash", "refund:request", "refund:approve", "payout:prepare", "payout:approve",
+  "commission_rule:propose", "commission_rule:approve", "balance_policy:propose", "balance_policy:approve",
+];
+const RULE_READERS: Permission[] = ["commission_rule:propose", "commission_rule:approve", "balance_policy:propose", "balance_policy:approve", "commission:read"];
 import { DriverDirectory, DriverRecord, ReviewQueuePage, VehicleDirectory, VehicleRecord } from "./pages/staff/Fleet";
 
 /** Has the permission in any city (staff pages pick the city inside). */
@@ -59,6 +73,18 @@ export function staffSections(p: Principal, flags: { phoneBooking?: boolean } = 
     {
       title: "Accounts",
       items: [...item(inAnyCity(p, "user:suspend"), "/staff/safety", "Suspend")],
+    },
+    {
+      title: "Money",
+      items: [
+        ...item(can(p, "balance:read") || can(p, "report:read_finance"), "/staff/money", "Overview"),
+        ...item(inAnyCity(p, "balance:read"), "/staff/money/balances", "Balances"),
+        ...item(inAnyCity(p, "balance:read") || inAnyCity(p, "refund:request") || can(p, "refund:approve"), "/staff/money/payments", "Rider payments"),
+        ...item(MONEY_APPROVERS.some((perm) => inAnyCity(p, perm)), "/staff/money/approvals", "Money approvals"),
+        ...item(can(p, "payout:prepare") || can(p, "payout:approve"), "/staff/money/payouts", "Payouts"),
+        ...item(RULE_READERS.some((perm) => inAnyCity(p, perm)), "/staff/money/rules", "Commission and limits"),
+        ...item(can(p, "balance:read") || can(p, "report:read_finance") || can(p, "system:read"), "/staff/money/providers", "Payment providers"),
+      ],
     },
     {
       title: "Administration",
@@ -163,6 +189,14 @@ export function App() {
           <Route path="admin/announcements" element={<Guard ok={(p) => can(p, "announcement:manage")}><AnnouncementsPage /></Guard>} />
           <Route path="admin/system" element={<Guard ok={(p) => can(p, "system:read")}><SystemPage /></Guard>} />
           <Route path="admin/audit" element={<Guard ok={(p) => can(p, "audit_log:read")}><AuditPage /></Guard>} />
+          <Route path="money" element={<Guard ok={(p) => can(p, "balance:read") || can(p, "report:read_finance")}><MoneyOverviewPage /></Guard>} />
+          <Route path="money/balances" element={<Guard ok={(p) => inAnyCity(p, "balance:read")}><BalancesPage /></Guard>} />
+          <Route path="money/balances/:accountId" element={<Guard ok={(p) => inAnyCity(p, "balance:read")}><BalancePage /></Guard>} />
+          <Route path="money/payments" element={<Guard ok={(p) => inAnyCity(p, "balance:read") || inAnyCity(p, "refund:request") || can(p, "refund:approve")}><PaymentsPage /></Guard>} />
+          <Route path="money/approvals" element={<Guard ok={(p) => MONEY_APPROVERS.some((perm) => inAnyCity(p, perm))}><MoneyApprovalsPage /></Guard>} />
+          <Route path="money/payouts" element={<Guard ok={(p) => can(p, "payout:prepare") || can(p, "payout:approve")}><PayoutsPage /></Guard>} />
+          <Route path="money/rules" element={<Guard ok={(p) => RULE_READERS.some((perm) => inAnyCity(p, perm))}><RulesPage /></Guard>} />
+          <Route path="money/providers" element={<Guard ok={(p) => can(p, "balance:read") || can(p, "report:read_finance") || can(p, "system:read")}><ProvidersPage /></Guard>} />
           <Route path="none" element={<NoAccess />} />
         </Route>
 

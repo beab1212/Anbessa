@@ -65,9 +65,12 @@ export async function createHarness() {
   // ── actors ────────────────────────────────────────────────────────────────
   const rider = async (id = uuid(), roles: object[] = [{ r: "RIDER" }]) => ({ id, token: await token(id, roles) });
   const staff = async (roles: object[], id = uuid()) => ({ id, token: await token(id, roles, "ride-admin") });
-  async function driver(at: LatLng = near(BOLE, 300), opts: { cashAllowed?: boolean; fleetOrgId?: string; vehicleType?: string } = {}) {
+  async function driver(at: LatLng = near(BOLE, 300), opts: { cashAllowed?: boolean; fleetOrgId?: string; vehicleType?: string; balanceState?: string } = {}) {
     const id = uuid();
-    await goOnline(redis, { driverId: id, cityId: CITY, vehicleType: opts.vehicleType ?? "economy", vehicleId: `veh-${id.slice(0, 6)}`, cashAllowed: opts.cashAllowed ?? true, fleetOrgId: opts.fleetOrgId });
+    await goOnline(redis, {
+      driverId: id, cityId: CITY, vehicleType: opts.vehicleType ?? "economy", vehicleId: `veh-${id.slice(0, 6)}`, cashAllowed: opts.cashAllowed ?? true,
+      fleetOrgId: opts.fleetOrgId, beneficiaryId: opts.fleetOrgId ?? id, ...(opts.balanceState ? { balanceState: opts.balanceState } : {}),
+    });
     let last = at;
     // the clock moves as if the car drove there at 10 m/s (pings faster than 200 km/h are dropped)
     const ping = async (p: LatLng = at) => {

@@ -49,7 +49,7 @@ flowchart TB
     Core[Ride-hailing backend]
   end
 
-  Stripe[(Stripe Connect<br/>charges + payouts)]
+  Pay[(telebirr · CBE Birr · Chapa<br/>charges, top-ups, payouts)]
   FCM[(Firebase Cloud Messaging<br/>push)]
   Twilio[(Twilio<br/>SMS fallback)]
   TG[(Telegram Gateway API<br/>login codes)]
@@ -58,7 +58,7 @@ flowchart TB
   Rider -->|book, track, pay| Core
   Driver -->|go online, accept, stream GPS| Core
   Ops -->|monitor trips, drivers, payouts| Core
-  Core -->|charge riders, pay drivers| Stripe
+  Core -->|charge riders, pay drivers| Pay
   Core -->|push notifications| FCM
   Core -->|SMS| Twilio
   Core -->|verification codes| TG
@@ -149,13 +149,13 @@ Each service owns one business capability **and its data**. No service reads ano
 | Service | Port | Responsibility | Owns | Status |
 |---|---|---|---|---|
 | **auth-service** | 3001 | Identity on **Better Auth** ([Auth.md](../design/Auth.md)): phone OTP and staff password + TOTP, sessions, organisations, ES256 JWTs + JWKS, `/api/identity` (guests, maker–checker staff roles, suspension) | `auth_service` DB: users, sessions, organisations, members, signing keys, approvals, outbox | ✅ implemented, unit + integration tests |
-| **trip-service** | 3002 | Trip lifecycle state machine, matching (one driver at a time, OSRM-ranked, 2→4→6 km), cancellations and fees, ratings, dispatcher board | `trip_service` DB: trip, trip_event (monthly partitions), trip_offer, driver_active_trip, ratings, idempotency keys, outbox | ✅ implemented, integration tests + an end-to-end run with all services. Quotes from a dev stand-in until pricing-service exists |
+| **trip-service** | 3002 | Trip lifecycle state machine, matching (one driver at a time, OSRM-ranked, 2→4→6 km; skips blocked balances, and cash-paused ones for cash trips), cancellations and fees, ratings, dispatcher board | `trip_service` DB: trip, trip_event (monthly partitions), trip_offer, driver_active_trip, ratings, idempotency keys, outbox | ✅ implemented, integration tests + an end-to-end run with all services. Quotes come from pricing-service (`PRICING=builtin` keeps the old in-process stand-in for running alone) |
 | **location-service** | 3003 | Driver state from `driver.online`/`offline` and `trip.*`, nearby-driver search for matching, ETA to pickup, staleness sweeper, ops map and the rider's trip view | Redis: driver state, geo sets per city and vehicle type (Database.md §10) | ✅ implemented, integration tests on Redis. A dev route still puts drivers online without fleet-service |
-| **pricing-service** | 3004 | Fare estimates, surge multipliers | Pricing rules (stateless today) | 📐 `/health` only |
-| **payment-service** | 3005 | Fare capture and driver payouts (Stripe Connect), idempotent charges | `payment_service` DB: charges, payouts | 📐 `/health` only |
+| **pricing-service** | 3004 | Quotes: route (mapping-service) × the city's live fare card (Settings → Fares), one per vehicle type; trip-service reads the quote when the trip is requested | Redis only (quotes expire after `quote.ttlSeconds`) | ✅ implemented, unit tests. Versioned fare rules, zones, promotions and surge (workflow 15) are next |
+| **payment-service** | 3005 | Double-entry ledger, trip settlement per payment method, commission + VAT, driver/fleet balances with limits (cash pause, block), rider charges by mobile money and card with retries and receivables, top-ups (mobile money, office cash, bank transfer), weekly settlement and payouts, refunds, commission rules and balance policies (maker–checker), provider webhooks and reconciliation | `payment_service` DB: ledger_account, journal_entry, posting (balanced, append-only), beneficiary, payment, trip_settlement, top_up, payment_due, payout_batch/line, refund, commission_rule, balance_policy, rule_change, webhook_event, inbox, outbox | ✅ implemented, unit + integration tests, web Money pages. Providers (telebirr, CBE Birr, Chapa) are **simulated** until the real integrations are written; refused in production |
 | **notification-service** | 3006 | Push (FCM) and SMS from events. **Login codes via the Telegram Gateway API, SMS fallback** (internal API from auth-service, never Kafka: [Auth.md §9.7](../design/Auth.md#97-otp-delivery-telegram-gateway-first-sms-fallback)) | `notification_service` DB: `otp_delivery`, `notification` (dedupe log), `device_token` | ✅ OTP delivery (Telegram + SMS fallback), invite SMS and driver-activated push from Kafka, device tokens. Trip/payment notifications wait for those events |
 | **mapping-service** | 3007 | The only gateway to OSRM / Nominatim: route, table, snap, search, reverse, with timeouts, a circuit breaker and straight-line fallback | Route and geocoding cache (Redis) | ✅ implemented, tested against OSRM/Nominatim-shaped fakes. Needs `make map-data` for real routing |
-| **fleet-service** | 3008 | Driver applications, vehicles and ownership (V1–V10), fleet authorisations, driving sessions (going online), onboarding documents (pre-signed S3 uploads), review queue, document expiry | `fleet_service` DB: driver_profile (licence encrypted + blind index), vehicle, vehicle_authorization, driving_session, document, idempotency keys, outbox | ✅ implemented, unit + integration tests, web review queue and fleet portal. Balance check on going online waits for payment-service |
+| **fleet-service** | 3008 | Driver applications, vehicles and ownership (V1–V10), fleet authorisations, driving sessions (going online; a blocked balance can't), onboarding documents (pre-signed S3 uploads), review queue, document expiry | `fleet_service` DB: driver_profile (licence encrypted + blind index), vehicle, vehicle_authorization, driving_session, document, idempotency keys, outbox | ✅ implemented, unit + integration tests, web review queue and fleet portal |
 | **platform-service** | 3011 | Live settings (matching, trip rules, fees, fares, OTP, documents, maintenance, app versions, feature flags) with maker–checker for sensitive ones; cities and vehicle types; announcements; public client configuration; the system page (health, outboxes, Kafka lag, integrations) | `platform_service` DB: setting values, history and change requests, cities, vehicle types, announcements, outbox | ✅ implemented, integration tests, admin dashboard |
 | **audit-service** | 3010 | The write-once audit log: consumes `audit.recorded`, search and CSV export | `audit_service` DB: `audit_entry` (monthly partitions, UPDATE/DELETE refused) | ✅ implemented, integration tests, admin dashboard |
 | **realtime-gateway** | 3000 | WebSocket connections, driver pings into Redis, live location fan-out to trip rooms | Socket rooms (in Redis) | ✅ pings from `DRIVER` tokens only, plausibility checks, fan-out to the assigned trip only, guarded Kafka publish |
@@ -220,8 +220,8 @@ flowchart TD
 |---|---|---|
 | `/api/auth` | auth-service:3001 | rate-limiting 30/min |
 | `/api/trips` | trip-service:3002 | jwt, rate-limiting 60/min |
-| `/api/pricing` | pricing-service:3004 | jwt |
-| `/api/payments` | payment-service:3005 | jwt, rate-limiting 20/min |
+| `/api/pricing` | pricing-service:3004 | rate-limiting 120/min (each route checks its token; the fare card is public) |
+| `/api/payments` | payment-service:3005 | rate-limiting 120/min, 64 KB bodies. `/api/payments/webhooks/{provider}` is public and verified by each provider's signature |
 
 The realtime gateway is reached directly (through the load balancer), not through Kong.
 
@@ -275,16 +275,17 @@ sequenceDiagram
   participant N as notification-service
   participant D as Driver app
 
-  R->>Kong: POST /api/pricing/estimate {pickup, dropoff}
+  R->>Kong: POST /api/pricing/estimates {pickup, dropoff}
   Kong->>P: forward (P verifies the JWT)
-  P->>M: GET /route?from&to
+  P->>M: POST /internal/route
   M->>O: GET /route/v1/driving (pickup → dropoff)
   O-->>M: distance, duration
   M-->>P: distance, duration
-  P-->>R: fare estimate (+ surge)
+  P-->>R: quotes (one per vehicle type, live fares, kept 10 min)
 
-  R->>Kong: POST /api/trips {pickup, dropoff, estimateId}
+  R->>Kong: POST /api/trips {quoteId, paymentMethod}
   Kong->>T: forward (T verifies the JWT)
+  T->>P: GET /internal/quotes/:id (the fare is fixed)
   T->>T: create Trip{status: requested} in own DB
   T->>K: trip.requested
   T->>L: nearby drivers (pickup, radius)
@@ -329,7 +330,9 @@ sequenceDiagram
 - Implausible pings (accuracy > 100 m, faster than 200 km/h, from the future, out of order) are dropped before they reach the geo index.
 - Redis gives sub-millisecond nearby search. Kafka gives a durable stream for ETA recalculation, audit and analytics.
 
-### 5.4 Trip completion and payment (target design)
+### 5.4 Trip completion and payment
+
+Cash and company-account trips settle as soon as `trip.completed` arrives. Mobile money and card trips are charged first; the driver's balance moves when the provider confirms ([Payment.md](../design/Payment.md), workflow [08](../design/workflows/08-payment-receipt-rating.md)).
 
 ```mermaid
 sequenceDiagram
@@ -338,20 +341,27 @@ sequenceDiagram
   participant T as trip-service
   participant K as Kafka
   participant Pay as payment-service
-  participant S as Stripe
-  participant N as notification-service
+  participant PR as Provider (telebirr, CBE Birr, Chapa)
+  participant R as Rider app
+  participant L as location-service
 
   D->>T: complete trip
   T->>T: status in_progress → completed (+ outbox row, same transaction)
-  T->>K: trip.completed {eventId, tripId, fareCents}
-  K->>Pay: trip.completed
-  Pay->>Pay: dedupe by eventId
-  Pay->>S: charge rider (idempotency key = tripId)
-  S-->>Pay: succeeded
-  Pay->>K: payment.captured
-  K->>N: payment.captured
-  N->>N: push receipt to rider, earnings update to driver
-  Note over Pay,S: on failure → payment.failed → trip marked unpaid (saga compensation)
+  T->>K: trip.completed {eventId, fareMinor, paymentMethod, beneficiary}
+  K->>Pay: trip.completed (inbox dedupe)
+  alt cash or company account
+    Pay->>Pay: journal trip-settlement:<tripId> (balance −commission −VAT, or receivable)
+  else mobile money or card
+    Pay->>Pay: payment PENDING (committed first)
+    Pay->>PR: charge (reference ANBP…)
+    Pay-->>R: payment:action_required (realtime + push)
+    R->>PR: approve
+    PR->>Pay: signed webhook → verify, dedupe
+    Pay->>Pay: journal: provider clearing −fare, balance +fare −commission −VAT
+  end
+  Pay->>K: trip.settled, balance.state_changed (if a limit was crossed)
+  K->>L: balance.state_changed → cash eligibility of every online car of the beneficiary
+  Note over Pay,PR: declined → retried, then a rider receivable (the driver is still paid). Lost callback → reconciliation asks the provider.
 ```
 
 ---
@@ -449,13 +459,18 @@ Contracts live in `libs/shared-types/src/events.ts`. Producer and consumer impor
 | `org.member_invited` | `orgId` | auth-service | `{ invitationId, orgId, orgName, role, phoneNumber? }` | notification (invite SMS) | ✅ |
 | `role.granted` / `role.revoked` | `userId` | auth-service | `{ userId, role, orgId?, cityId?, byUserId }` | notification (driver activated push), audit | ✅ produced, notification consumes `DRIVER` grants |
 | `driver.location` | `driverId` | realtime-gateway | `{ driverId, cityId, tripId?, lat, lng, heading?, speed?, accuracy?, at }` | ETA, trip audit, analytics | ✅ produced (guarded, never blocks pings) |
-| `driver.online` / `driver.offline` | `driverId` | fleet-service | `{ driverId, vehicleId, vehicleType, cityId, fleetOrgId?, cashAllowed, balanceState? }` / `{ driverId, reason }` | location | 📐 producer not built; location consumes |
+| `driver.online` / `driver.offline` | `driverId` | fleet-service | `{ driverId, vehicleId, vehicleType, cityId, fleetOrgId?, beneficiaryId, cashAllowed, balanceState }` / `{ driverId, reason }` | location | ✅ (balance state asked from payment-service at session start) |
 | `driver.connection_lost` | `driverId` | location-service | `{ driverId, cityId, lastSeenAt }` | fleet (ends the session) | ✅ produced |
 | `trip.matched` | `tripId` | trip-service | `{ tripId, riderId, driverId, cityId, vehicleType }` | location (driver busy, trip members), notification | ✅ |
 | `trip.requested` / `driver_en_route` / `driver_arrived` / `started` | `tripId` | trip-service | ids, city, payment method / fare estimate | notification, analytics | ✅ produced |
-| `trip.completed` | `tripId` | trip-service | `{ fareMinor, waitingFeeMinor, paymentMethod, beneficiary {type, id}, billingType, billingOrgId?, distanceMeters, durationSeconds, … }` | payment, notification, location | ✅ produced (payment-service not built) |
-| `trip.cancelled` | `tripId` | trip-service | `{ by, reason, feeMinor, driverCompensationMinor, beneficiary?, … }` | payment (fee), notification, location | ✅ produced |
-| `payment.captured` / `payment.failed` | `tripId` | payment-service | `{ tripId, amountCents, … }` | trip, notification | 📐 |
+| `trip.completed` | `tripId` | trip-service | `{ fareMinor, waitingFeeMinor, paymentMethod, beneficiary {type, id}, billingType, billingOrgId?, distanceMeters, durationSeconds, … }` | payment (settles), location | ✅ |
+| `trip.cancelled` | `tripId` | trip-service | `{ by, reason, feeMinor, driverCompensationMinor, beneficiary?, billingOrgId?, … }` | payment (fee), location | ✅ |
+| `trip.settled` | `tripId` | payment-service | `{ tripId, riderId, driverId?, beneficiary?, purpose, paymentMethod, fareMinor, commissionMinor, vatMinor, earningsMinor }` | notification (receipt) | ✅ |
+| `payment.action_required` | `riderId` | payment-service | `{ paymentId, tripId, purpose, provider, amountMinor, checkoutUrl }` | notification (approve push); riders also get it live through realtime-gateway | ✅ |
+| `payment.captured` / `payment.failed` | `riderId` | payment-service | `{ paymentId, tripId, purpose, provider, method, amountMinor, final?, nextAttemptAt? }` | notification | ✅ |
+| `balance.state_changed` | beneficiary id | payment-service | `{ accountId, beneficiary, cityId, state, previousState, cashAllowed, balanceMinor }` | location (matching eligibility of every online car of the beneficiary), notification | ✅ |
+| `balance.topped_up` / `balance.payment_due` / `payout.sent` / `payout.failed` | beneficiary id | payment-service | `{ accountId, beneficiary, amountMinor, balanceMinor, channel?, provider?, minimumMinor?, dueAt?, failure? }` | notification | ✅ |
+| `refund.succeeded` / `refund.failed` | `riderId` | payment-service | `{ refundId, paymentId, tripId, amountMinor }` | notification | ✅ |
 
 ### Event conventions
 
@@ -516,7 +531,7 @@ flowchart LR
 | Edge auth | Kong does routing, rate limits and request-size limits only. realtime-gateway (and every service, as it gets routes) verifies JWTs with the JWKS through `libs/shared-authz` |
 | Authorization | In the owning service (e.g. only the trip's rider or driver may read it). Never "the gateway checked" |
 | Rate limiting | Kong per route (stricter on `/api/auth` and `/api/payments`) |
-| Payments | Idempotency keys per trip. Card data never touches our systems (Stripe) |
+| Payments | A balanced, append-only ledger; idempotency keys per trip, top-up, payout and refund; provider callbacks verified by signature. Card data never touches our systems (Chapa's hosted checkout) |
 | Network | Databases, Redis and Kafka in private subnets. TLS to RDS, ElastiCache and MSK in production |
 
 ### Secrets
@@ -642,7 +657,8 @@ The infrastructure is defined in `infra/terraform` (EKS, RDS, ElastiCache, MSK) 
 | Failure | Effect (target design) |
 |---|---|
 | notification-service down | Events wait in Kafka; notifications arrive late, nothing else breaks |
-| payment-service down | Trips still complete; charges are processed on recovery (events retained) |
+| payment-service down | Trips still complete; settlement and charges happen on recovery (events wait in Kafka, the inbox dedupes). Drivers go online with the last balance state location-service has |
+| A payment provider is down or a callback is lost | Charges stay open; the provider is asked again (reconciliation) after `RECONCILE_AFTER_SECONDS`; declined charges are retried, then settled through a rider receivable |
 | mapping/OSRM slow or down | Timeouts + cached routes. Fare falls back to a straight-line estimate |
 | Redis down | No nearby search or live tracking; positions rebuild within seconds of recovery |
 | A pod crashes | Kubernetes restarts it; readiness keeps traffic away until it's healthy |

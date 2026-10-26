@@ -525,25 +525,64 @@ importers:
 
   services/payment-service:
     dependencies:
+      '@fastify/helmet':
+        specifier: ^13.2.0
+        version: 13.2.0
+      '@fastify/rate-limit':
+        specifier: ^11.2.1
+        version: 11.2.1
+      '@prisma/adapter-pg':
+        specifier: ^7.10.1
+        version: 7.10.1
+      '@prisma/client':
+        specifier: ^7.10.1
+        version: 7.10.1(prisma@7.10.1(@types/node@24.19.2)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(magicast@0.5.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@7.0.2))(typescript@7.0.2)
+      '@ride-app/shared-authz':
+        specifier: workspace:*
+        version: link:../../libs/shared-authz
       '@ride-app/shared-config':
         specifier: workspace:*
         version: link:../../libs/shared-config
+      '@ride-app/shared-settings':
+        specifier: workspace:*
+        version: link:../../libs/shared-settings
       '@ride-app/shared-types':
         specifier: workspace:*
         version: link:../../libs/shared-types
       '@ride-app/shared-utils':
         specifier: workspace:*
         version: link:../../libs/shared-utils
+      '@socket.io/redis-emitter':
+        specifier: ^5.1.0
+        version: 5.1.0
       fastify:
         specifier: ^5.12.7
         version: 5.12.7
+      ioredis:
+        specifier: ^6.0.0
+        version: 6.0.0
       kafkajs:
         specifier: ^2.2.4
         version: 2.2.4(patch_hash=3979a661bd1f0111fd88b444b14acbdb0161c2d14734f3cda7c4ff7b7a8774a6)
-      stripe:
-        specifier: ^23.0.1
-        version: 23.0.1(@types/node@26.6.5)
+      uuid:
+        specifier: ^11.1.1
+        version: 11.1.1
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
     devDependencies:
+      dotenv:
+        specifier: ^18.0.9
+        version: 18.0.9
+      jose:
+        specifier: ^6.2.13
+        version: 6.2.13
+      pino:
+        specifier: ^10.4.0
+        version: 10.4.0
+      prisma:
+        specifier: ^7.10.1
+        version: 7.10.1(@types/node@24.19.2)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(magicast@0.5.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@7.0.2)
       tsx:
         specifier: ^4.23.15
         version: 4.23.15
@@ -552,7 +591,7 @@ importers:
         version: 7.0.2
       vitest:
         specifier: ^5.0.5
-        version: 5.0.5(@types/node@26.6.5)(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
+        version: 5.0.5(@types/node@24.19.2)(vite@8.3.5(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
   services/platform-service:
     dependencies:
@@ -623,22 +662,40 @@ importers:
 
   services/pricing-service:
     dependencies:
-      '@ride-app/shared-config':
+      '@fastify/helmet':
+        specifier: ^13.2.0
+        version: 13.2.0
+      '@fastify/rate-limit':
+        specifier: ^11.2.1
+        version: 11.2.1
+      '@ride-app/shared-authz':
         specifier: workspace:*
-        version: link:../../libs/shared-config
-      '@ride-app/shared-types':
+        version: link:../../libs/shared-authz
+      '@ride-app/shared-location':
         specifier: workspace:*
-        version: link:../../libs/shared-types
+        version: link:../../libs/shared-location
+      '@ride-app/shared-settings':
+        specifier: workspace:*
+        version: link:../../libs/shared-settings
       '@ride-app/shared-utils':
         specifier: workspace:*
         version: link:../../libs/shared-utils
       fastify:
         specifier: ^5.12.7
         version: 5.12.7
+      ioredis:
+        specifier: ^6.0.0
+        version: 6.0.0
       zod:
         specifier: ^4.6.7
         version: 4.6.7
     devDependencies:
+      jose:
+        specifier: ^6.2.13
+        version: 6.2.13
+      pino:
+        specifier: ^10.4.0
+        version: 10.4.0
       tsx:
         specifier: ^4.23.15
         version: 4.23.15
@@ -3379,15 +3436,6 @@ packages:
   strip-json-comments@5.0.3:
     resolution: {integrity: sha512-1tB5mhVo7U+ETBKNf92xT4hrQa3pm0MZ0PQvuDnWgAAGHDsfp4lPSpiS6psrSiet87wyGPh9ft6wmhOMQ0hDiw==}
     engines: {node: '>=14.16'}
-
-  stripe@23.0.1:
-    resolution: {integrity: sha512-VFLs9IAzSZ8GIm6/vqhjqOL0fbYrSNYCpgZ3LS3YkSi/i5RnyMpu/Hf9YxPTOCYwc3mZKU3IJvuvKffQH2NLMg==}
-    engines: {node: '>=20'}
-    peerDependencies:
-      '@types/node': '>=20'
-    peerDependenciesMeta:
-      '@types/node':
-        optional: true
 
   thread-stream@4.2.0:
     resolution: {integrity: sha512-e2zZ96wSChazBsbENf/Pcm/4swHt2cEKQ92rhUjkL9GCKiTDJIaTBenjE/m9DXi0QBmTMDkFDdOomUy20A1tDQ==}
@@ -6229,10 +6277,6 @@ snapshots:
       ansi-regex: 5.0.1
 
   strip-json-comments@5.0.3: {}
-
-  stripe@23.0.1(@types/node@26.6.5):
-    optionalDependencies:
-      '@types/node': 26.6.5
 
   thread-stream@4.2.0:
     dependencies:

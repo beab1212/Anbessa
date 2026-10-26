@@ -61,6 +61,10 @@ export const DEV_ACCOUNTS: DevAccount[] = [
   staff("onboarding", "Meron Haile", "Onboarding officer", ["ONBOARDING_OFFICER"]),
   staff("safety", "Biruk Assefa", "Safety officer", ["SAFETY_OFFICER"]),
   staff("ops-floor", "Selam Kebede", "Ops floor (dispatch, call center, onboarding, safety)", ["DISPATCHER", "CALL_CENTER_AGENT", "ONBOARDING_OFFICER", "SAFETY_OFFICER"]),
+  staff("support", "Eden Wolde", "Support agent (asks for refunds)", ["SUPPORT_AGENT"]),
+  staff("operations-manager", "Henok Abebe", "Operations manager (proposes commission and limits)", ["OPERATIONS_MANAGER"]),
+  staff("finance-officer", "Mahlet Fikru", "Finance officer (records cash, runs settlement)", ["FINANCE_OFFICER"]),
+  staff("finance-manager", "Bereket Lemma", "Finance manager (approves money)", ["FINANCE_MANAGER"]),
   { surface: "partner", key: "fleet-owner", name: "Abebe Kassa", label: "Fleet owner", phone: "+251900000101", memberships: [{ org: "dev-fleet", role: "FLEET_OWNER" }] },
   { surface: "partner", key: "corporate-admin", name: "Liya Mekonnen", label: "Company account admin", phone: "+251900000201", memberships: [{ org: "dev-corporate", role: "CORPORATE_ADMIN" }] },
   { surface: "partner", key: "corporate-coordinator", name: "Samuel Tadesse", label: "Company travel desk (books rides)", phone: "+251900000202", memberships: [{ org: "dev-corporate", role: "CORPORATE_COORDINATOR" }] },
@@ -70,6 +74,8 @@ export const DEV_ACCOUNTS: DevAccount[] = [
   { surface: "partner", app: "phone", key: "fleet-driver", name: "Tesfaye Alemu", label: "Fleet driver (Selam Transport)", phone: "+251900000102", memberships: [{ org: "dev-fleet", role: "FLEET_DRIVER" }] },
   { surface: "partner", app: "phone", key: "driver-applicant", name: "Mulugeta Bekele", label: "Owner-driver waiting for review", phone: "+251900000401", memberships: [] },
   { surface: "partner", app: "phone", key: "driver-active", name: "Almaz Tadesse", label: "Owner-driver, approved", phone: "+251900000402", memberships: [] },
+  // a rider for the phone app (trip requests, payments)
+  { surface: "partner", app: "phone", key: "rider", name: "Sara Getachew", label: "Rider", phone: "+251900000501", memberships: [] },
 ];
 
 /** RFC 6238 TOTP (HMAC-SHA1, 30 s, 6 digits) over the secret's UTF-8 bytes, like Better Auth. */

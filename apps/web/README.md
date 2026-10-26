@@ -32,13 +32,20 @@ What each person sees comes from the roles in their access token, read with the 
 | **Live board** `/staff/board`: active trips, assign, cancel | `trip:read @ CITY` (assign: dispatchers) | email + password + TOTP (`/api/admin-auth`) |
 | **Live map** `/staff/drivers`: every online driver on the map, filters, list | `location:read_live @ CITY` | 〃 |
 | **Book by phone** `/staff/phone`: guest caller, places (search or tap the map), fare, request | `trip:create_on_behalf @ CITY` | 〃 |
-| **Find a trip** `/staff/trips/:id`: route and live driver on a map, timeline, money, cancel | `trip:read @ CITY` | 〃 |
+| **Find a trip** `/staff/trips/:id`: route and live driver on a map, timeline, money (the charge, commission and what the driver's balance moved by), cancel | `trip:read @ CITY` | 〃 |
 | **Review queue** `/staff/review`: drivers, vehicles and company papers waiting, oldest first | `document:review @ CITY` | 〃 |
 | **Drivers** `/staff/fleet/drivers` and `/:userId`: applications and drivers; review documents, approve, request changes, suspend, reinstate | `driver:read @ CITY` (decisions: `driver:verify`, `driver:suspend`…) | 〃 |
 | **Vehicles** `/staff/fleet/vehicles` and `/:id`: cars; review documents, approve or reject | `vehicle:read @ CITY` (decisions: `vehicle:verify`) | 〃 |
 | **Companies** `/staff/onboarding`: verification queue, each company's papers in a drawer | `org:read @ CITY` (verify, suspend; documents: `document:review`) | 〃 |
 | **Suspend** `/staff/safety` | `user:suspend @ CITY` (staff targets: super admins) | 〃 |
 | **Staff and roles** `/staff/people`: every staff member with their roles, authenticator status and last sign-in (access review: roles unused for 30+ days are flagged); remove a role (at once); ask for one (approved under Approvals); new staff accounts | `staff:manage`, `role:request`, `role:approve` | 〃 |
+| **Money → Overview** `/staff/money`: fares, commission and VAT in the last 7 days; what drivers and fleets owe and are owed; balance states; open charges, receivables; what each provider holds; ledger integrity | `balance:read` or `report:read_finance` (everywhere) | 〃 |
+| **Balances** `/staff/money/balances` and `/:accountId`: every driver and fleet balance, most negative first, by state; one balance's limits, dues, statement and top-ups; record cash paid at an office or a bank transfer | `balance:read` (recording: `topup:record_cash`) | 〃 |
+| **Rider payments** `/staff/money/payments`: charges by mobile money and card and their state; check one with the provider; ask for a refund | `balance:read`, `refund:request` (checking: `commission:collect`) | 〃 |
+| **Money approvals** `/staff/money/approvals`: cash and bank top-ups, refunds, payout batches, commission and limit changes waiting for a second person | any of `topup:*`, `refund:*`, `payout:*`, `commission_rule:*`, `balance_policy:*` | 〃 |
+| **Payouts** `/staff/money/payouts`: the weekly settlement batches and their lines; run it now | `payout:prepare` / `payout:approve` | 〃 |
+| **Commission and limits** `/staff/money/rules`: per city, what's in force and what's proposed; propose a commission rule or new limits | `commission_rule:*`, `balance_policy:*`, `commission:read` | 〃 |
+| **Payment providers** `/staff/money/providers`: telebirr, CBE Birr, Chapa (simulated or live) and their latest callbacks | `balance:read`, `report:read_finance` or `system:read` | 〃 |
 | **Administration → Overview** `/staff/admin`: trips today, people, drivers and vehicles, system status, approvals waiting, alerts | `report:read` or `system:read` | 〃 |
 | **Users** `/staff/admin/users` and `/:id`: every account (riders, drivers, partners, guests, staff), search; one person's roles, organisations and sessions; sign out everywhere, suspend or reinstate, reset a staff member's sign-in; what they did and what was done to them (audit log) | `user:read_masked` (actions: `session:revoke`, `staff:manage`, `user:suspend`…) | 〃 |
 | **Roles and permissions** `/staff/admin/roles`: the live matrix, a role editor (checked against the guardrails as you edit), custom roles. Changes go to Approvals | `authz:read` (changes: `authz:propose`) | 〃 |
@@ -48,7 +55,7 @@ What each person sees comes from the roles in their access token, read with the 
 | **Announcements** `/staff/admin/announcements`: banners for riders, drivers, partners and staff, by city and time | `announcement:manage` | 〃 |
 | **System** `/staff/admin/system`: every service's health and answer time, outboxes, Kafka lag, Redis, login-code delivery, routing engines, document storage | `system:read` | 〃 |
 | **Audit log** `/staff/admin/audit`: search and export the write-once log | `audit_log:read` | 〃 |
-| **Company** `/partner/org/:id`: people and invitations by phone (fleets: each driver's onboarding status and cars); **Vehicles** tab (fleets); **Documents** tab (company papers) | the org's owner or admin | phone + 6-digit code (`/api/auth`) |
+| **Company** `/partner/org/:id`: people and invitations by phone (fleets: each driver's onboarding status and cars); **Vehicles** tab (fleets); **Balance** tab (fleets: the fleet's one balance, statement, top up by mobile money, payout method); **Documents** tab (company papers) | the org's owner or admin | phone + 6-digit code (`/api/auth`) |
 | **Fleet car** `/partner/org/:id/vehicles/:vehicleId`: documents, submit for review, who may drive it, remove | `vehicle:read` / `vehicle:authorize_driver @ ORG` | 〃 |
 | **Book a ride** `/partner/org/:id/book` (company accounts) | `trip:create_on_behalf @ ORG` | 〃 |
 | **Register a company** `/partner/register` | any signed-in partner | 〃 |
@@ -68,6 +75,8 @@ The browser only calls `/api/*` **on its own origin**. In development Vite forwa
 |---|---|
 | `/api/auth`, `/api/admin-auth`, `/api/identity` | auth-service (3001) |
 | `/api/trips` | trip-service (3002) |
+| `/api/pricing` | pricing-service (3004): estimates |
+| `/api/payments` | payment-service (3005): balances, payments, payouts, providers |
 | `/api/locations` | location-service (3003) |
 | `/api/maps` | mapping-service (3007) |
 | `/api/fleet` | fleet-service (3008) |
@@ -78,7 +87,7 @@ The app reads `/api/platform/client-config` at start (`lib/platform.tsx`): the c
 
 In development the sign-in page also has a **Sign in as…** panel with ready-made accounts: run `pnpm --filter @ride-app/auth-service seed:dev` once, with `DEV_LOGIN=on` in auth-service's `.env`. The panel lives in `src/dev/`, is loaded only when `import.meta.env.DEV` is true, and isn't in production builds ([docs/development](../../docs/development/README.md#ready-made-accounts-web-app-dev-sign-in)).
 
-Without Nominatim, place search falls back to a list of common Addis Ababa places (`src/components/PlacePicker.tsx`). Fares come from trip-service's development quote stand-in until pricing-service exists.
+Without Nominatim, place search falls back to a list of common Addis Ababa places (`src/components/PlacePicker.tsx`). Fares come from pricing-service (`/api/pricing/estimates`), priced with the live fare card in Settings → Fares.
 
 ## Layout
 
