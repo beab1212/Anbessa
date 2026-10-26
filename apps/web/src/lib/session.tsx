@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useMemo, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import type { Principal } from "@ride-app/shared-authz";
-import { accessToken, authCall, forgetTokens, principalOf, type Claims, type Surface } from "./api";
+import { setAuthzSnapshot, type AuthzSnapshot, type Principal } from "@ride-app/shared-authz";
+import { accessToken, api, authCall, forgetTokens, principalOf, type Claims, type Surface } from "./api";
 
 interface SurfaceState {
   loading: boolean;
@@ -19,23 +19,55 @@ interface SessionValue {
 const Ctx = createContext<SessionValue | null>(null);
 
 /** Who is signed in on each surface: a fresh access token's claims, refreshed with the token. */
-function useSurface(surface: Surface): SurfaceState {
-  const q = useQuery({
+function useClaims(surface: Surface) {
+  return useQuery({
     queryKey: ["session", surface],
     queryFn: async () => {
       const t = await accessToken(surface, true).catch(() => null);
-      return t ? { claims: t.claims, principal: principalOf(surface, t.claims) } : { claims: null, principal: null };
+      return { claims: t?.claims ?? null };
     },
     staleTime: 5 * 60_000,
     retry: false,
   });
-  return { loading: q.isLoading, claims: q.data?.claims ?? null, principal: q.data?.principal ?? null };
+}
+
+/**
+ * The live permission matrix (auth-service, edited in Administration → Roles and permissions).
+ * The bundled matrix is only the fallback; the roles in a token are read against this one,
+ * so custom roles and permission changes show up without a new release.
+ */
+function useAuthz(surface: Surface | null) {
+  return useQuery({
+    queryKey: ["authz", surface],
+    enabled: !!surface,
+    refetchInterval: 60_000,
+    queryFn: async () => {
+      const snap = await api<AuthzSnapshot>(surface!, "/api/identity/authz");
+      setAuthzSnapshot(snap);
+      return snap.version;
+    },
+  });
 }
 
 export function SessionProvider({ children }: { children: ReactNode }) {
   const qc = useQueryClient();
-  const staff = useSurface("staff");
-  const partner = useSurface("partner");
+  const staffQ = useClaims("staff");
+  const partnerQ = useClaims("partner");
+  const staffClaims = staffQ.data?.claims ?? null;
+  const partnerClaims = partnerQ.data?.claims ?? null;
+  const authz = useAuthz(staffClaims ? "staff" : partnerClaims ? "partner" : null);
+  const version = authz.data;
+  const staff = useMemo<SurfaceState>(
+    () => ({ loading: staffQ.isLoading || (!!staffClaims && authz.isLoading), claims: staffClaims, principal: staffClaims ? principalOf("staff", staffClaims) : null }),
+    // the principal is re-read when the matrix version changes (custom roles become known)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [staffQ.isLoading, staffClaims, authz.isLoading, version],
+  );
+  const partner = useMemo<SurfaceState>(
+    () => ({ loading: partnerQ.isLoading, claims: partnerClaims, principal: partnerClaims ? principalOf("partner", partnerClaims) : null }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [partnerQ.isLoading, partnerClaims, version],
+  );
 
   const refresh = useCallback(async (surface: Surface) => {
     forgetTokens(surface);

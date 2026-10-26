@@ -355,6 +355,7 @@ Format: `resource:action`. A permission alone isn't enough: it's always combined
 | **Marketing** | `promo:manage` · `campaign:send` |
 | **Support & safety** | `ticket:create` · `ticket:read` · `ticket:update` · `lost_item:manage` · `sos:trigger` · `sos:respond` · `incident:manage` |
 | **Administration** | `staff:manage` · `role:request` · `role:approve` · `audit_log:read` · `report:read` · `report:read_finance` · `report:read_regulatory` |
+| **Platform administration** | `authz:read` · `authz:propose` · `authz:approve` (the matrix itself) · `settings:read` · `settings:propose` · `settings:approve` (live settings) · `city:manage` · `announcement:manage` · `system:read` · `session:revoke` |
 
 ---
 
@@ -438,7 +439,25 @@ Scope legend: **S** = own data (`SELF`) · **O** = own organisation (`ORG`) · *
 | Service-specific scopes | — | — | Per client, e.g. trip-service: `location:read_live`, `driver:read` |
 
 > [!NOTE]
-> The matrix lives in code as **one shared definition** (`libs/shared-authz/src/matrix.ts`), so services, the staff dashboard and tests use the same source of truth. `CORPORATE_EMPLOYEE` has `trip:bill_corporate` (O), and `FLEET_DRIVER` has nothing of its own (§4, attributes). Changing a role's bundle is a reviewed code change plus a permission-version bump ([§10](#10-tokens)).
+> **Where the matrix lives.** `libs/shared-authz/src/matrix.ts` is the **built-in default**: auth-service seeds its `role_definition` / `role_permission` tables from it on first start. After that the matrix is **data**:
+>
+> - **Editing:** a super admin proposes a change to one role in the admin dashboard (Administration → Roles and permissions), and a **different** super admin approves it. The approval is an `authz:change` request ([§11](#11-approvals-makerchecker)).
+> - **Executing:** the change runs in the approving transaction and bumps `authz_version`.
+> - **Distribution:** auth-service publishes `authz:changed` on Redis. Every service reloads (`createAuthzSync`: snapshot from `GET /internal/authz/snapshot`, plus a 30 s poll), and so does the web app (`GET /api/identity/authz`).
+> - **Tokens don't change:** they carry roles, not permissions, so a change applies to existing sessions within seconds.
+>
+> **Custom roles** (`CUSTOM_*`) are staff roles, per city or everywhere, granted through the normal role request.
+>
+> **Guardrails**, checked when a change is proposed and again when it executes:
+> - only catalog permissions;
+> - staff roles act in a city (C) or everywhere (G), and city roles only C;
+> - rider and partner roles act on their own data (S) or organisation (O);
+> - no role holds both the request and approve halves of a money or settings action;
+> - super admins always keep `staff:manage`, `role:request`, `role:approve` and `authz:*`;
+> - `org:manage_members` on partner roles changes only with a release (it's mirrored into Better Auth's organization plugin);
+> - a role still held by someone can't be archived.
+>
+> The table above is the built-in default. `CORPORATE_EMPLOYEE` has `trip:bill_corporate` (O), and `FLEET_DRIVER` has nothing of its own (§4, attributes).
 
 ---
 
@@ -581,6 +600,9 @@ Sensitive actions are **requested** by one person and **approved** by another.
 | Driver incentive | `incentive:propose` | `incentive:approve` | Budget cap |
 | Staff role grant | `role:request` (super admin) | `role:approve` (**another** super admin) | Grants of `SUPER_ADMIN`, `FINANCE_MANAGER` and `SAFETY_OFFICER` need a written reason |
 | Vehicle ownership transfer | `vehicle:transfer` (onboarding officer) | A second onboarding officer | New owner's documents re-verified |
+| Permission change (a role's bundle, custom roles) | `authz:propose` (super admin) | `authz:approve` (**another** super admin) | Guardrails ([§8](#8-role--permission-matrix)); one pending change per role. **Implemented** |
+| Sensitive live setting (fees, fares, maintenance, minimum app versions, OTP fallback) | `settings:propose` (super admin) | `settings:approve` (**another** super admin) | Ordinary settings apply at once. **Implemented** (platform-service) |
+| Reset a super admin's sign-in (new temporary password, authenticator removed) | `staff:manage` | `staff:manage` (another super admin) | Other staff are reset at once. **Implemented** |
 
 **Universal rules:** the requester can never approve their own request (checked by user ID, not role). Approvals expire after 7 days. Every state change is audited.
 
@@ -619,7 +641,14 @@ An **append-only** record of who did what. It's for security investigations, dis
 
 **What is always logged:** every staff write; every view of PII or GPS traces; every money action; every role, suspension and approval change; every denied staff request.
 
-**How:** each service publishes `audit.recorded` events to Kafka. The proposed audit-service consumes them into a write-once store. No API can update or delete entries, and retention is set per legal requirements.
+**How:** each service publishes `audit.recorded` events to Kafka through its outbox.
+
+**Implemented:** [audit-service](../../services/audit-service/README.md) consumes them into `audit_entry`:
+- partitioned by month;
+- a trigger refuses UPDATE and DELETE;
+- a replayed event is stored once.
+
+The admin dashboard's Audit log page searches it (actor, action, resource, outcome, service, time) and exports CSV, and the export is itself logged. Events come from auth-service (roles, approvals, suspensions, staff sign-ins, MFA resets, session revocations), fleet-service (document views and decisions, driver and vehicle decisions) and platform-service (settings, cities, announcements). `actorRoles`, `requestId`, `ip` and `userAgent` aren't recorded yet; staff sign-ins carry IP and user agent in `reason`.
 
 ---
 

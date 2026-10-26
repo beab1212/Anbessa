@@ -1,0 +1,31 @@
+// Audit database (Role.md §12, Database.md): one write-once table, partitioned by month.
+// Rows are inserted by the Kafka consumer only; a trigger refuses UPDATE and DELETE.
+
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+model AuditEntry {
+  eventId      String   @map("event_id") @db.Uuid
+  at           DateTime @db.Timestamptz
+  actorId      String?  @map("actor_id") @db.Uuid
+  action       String
+  resourceType String   @map("resource_type")
+  resourceId   String   @map("resource_id")
+  outcome      String
+  reason       String?
+  onBehalfOf   String?  @map("on_behalf_of") @db.Uuid
+  service      String?
+  recordedAt   DateTime @default(now()) @map("recorded_at") @db.Timestamptz
+
+  @@id([at, eventId])
+  @@index([actorId, at(sort: Desc)])
+  @@index([resourceType, resourceId, at(sort: Desc)])
+  @@index([action, at(sort: Desc)])
+  @@map("audit_entry")
+}

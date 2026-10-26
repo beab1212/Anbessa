@@ -14,6 +14,7 @@ export interface AuditPayload {
   resource: { type: string; id: string };
   outcome: "ALLOWED" | "DENIED" | "EXECUTED";
   reason?: string;
+  service?: string;
 }
 
 export type FleetEvent =
@@ -41,4 +42,4 @@ export async function writeOutbox(tx: Prisma.TransactionClient, ...events: Fleet
   });
 }
 
-export const audit = (payload: AuditPayload): FleetEvent => ({ topic: "audit.recorded", key: payload.actorId ?? "system", payload });
+export const audit = (payload: AuditPayload): FleetEvent => ({ topic: "audit.recorded", key: payload.actorId ?? "system", payload: { ...payload, service: "fleet-service" } });

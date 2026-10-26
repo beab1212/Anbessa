@@ -11,6 +11,7 @@ import { buildApp } from "../../src/app.js";
 import { loadConfig } from "../../src/config/index.js";
 import { createContainer, type Container } from "../../src/container.js";
 import { passwordHasher } from "../../src/auth/password.js";
+import { ensureAuthzSeeded } from "../../src/authz/store.js";
 import type { SecuritySignals } from "../../src/lib/signals.js";
 import { TEST_DATABASE_URL } from "./global-setup.js";
 
@@ -57,6 +58,8 @@ export async function createHarness(): Promise<Harness> {
     signals: mem.signals,
     otpSink: (req) => otps.set(req.phoneNumber, req.code),
   });
+  await ensureAuthzSeeded(c.db);
+  await c.authzSync.refresh("test");
   const app = await buildApp(c);
   await app.ready();
   return { app, c, mem, otps, close: async () => { await app.close(); await c.close(); } };
@@ -137,7 +140,7 @@ export class StaffUser {
   }
 
   /** Bearer call to the identity API with a fresh staff access token. */
-  async identity(method: "GET" | "POST", url: string, body?: Json) {
+  async identity(method: "GET" | "POST" | "PUT", url: string, body?: Json) {
     const token = await this.accessToken();
     return this.h.app.inject({ method, url, headers: { authorization: `Bearer ${token}` }, ...(body ? { payload: body } : {}) });
   }

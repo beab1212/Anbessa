@@ -553,3 +553,10 @@
     flex: 1;
   }
 }
+
+/* announcements and the maintenance notice above a page */
+.banners {
+  display: grid;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}

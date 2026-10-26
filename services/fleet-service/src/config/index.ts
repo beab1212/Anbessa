@@ -39,7 +39,10 @@ export const envSchema = z
     S3_ENDPOINT: z.string().url().optional(),
     S3_FORCE_PATH_STYLE: z.enum(["true", "false"]).default("false").transform((v) => v === "true"),
 
-    // Documents due within this many days count as "expiring soon"; the expiry job runs hourly
+    // Live settings (admin dashboard): GET /internal/settings/snapshot
+    PLATFORM_INTERNAL_URL: z.string().url().default("http://localhost:3011"),
+
+    // Documents due within this many days count as "expiring soon" (default until changed in the admin dashboard)
     EXPIRY_WARNING_DAYS: z.coerce.number().int().min(1).max(90).default(30),
   })
   .superRefine((env, ctx) => {

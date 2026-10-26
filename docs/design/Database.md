@@ -1005,3 +1005,15 @@ The existing practice ([Database Migrations note](../../learned/Concepts/Databas
 | Q4 | Which mobile-money provider (and its idempotency/webhook semantics)? | Abstracted behind `payment` + reconciliation, so any provider fits |
 | Q5 | Do the ops staff need cross-city search in v1? | No: `ops_read` is scoped by city like the staff roles |
 | Q6 | Is Row-Level Security worth the operational cost in v1? | Optional, enable on fleet/corporate tables once the portals launch |
+
+---
+
+## Appendix: administration tables (implemented)
+
+| Service | Table | What it holds |
+|---|---|---|
+| auth-service | `role_definition`, `role_permission`, `authz_version` | The permission matrix as data: seeded from `libs/shared-authz`, changed only by approved `authz:change` requests (Role.md §8). `ck_role_custom_staff`: custom roles are `CUSTOM_*` staff roles |
+| auth-service | `approval_request` | Every maker–checker action: `role:grant`, `authz:change`, `staff:reset_mfa`. Statuses add `CANCELLED` and `FAILED`; an hourly sweep records `EXPIRED` |
+| platform-service | `setting_value` (unique on `(key, city_id) NULLS NOT DISTINCT`), `setting_history`, `setting_change`, `settings_version` | Live settings, their history, sensitive changes awaiting approval, and the version services reload on |
+| platform-service | `city`, `vehicle_type`, `announcement` | Where the platform operates and what it offers; banners for the apps and the web |
+| audit-service | `audit_entry` (partitioned by month on `at`, PK `(at, event_id)`) | The write-once audit log; a trigger refuses UPDATE and DELETE |

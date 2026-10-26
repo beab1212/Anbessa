@@ -21,6 +21,7 @@ import type { Realtime } from "../lib/realtime.js";
 import { writeOutbox, type TripEvent } from "../outbox/outbox.js";
 import type { QuoteProvider } from "../quotes.js";
 import { cancellationFee, policyFor, waitingFee, type CancelledBy } from "./policy.js";
+import type { SettingsReader } from "@ride-app/shared-settings";
 
 export const ACTIVE = ["requested", "matched", "en_route", "in_progress"] as const;
 type Status = "requested" | "matched" | "en_route" | "in_progress" | "completed" | "cancelled";
@@ -40,7 +41,8 @@ export interface TripServiceDeps {
   realtime: Realtime;
   matching: MatchingControl;
   logger: Logger;
-  config: { pinRequired: boolean };
+  /** live settings (platform-service): PIN, trip rules, maintenance, feature flags */
+  settings: SettingsReader;
   now?: () => Date;
 }
 
@@ -277,6 +279,10 @@ export function createTripService(deps: TripServiceDeps) {
         channel = "APP";
       }
       if (input.billingOrgId) authorize(p, "trip:bill_corporate", { orgId: input.billingOrgId });
+      // platform switches (admin settings): maintenance pauses new trips; booking channels can be turned off
+      if (deps.settings.get<boolean>("maintenance.newTrips")) throw new AppError(503, deps.settings.get<string>("maintenance.message"), "maintenance");
+      if (channel === "PHONE" && !deps.settings.get<boolean>("features.phoneBooking")) throw new AppError(403, "phone booking is turned off", "feature_disabled");
+      if (input.billingOrgId && !deps.settings.get<boolean>("features.corporateBooking")) throw new AppError(403, "company account bookings are turned off", "feature_disabled");
 
       try {
         const trip = await db.$transaction(async (tx) => {
@@ -362,7 +368,7 @@ export function createTripService(deps: TripServiceDeps) {
       assertDriver(p, t);
       if (t.status === "matched") throw invalidState("not en route yet: tap \"On my way\" first");
       if (t.arrivedAt) return t;
-      const policy = policyFor(t.cityId);
+      const policy = policyFor(deps.settings, t.cityId);
       const pos = await livePosition(p.userId);
       if (!pos) throw conflict("your position is unknown: check that location is on", "position_unknown");
       const meters = haversineMeters(pos, { lat: t.pickupLat, lng: t.pickupLng });
@@ -377,7 +383,7 @@ export function createTripService(deps: TripServiceDeps) {
       const t = await load(tripId);
       assertDriver(p, t);
       if (!t.arrivedAt) throw conflict("tap \"Arrived\" at the pickup first", "not_arrived");
-      if (deps.config.pinRequired && pin !== t.pin) throw badRequest("wrong trip PIN: ask the rider for the 4-digit code", "wrong_pin");
+      if (deps.settings.get<boolean>("trip.pinRequired") && pin !== t.pin) throw badRequest("wrong trip PIN: ask the rider for the 4-digit code", "wrong_pin");
       const u = await transition(t, ["en_route"], "in_progress", { startedAt: now() }, p.userId, progressEvent("trip.started"));
       notify(u);
       return u;
@@ -392,7 +398,7 @@ export function createTripService(deps: TripServiceDeps) {
       const t = await load(tripId);
       assertDriver(p, t);
       if (t.status !== "in_progress") throw invalidState(t.status);
-      const policy = policyFor(t.cityId);
+      const policy = policyFor(deps.settings, t.cityId);
       const at = now();
       const waiting = waitingFee(policy, t.arrivedAt, t.startedAt ?? at, t.waitingPerMinMinor);
       const fare = t.fareEstimateMinor + waiting;
@@ -436,7 +442,7 @@ export function createTripService(deps: TripServiceDeps) {
       });
       if (!["requested", "matched", "en_route"].includes(t.status)) throw invalidState(t.status);
       const by: CancelledBy = p.audience === "ride-admin" ? "STAFF" : p.userId === t.driverUserId ? "DRIVER" : "RIDER";
-      const policy = policyFor(t.cityId);
+      const policy = policyFor(deps.settings, t.cityId);
 
       if (by === "DRIVER" && reason === "NO_SHOW") {
         // workflow 07: only after waiting the full no-show time, still at the pickup

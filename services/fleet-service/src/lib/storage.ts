@@ -7,7 +7,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { GetObjectCommand, HeadBucketCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import type { Signer } from "./crypto.js";
 
@@ -29,6 +29,8 @@ export interface ObjectStore {
   presignGet(key: string): Promise<string>;
   /** Size and (where cheap) SHA-256 of a stored object; null when it isn't there. */
   stat(key: string): Promise<{ size: number; sha256?: Buffer } | null>;
+  /** for the system page: can we reach the storage? */
+  health(): Promise<{ kind: "s3" | "local"; ok: boolean; detail?: string }>;
 }
 
 export function s3Store(opts: { bucket: string; region: string; endpoint?: string; forcePathStyle: boolean }): ObjectStore {
@@ -46,6 +48,14 @@ export function s3Store(opts: { bucket: string; region: string; endpoint?: strin
       } catch (err) {
         if ((err as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode === 404) return null;
         throw err;
+      }
+    },
+    async health() {
+      try {
+        await s3.send(new HeadBucketCommand({ Bucket: opts.bucket }));
+        return { kind: "s3", ok: true, detail: opts.bucket };
+      } catch (err) {
+        return { kind: "s3", ok: false, detail: `${opts.bucket}: ${(err as Error).name}` };
       }
     },
   };
@@ -95,6 +105,14 @@ export function localStore(dir: string, sign: Signer, publicPath = "/api/fleet/f
       const p = pathOf(key);
       await mkdir(dirname(p), { recursive: true });
       await writeFile(p, body);
+    },
+    async health() {
+      try {
+        await mkdir(root, { recursive: true });
+        return { kind: "local", ok: true, detail: "development storage" };
+      } catch {
+        return { kind: "local", ok: false, detail: "storage directory not writable" };
+      }
     },
     contentTypeOf(key) {
       // keys end in the upload's extension (see objectKey in fleet/service.ts)

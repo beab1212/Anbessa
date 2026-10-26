@@ -327,3 +327,52 @@ describe("reading trips", () => {
     expect((await h.req("GET", "/api/trips?as=rider", r)).json<{ trips: { id: string }[] }>().trips[0]?.id).toBe(tripId);
   });
 });
+
+describe("admin settings (platform-service), live", () => {
+  it("maintenance pauses new trips with the configured message; flags turn booking channels off", async () => {
+    const r = await h.rider();
+    h.settings.set("maintenance.newTrips", true);
+    h.settings.set("maintenance.message", "Back at 10:00");
+    try {
+      const res = await h.requestTrip(r);
+      expect(res.statusCode).toBe(503);
+      expect(res.json()).toMatchObject({ error: "maintenance", message: "Back at 10:00" });
+    } finally {
+      h.settings.set("maintenance.newTrips", false);
+    }
+
+    const agent = await h.staff([{ r: "CALL_CENTER_AGENT", city: CITY }]);
+    const guest = uuid();
+    h.settings.set("features.phoneBooking", false);
+    try {
+      const q = await h.quote(agent);
+      const res = await h.req("POST", "/api/trips", agent, { quoteId: q.id, paymentMethod: "CASH", riderUserId: guest });
+      expect(res.json()).toMatchObject({ error: "feature_disabled" });
+    } finally {
+      h.settings.set("features.phoneBooking", true);
+    }
+  });
+
+  it("fares and cancellation fees follow the city's settings", async () => {
+    const r = await h.rider();
+    const before = (await h.quote(r)).fareMinor;
+    h.settings.set("fares.economy.baseMinor", 50_000, CITY);
+    try {
+      expect((await h.quote(r)).fareMinor).toBe(before + 45_000);
+    } finally {
+      h.settings.set("fares.economy.baseMinor", 5000, CITY);
+    }
+
+    h.settings.set("cancel.feeMinor", 7000, CITY);
+    h.settings.set("cancel.freeSeconds", 0, CITY);
+    try {
+      const { r: rider, tripId } = await h.matchedTrip();
+      h.clock.now += 5000;
+      const res = await h.req("POST", `/api/trips/${tripId}/cancel`, rider, { reason: "CHANGED_PLANS" });
+      expect(res.json<{ cancellation: { feeMinor: number } }>().cancellation.feeMinor).toBe(7000);
+    } finally {
+      h.settings.set("cancel.feeMinor", 3000, CITY);
+      h.settings.set("cancel.freeSeconds", 120, CITY);
+    }
+  });
+});

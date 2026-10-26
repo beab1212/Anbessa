@@ -7,6 +7,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { Redis } from "ioredis";
+import { settingDef, type SettingsReader } from "@ride-app/shared-settings";
 import { cityAt, type LatLng } from "@ride-app/shared-location";
 import { badRequest } from "./lib/errors.js";
 import { NotFoundUpstream, type MappingClient } from "./lib/clients.js";
@@ -57,16 +58,20 @@ export function pricingQuotes(base: string, token: string): QuoteProvider {
 
 // ── development stand-in ──────────────────────────────────────────────────────
 
-/** Fare table for the stand-in only (santim). pricing-service replaces it with versioned fare rules. */
-export const DEV_FARES: Record<string, { baseMinor: number; perKmMinor: number; perMinMinor: number; minFareMinor: number; waitingPerMinMinor: number }> = {
-  economy: { baseMinor: 5000, perKmMinor: 1500, perMinMinor: 200, minFareMinor: 8000, waitingPerMinMinor: 300 },
-  comfort: { baseMinor: 7000, perKmMinor: 2000, perMinMinor: 300, minFareMinor: 11000, waitingPerMinMinor: 400 },
-  minivan: { baseMinor: 9000, perKmMinor: 2500, perMinMinor: 350, minFareMinor: 14000, waitingPerMinMinor: 500 },
-};
+/** The stand-in's fare for a vehicle type in a city (santim), from the live `fares.*` settings. pricing-service replaces it. */
+export function devFare(settings: SettingsReader, vehicleType: string, cityId: string) {
+  const key = (part: string) => `fares.${vehicleType}.${part}`;
+  if (!settingDef(key("baseMinor"))) return null;
+  return {
+    baseMinor: settings.get<number>(key("baseMinor"), cityId),
+    perKmMinor: settings.get<number>(key("perKmMinor"), cityId),
+    perMinMinor: settings.get<number>(key("perMinMinor"), cityId),
+    minFareMinor: settings.get<number>(key("minFareMinor"), cityId),
+    waitingPerMinMinor: settings.get<number>(key("waitingPerMinMinor"), cityId),
+  };
+}
 
-const QUOTE_TTL_SECONDS = 600;
-
-export function builtinQuotes(redis: Redis, mapping: MappingClient, now: () => Date = () => new Date()) {
+export function builtinQuotes(redis: Redis, mapping: MappingClient, settings: SettingsReader, now: () => Date = () => new Date()) {
   const key = (id: string) => `devquote:${id}`;
   return {
     async create(input: { requestedBy: string; pickup: LatLng; dropoff: LatLng; vehicleTypes: string[]; pickupAddress?: string; dropoffAddress?: string }): Promise<Quote[]> {
@@ -75,11 +80,12 @@ export function builtinQuotes(redis: Redis, mapping: MappingClient, now: () => D
       const route = await mapping.route([input.pickup, input.dropoff]);
       const km = route.distanceMeters / 1000;
       const min = route.durationSeconds / 60;
-      const expiresAt = new Date(now().getTime() + QUOTE_TTL_SECONDS * 1000).toISOString();
+      const ttl = settings.get<number>("quote.ttlSeconds");
+      const expiresAt = new Date(now().getTime() + ttl * 1000).toISOString();
       const quotes: Quote[] = [];
       for (const vehicleType of input.vehicleTypes) {
-        const f = DEV_FARES[vehicleType];
-        if (!f) throw badRequest(`unknown vehicle type ${vehicleType}`);
+        const f = devFare(settings, vehicleType, cityId);
+        if (!f) throw badRequest(`no fare for vehicle type ${vehicleType}`);
         // rounded to whole birr, like a meter would show
         const raw = f.baseMinor + km * f.perKmMinor + min * f.perMinMinor;
         const fareMinor = Math.max(f.minFareMinor, Math.round(raw / 100) * 100);
@@ -89,7 +95,7 @@ export function builtinQuotes(redis: Redis, mapping: MappingClient, now: () => D
           fareMinor, waitingPerMinMinor: f.waitingPerMinMinor, currency: "ETB",
           distanceMeters: route.distanceMeters, durationSeconds: route.durationSeconds, approximate: route.approximate, expiresAt,
         };
-        await redis.set(key(q.id), JSON.stringify(q), "EX", QUOTE_TTL_SECONDS);
+        await redis.set(key(q.id), JSON.stringify(q), "EX", ttl);
         quotes.push(q);
       }
       return quotes;

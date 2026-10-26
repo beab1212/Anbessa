@@ -24,6 +24,8 @@ export interface AuditPayload {
   outcome: "ALLOWED" | "DENIED" | "PENDING_APPROVAL" | "EXECUTED";
   reason?: string;
   onBehalfOf?: string;
+  /** set by audit(): which service recorded it */
+  service?: string;
 }
 
 type TxClient = Prisma.TransactionClient | Db;
@@ -44,5 +46,5 @@ export async function writeOutbox(tx: TxClient, ...events: IdentityEvent[]): Pro
 export const audit = (payload: AuditPayload): IdentityEvent => ({
   topic: "audit.recorded",
   key: payload.actorId ?? "system",
-  payload,
+  payload: { ...payload, service: "auth-service" },
 });

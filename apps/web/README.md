@@ -25,7 +25,7 @@ If the style or tiles can't load, the map says so and everything beside it keeps
 
 ## Who sees what
 
-What each person sees comes from the roles in their access token, read with the **same permission matrix** the services enforce (`libs/shared-authz`). Hiding a page is a convenience: every service checks every request again.
+What each person sees comes from the roles in their access token, read with the **same permission matrix** the services enforce. The matrix is live: the app loads it from auth-service (`GET /api/identity/authz`, `lib/session.tsx`), so permission changes and custom roles made in Administration show up without a release. The bundled `libs/shared-authz` matrix is only the fallback. Hiding a page is a convenience: every service checks every request again.
 
 | Area | Who (permission @ scope) | Signs in with |
 |---|---|---|
@@ -38,7 +38,16 @@ What each person sees comes from the roles in their access token, read with the 
 | **Vehicles** `/staff/fleet/vehicles` and `/:id`: cars; review documents, approve or reject | `vehicle:read @ CITY` (decisions: `vehicle:verify`) | 〃 |
 | **Companies** `/staff/onboarding`: verification queue, each company's papers in a drawer | `org:read @ CITY` (verify, suspend; documents: `document:review`) | 〃 |
 | **Suspend** `/staff/safety` | `user:suspend @ CITY` (staff targets: super admins) | 〃 |
-| **Staff and roles** `/staff/people`: accounts, maker–checker requests | `staff:manage`, `role:request`, `role:approve` | 〃 |
+| **Staff and roles** `/staff/people`: every staff member with their roles, authenticator status and last sign-in (access review: roles unused for 30+ days are flagged); remove a role (at once); ask for one (approved under Approvals); new staff accounts | `staff:manage`, `role:request`, `role:approve` | 〃 |
+| **Administration → Overview** `/staff/admin`: trips today, people, drivers and vehicles, system status, approvals waiting, alerts | `report:read` or `system:read` | 〃 |
+| **Users** `/staff/admin/users` and `/:id`: every account (riders, drivers, partners, guests, staff), search; one person's roles, organisations and sessions; sign out everywhere, suspend or reinstate, reset a staff member's sign-in; what they did and what was done to them (audit log) | `user:read_masked` (actions: `session:revoke`, `staff:manage`, `user:suspend`…) | 〃 |
+| **Roles and permissions** `/staff/admin/roles`: the live matrix, a role editor (checked against the guardrails as you edit), custom roles. Changes go to Approvals | `authz:read` (changes: `authz:propose`) | 〃 |
+| **Approvals** `/staff/admin/approvals`: everything waiting for a second person (role grants, permission changes, sensitive settings, super-admin sign-in resets); approve, reject, or withdraw your own | any of `role:*`, `authz:*`, `settings:*`, `staff:manage` | 〃 |
+| **Settings** `/staff/admin/settings`: every live setting by group, with city overrides, history and reset to default. ★ = needs approval | `settings:read` (changes: `settings:propose`) | 〃 |
+| **Cities and vehicles** `/staff/admin/cities`: open or close cities, their map area; vehicle types and where they're offered | `settings:read` (changes: `city:manage`) | 〃 |
+| **Announcements** `/staff/admin/announcements`: banners for riders, drivers, partners and staff, by city and time | `announcement:manage` | 〃 |
+| **System** `/staff/admin/system`: every service's health and answer time, outboxes, Kafka lag, Redis, login-code delivery, routing engines, document storage | `system:read` | 〃 |
+| **Audit log** `/staff/admin/audit`: search and export the write-once log | `audit_log:read` | 〃 |
 | **Company** `/partner/org/:id`: people and invitations by phone (fleets: each driver's onboarding status and cars); **Vehicles** tab (fleets); **Documents** tab (company papers) | the org's owner or admin | phone + 6-digit code (`/api/auth`) |
 | **Fleet car** `/partner/org/:id/vehicles/:vehicleId`: documents, submit for review, who may drive it, remove | `vehicle:read` / `vehicle:authorize_driver @ ORG` | 〃 |
 | **Book a ride** `/partner/org/:id/book` (company accounts) | `trip:create_on_behalf @ ORG` | 〃 |
@@ -62,6 +71,10 @@ The browser only calls `/api/*` **on its own origin**. In development Vite forwa
 | `/api/locations` | location-service (3003) |
 | `/api/maps` | mapping-service (3007) |
 | `/api/fleet` | fleet-service (3008) |
+| `/api/platform` | platform-service (3011): settings, cities, announcements, system; `client-config` is public |
+| `/api/audit` | audit-service (3010) |
+
+The app reads `/api/platform/client-config` at start (`lib/platform.tsx`): the city list, feature flags (the Book by phone page disappears when phone booking is off), the maintenance message (a banner and a "new trips paused" badge) and announcements for staff and partners.
 
 In development the sign-in page also has a **Sign in as…** panel with ready-made accounts: run `pnpm --filter @ride-app/auth-service seed:dev` once, with `DEV_LOGIN=on` in auth-service's `.env`. The panel lives in `src/dev/`, is loaded only when `import.meta.env.DEV` is true, and isn't in production builds ([docs/development](../../docs/development/README.md#ready-made-accounts-web-app-dev-sign-in)).
 

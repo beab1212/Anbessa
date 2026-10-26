@@ -192,22 +192,62 @@ model City {
   @@map("city")
 }
 
-/// Maker–checker requests for staff role grants (Role.md §11).
+/// Maker–checker requests (Role.md §11): staff role grants, permission-matrix changes, MFA resets of super admins.
 model ApprovalRequest {
   id         String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  action     String    // "role:grant"
-  payload    Json      // { userId, role, cityId? }
+  action     String    // "role:grant" | "authz:change" | "staff:reset_mfa"
+  payload    Json      // per action (see src/identity/approvals.ts)
   reason     String
   makerId    String    @map("maker_id") @db.Uuid
   checkerId  String?   @map("checker_id") @db.Uuid
-  status     String    @default("PENDING") // PENDING | APPROVED | REJECTED | EXECUTED | EXPIRED
+  status     String    @default("PENDING") // PENDING | REJECTED | EXECUTED | EXPIRED | CANCELLED | FAILED
   decisionReason String? @map("decision_reason")
   createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz
   decidedAt  DateTime? @map("decided_at") @db.Timestamptz
   expiresAt  DateTime  @map("expires_at") @db.Timestamptz
 
   @@index([status, createdAt])
+  @@index([action, status, createdAt(sort: Desc)], map: "ix_approval_action_status")
   @@map("approval_request")
+}
+
+/// The role catalog and its permissions (Role.md §8): seeded from libs/shared-authz, then edited
+/// only through approved `authz:change` requests. Every service loads it (GET /internal/authz/snapshot).
+model RoleDefinition {
+  code        String   @id // "DISPATCHER", or "CUSTOM_…" for roles created by admins
+  label       String
+  description String?
+  audience    String   // ride-app | ride-admin
+  storageType String   @map("storage_type") // user | member
+  orgKinds    String[] @map("org_kinds")
+  stored      String   @unique // name kept in user.role / member.role
+  builtIn     Boolean  @default(false) @map("built_in")
+  archived    Boolean  @default(false)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  permissions RolePermission[]
+
+  @@map("role_definition")
+}
+
+model RolePermission {
+  roleCode   String @map("role_code")
+  permission String
+  scope      String // S | O | C | G
+
+  role RoleDefinition @relation(fields: [roleCode], references: [code], onDelete: Cascade)
+
+  @@id([roleCode, permission])
+  @@map("role_permission")
+}
+
+/// One row: bumped on every executed matrix change; services reload when it moves.
+model AuthzVersion {
+  id      Int @id @default(1)
+  version Int @default(0)
+
+  @@map("authz_version")
 }
 
 /// Transactional outbox (Database.md §8). Published to Kafka by the relay.

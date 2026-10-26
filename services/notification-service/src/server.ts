@@ -1,3 +1,4 @@
+import { createAuthzSync, fetchAuthzSnapshotFrom } from "@ride-app/shared-authz";
 import { buildApp } from "./app.js";
 import { loadConfig } from "./config/index.js";
 import { createContainer } from "./container.js";
@@ -13,6 +14,8 @@ async function main() {
   if (!config.TELEGRAM_GATEWAY_TOKEN) logger.warn("TELEGRAM_GATEWAY_TOKEN not set: login codes go by SMS only");
   if (config.SMS_PROVIDER === "console") logger.warn("SMS_PROVIDER=console: SMS (including login codes) is logged (development only)");
 
+  await c.settingsClient.start();
+
   // SMS fallback schedule (Redis) and 30-day retention of delivery rows
   const fallbackTimer = setInterval(() => void c.otp.pollFallbacks().catch((err) => logger.error({ err }, "fallback poll failed")), 1000);
   const purgeTimer = setInterval(() => void c.otp.purgeOld().catch((err) => logger.error({ err }, "purge failed")), 60 * 60 * 1000);
@@ -23,6 +26,14 @@ async function main() {
   if (consumer) await consumer.start();
   else logger.warn("KAFKA_BROKERS not set: event notifications are disabled");
 
+  // the permission matrix follows auth-service live (Role.md §8)
+  const authzSync = createAuthzSync({
+    fetchSnapshot: fetchAuthzSnapshotFrom(config.AUTH_INTERNAL_URL, config.INTERNAL_SERVICE_TOKEN),
+    ...(c.redis ? { redis: c.redis } : {}),
+    logger,
+  });
+  await authzSync.start();
+
   await app.listen({ port: config.PORT, host: "0.0.0.0" });
 
   // Graceful shutdown so in-flight requests finish and connections close cleanly.
@@ -32,6 +43,8 @@ async function main() {
       if (closing) return;
       closing = true;
       logger.info(`${signal} received, shutting down`);
+      await authzSync.stop();
+      await c.settingsClient.stop();
       clearInterval(fallbackTimer);
       clearInterval(purgeTimer);
       await app.close();

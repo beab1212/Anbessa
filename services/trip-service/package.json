@@ -22,6 +22,7 @@
     "@ride-app/shared-authz": "workspace:*",
     "@ride-app/shared-config": "workspace:*",
     "@ride-app/shared-location": "workspace:*",
+    "@ride-app/shared-settings": "workspace:*",
     "@ride-app/shared-types": "workspace:*",
     "@ride-app/shared-utils": "workspace:*",
     "@socket.io/redis-emitter": "^5.1.0",

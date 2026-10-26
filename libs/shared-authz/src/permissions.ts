@@ -34,6 +34,9 @@ export const PERMISSIONS = [
   // administration
   "staff:manage", "role:request", "role:approve", "audit_log:read",
   "report:read", "report:read_finance", "report:read_regulatory",
+  // platform administration: the permission matrix, live settings, cities, announcements, system health
+  "authz:read", "authz:propose", "authz:approve", "settings:read", "settings:propose", "settings:approve",
+  "city:manage", "announcement:manage", "system:read", "session:revoke",
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -42,5 +45,26 @@ export type Permission = (typeof PERMISSIONS)[number];
 export const APPROVAL_PERMISSIONS: readonly Permission[] = [
   "refund:approve", "payout:approve", "pricing:approve", "incentive:approve", "role:approve",
   "topup:approve_cash", "adjustment:approve", "writeoff:approve", "commission_rule:approve",
-  "balance_policy:approve", "policy_override:approve",
+  "balance_policy:approve", "policy_override:approve", "authz:approve", "settings:approve",
 ];
+
+/** Groups for screens that list permissions (the admin matrix editor). */
+export const PERMISSION_GROUPS: { name: string; prefixes: string[] }[] = [
+  { name: "Trips", prefixes: ["trip"] },
+  { name: "Live location", prefixes: ["location"] },
+  { name: "Users", prefixes: ["user", "session"] },
+  { name: "Drivers and vehicles", prefixes: ["driver", "vehicle", "document"] },
+  { name: "Organisations", prefixes: ["org", "corporate"] },
+  { name: "Money", prefixes: ["earnings", "payment", "refund", "payout", "commission", "invoice", "balance", "topup", "adjustment", "writeoff", "commission_rule", "balance_policy", "policy_override"] },
+  { name: "Pricing and operations", prefixes: ["zone", "vehicle_type", "pricing", "incentive"] },
+  { name: "Marketing", prefixes: ["promo", "campaign"] },
+  { name: "Support and safety", prefixes: ["ticket", "lost_item", "sos", "incident"] },
+  { name: "Administration", prefixes: ["staff", "role", "audit_log", "report", "authz", "settings", "city", "announcement", "system"] },
+];
+
+export function permissionGroup(permission: string): string {
+  const prefix = permission.split(":")[0]!;
+  return PERMISSION_GROUPS.find((g) => g.prefixes.includes(prefix))?.name ?? "Other";
+}
+
+export const isPermission = (value: string): value is Permission => (PERMISSIONS as readonly string[]).includes(value);

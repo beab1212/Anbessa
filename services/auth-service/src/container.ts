@@ -10,6 +10,9 @@ import { consoleOtpSender, notificationOtpSender, type OtpRequest, type OtpSende
 import { betterAuthKeySet, createPrincipalResolver } from "./http/principal.js";
 import { createOtpInbox } from "./dev/accounts.js";
 import { createIdentityService } from "./identity/service.js";
+import { createAuthzService } from "./authz/service.js";
+import { loadAuthzSnapshot } from "./authz/store.js";
+import { createAuthzSync } from "@ride-app/shared-authz";
 import { redisSecondaryStorage } from "./lib/secondary-storage.js";
 import { noopSignals, redisSignals, type SecuritySignals } from "./lib/signals.js";
 
@@ -39,9 +42,14 @@ export function createContainer(config: Config, logger: Logger, opts: ContainerO
   const appAuth = createAppAuth(authDeps);
   const adminAuth = createAdminAuth(authDeps);
 
+  const authz = createAuthzService({ db, logger, ...(redis ? { publisher: redis } : {}) });
+  // this process authorizes too: keep its registry equal to the database (other replicas publish changes)
+  const authzSync = createAuthzSync({ fetchSnapshot: () => loadAuthzSnapshot(db), ...(redis ? { redis } : {}), logger });
+
   const identity = createIdentityService({
     db,
     signals,
+    executors: { "authz:change": authz.executor },
     sessions: {
       // removes sessions on both surfaces (same session table / secondary storage)
       async revokeAllSessions(userId) {
@@ -56,8 +64,9 @@ export function createContainer(config: Config, logger: Logger, opts: ContainerO
   const requirePrincipal = createPrincipalResolver({ issuer: config.AUTH_ISSUER ?? config.AUTH_BASE_URL, keySet, signals });
 
   return {
-    config, db, redis, signals, appAuth, adminAuth, identity, requirePrincipal, devInbox,
+    config, db, redis, signals, appAuth, adminAuth, identity, authz, authzSync, requirePrincipal, devInbox,
     async close() {
+      await authzSync.stop();
       await db.$disconnect();
       redis?.disconnect();
     },

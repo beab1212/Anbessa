@@ -156,6 +156,8 @@ Each service owns one business capability **and its data**. No service reads ano
 | **notification-service** | 3006 | Push (FCM) and SMS from events. **Login codes via the Telegram Gateway API, SMS fallback** (internal API from auth-service, never Kafka: [Auth.md §9.7](../design/Auth.md#97-otp-delivery-telegram-gateway-first-sms-fallback)) | `notification_service` DB: `otp_delivery`, `notification` (dedupe log), `device_token` | ✅ OTP delivery (Telegram + SMS fallback), invite SMS and driver-activated push from Kafka, device tokens. Trip/payment notifications wait for those events |
 | **mapping-service** | 3007 | The only gateway to OSRM / Nominatim: route, table, snap, search, reverse, with timeouts, a circuit breaker and straight-line fallback | Route and geocoding cache (Redis) | ✅ implemented, tested against OSRM/Nominatim-shaped fakes. Needs `make map-data` for real routing |
 | **fleet-service** | 3008 | Driver applications, vehicles and ownership (V1–V10), fleet authorisations, driving sessions (going online), onboarding documents (pre-signed S3 uploads), review queue, document expiry | `fleet_service` DB: driver_profile (licence encrypted + blind index), vehicle, vehicle_authorization, driving_session, document, idempotency keys, outbox | ✅ implemented, unit + integration tests, web review queue and fleet portal. Balance check on going online waits for payment-service |
+| **platform-service** | 3011 | Live settings (matching, trip rules, fees, fares, OTP, documents, maintenance, app versions, feature flags) with maker–checker for sensitive ones; cities and vehicle types; announcements; public client configuration; the system page (health, outboxes, Kafka lag, integrations) | `platform_service` DB: setting values, history and change requests, cities, vehicle types, announcements, outbox | ✅ implemented, integration tests, admin dashboard |
+| **audit-service** | 3010 | The write-once audit log: consumes `audit.recorded`, search and CSV export | `audit_service` DB: `audit_entry` (monthly partitions, UPDATE/DELETE refused) | ✅ implemented, integration tests, admin dashboard |
 | **realtime-gateway** | 3000 | WebSocket connections, driver pings into Redis, live location fan-out to trip rooms | Socket rooms (in Redis) | ✅ pings from `DRIVER` tokens only, plausibility checks, fan-out to the assigned trip only, guarded Kafka publish |
 
 ### Internal structure (auth-service is the reference template)
@@ -199,6 +201,7 @@ The Dart side mirrors the contracts in `packages/core` (e.g. `TripStatus`), sync
 | Real-time push | WebSocket (Socket.io) | Live updates both ways | driver GPS → rider map |
 | Asynchronous events | Kafka topics | Side effects, replication, analytics | `user.created`, `driver.location`, `trip.completed` |
 | Fan-out between gateway pods | Redis pub/sub (Socket.io adapter) | Delivering a room message to a socket on another pod | `trip:<id>` room broadcasts |
+| Live configuration reloads | Redis pub/sub + a 30 s poll | Telling every service the permission matrix or the settings changed (they then fetch a snapshot over HTTP) | `authz:changed` (auth-service), `settings:changed` (platform-service) |
 
 ### When to use which
 
@@ -669,8 +672,8 @@ Anbessa/
 │   ├── phone-app/          Flutter phone app, rider AND driver modes (role-based)
 │   └── web/                React + Vite web app: staff dashboard, fleet and corporate portals (role-based)
 ├── packages/core/          Shared Dart models + widgets
-├── services/               8 Node.js microservices (one image each)
-├── libs/                   shared-types · shared-utils · shared-config
+├── services/               11 Node.js microservices (one image each), incl. fleet, platform (settings) and audit
+├── libs/                   shared-types · shared-utils · shared-config · shared-authz (live permission matrix) · shared-settings (live settings)
 ├── infra/
 │   ├── docker/             local compose stack
 │   ├── kong/               declarative gateway config

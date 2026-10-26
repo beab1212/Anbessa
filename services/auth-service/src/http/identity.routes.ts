@@ -2,18 +2,21 @@ import { timingSafeEqual } from "node:crypto";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { IdentityService } from "../identity/service.js";
+import type { AuthzService } from "../authz/service.js";
+import type { Db } from "../db.js";
 import { forbidden, unauthorized } from "../lib/errors.js";
 import type { RequirePrincipal } from "./principal.js";
 
 const uuid = z.string().uuid();
 const reason = z.string().trim().min(10).max(500);
 const cityId = z.string().trim().min(1).max(64);
+const APPROVAL_STATUSES = ["PENDING", "EXECUTED", "REJECTED", "EXPIRED", "CANCELLED", "FAILED"] as const;
 
 export function registerIdentityRoutes(
   app: FastifyInstance,
-  deps: { identity: IdentityService; requirePrincipal: RequirePrincipal; internalToken?: string },
+  deps: { identity: IdentityService; authz: AuthzService; db: Db; requirePrincipal: RequirePrincipal; internalToken?: string },
 ) {
-  const { identity, requirePrincipal } = deps;
+  const { identity, authz, requirePrincipal } = deps;
   const staff = (req: FastifyRequest) => requirePrincipal(req, "ride-admin");
 
   // Works for both surfaces: tells a client which roles its token carries.
@@ -46,7 +49,7 @@ export function registerIdentityRoutes(
   });
 
   app.get("/api/identity/staff-role-requests", async (req) => {
-    const q = z.object({ status: z.enum(["PENDING", "EXECUTED", "REJECTED", "EXPIRED"]).optional() }).parse(req.query);
+    const q = z.object({ status: z.enum(APPROVAL_STATUSES).optional() }).parse(req.query);
     return identity.listStaffRoleRequests(await staff(req), q.status);
   });
 
@@ -66,6 +69,74 @@ export function registerIdentityRoutes(
     const body = z.object({ userId: uuid, role: z.string(), cityId: cityId.optional(), reason }).parse(req.body);
     return identity.revokeStaffRole(await staff(req), body);
   });
+
+  // ── approvals inbox (every action) ─────────────────────────────────────────
+  app.get("/api/identity/approvals", async (req) => {
+    const q = z.object({ status: z.enum(APPROVAL_STATUSES).optional(), action: z.string().max(40).optional(), limit: z.coerce.number().int().min(1).max(200).default(100) }).parse(req.query);
+    return { approvals: await identity.approvals.list(await staff(req), q) };
+  });
+  app.post("/api/identity/approvals/:id/approve", async (req) => {
+    const { id } = z.object({ id: uuid }).parse(req.params);
+    const body = z.object({ reason: z.string().trim().max(500).optional() }).parse(req.body ?? {});
+    return identity.approvals.approve(await staff(req), id, body.reason);
+  });
+  app.post("/api/identity/approvals/:id/reject", async (req) => {
+    const { id } = z.object({ id: uuid }).parse(req.params);
+    return identity.approvals.reject(await staff(req), id, z.object({ reason }).parse(req.body).reason);
+  });
+  app.post("/api/identity/approvals/:id/cancel", async (req) => {
+    const { id } = z.object({ id: uuid }).parse(req.params);
+    return identity.approvals.cancel(await staff(req), id);
+  });
+
+  // ── the permission matrix (Role.md §8) ────────────────────────────────────
+  // Any signed-in user may read it: the web app decides what to show with it (services check again).
+  app.get("/api/identity/authz", async (req) => {
+    // either surface's token (the partner portal reads it too)
+    await requirePrincipal(req, "ride-admin").catch(() => requirePrincipal(req, "ride-app"));
+    return authz.snapshot();
+  });
+  const change = z.object({
+    roleCode: z.string().max(60).optional(),
+    create: z.object({ label: z.string().trim().min(3).max(60), description: z.string().trim().max(300).optional(), storage: z.enum(["city", "global"]) }).optional(),
+    set: z.array(z.object({ permission: z.string().max(60), scope: z.enum(["S", "O", "C", "G"]).nullable() })).max(150).default([]),
+    label: z.string().trim().min(3).max(60).optional(),
+    description: z.string().trim().max(300).optional(),
+    archive: z.boolean().optional(),
+  });
+  app.post("/api/identity/authz/changes", async (req, reply) => {
+    const body = change.extend({ reason }).parse(req.body);
+    return reply.status(201).send(await authz.propose(identity.approvals, await staff(req), body));
+  });
+  app.post("/api/identity/authz/preview", async (req) => {
+    const body = change.extend({ roleCode: z.string().max(60) }).parse(req.body);
+    return authz.preview(await staff(req), body);
+  });
+
+  // ── directory: users, staff, sessions ──────────────────────────────────────
+  app.get("/api/identity/users", async (req) => {
+    const q = z.object({
+      q: z.string().trim().max(80).optional(),
+      kind: z.enum(["staff", "rider", "driver", "partner", "guest"]).optional(),
+      status: z.enum(["active", "suspended"]).optional(),
+      cursor: uuid.optional(),
+      limit: z.coerce.number().int().min(1).max(100).default(50),
+    }).parse(req.query);
+    return identity.listUsers(await staff(req), q);
+  });
+  app.get("/api/identity/users/:id", async (req, reply) => {
+    const { id } = z.object({ id: uuid }).parse(req.params);
+    return reply.header("cache-control", "no-store").send(await identity.getUser(await staff(req), id));
+  });
+  app.post("/api/identity/users/:id/sessions/revoke", async (req) => {
+    const { id } = z.object({ id: uuid }).parse(req.params);
+    return identity.revokeSessions(await staff(req), id, z.object({ reason }).parse(req.body).reason);
+  });
+  app.post("/api/identity/users/:id/reset-mfa", async (req, reply) => {
+    const { id } = z.object({ id: uuid }).parse(req.params);
+    return reply.header("cache-control", "no-store").send(await identity.resetMfa(await staff(req), id, z.object({ reason }).parse(req.body).reason));
+  });
+  app.get("/api/identity/stats", async (req) => identity.stats(await staff(req)));
 
   // ── safety ──────────────────────────────────────────────────────────────────
   app.post("/api/identity/users/:id/suspend", async (req) => {
@@ -113,6 +184,28 @@ export function registerIdentityRoutes(
     const { userId } = z.object({ userId: uuid }).parse(req.params);
     const body = z.object({ active: z.boolean() }).parse(req.body);
     return identity.setDriverRole(userId, body.active, service);
+  });
+
+  // every service loads the permission matrix from here (libs/shared-authz sync.ts)
+  app.get("/internal/authz/snapshot", async (req) => {
+    internal(req);
+    return authz.snapshot();
+  });
+
+  // platform-service owns cities; identity keeps a copy and the city's staff organisation
+  app.put("/internal/cities/:id", async (req) => {
+    internal(req);
+    const { id } = z.object({ id: z.string().regex(/^[a-z0-9-]{1,40}$/) }).parse(req.params);
+    const body = z.object({ name: z.string().trim().min(2).max(80), timezone: z.string().trim().min(3).max(60) }).parse(req.body);
+    return identity.upsertCity({ id, ...body });
+  });
+
+  // system page (platform-service): events waiting to be published
+  app.get("/internal/ops/outbox", async (req) => {
+    internal(req);
+    const [row] = await deps.db.$queryRaw<{ pending: bigint; oldest: Date | null }[]>`
+      SELECT count(*) AS pending, min(created_at) AS oldest FROM outbox WHERE published_at IS NULL`;
+    return { pending: Number(row?.pending ?? 0), oldestAt: row?.oldest?.toISOString() ?? null };
   });
 
   app.get("/internal/organizations/:id", async (req) => {

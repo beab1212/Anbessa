@@ -35,12 +35,13 @@ export interface MatcherDeps {
   logger: Logger;
   /** cancels the trip with reason NO_DRIVER_FOUND */
   onTimeout: (tripId: string) => Promise<void>;
-  config: { timeoutSeconds: number; offerSeconds: number; radiiMeters: number[] };
+  /** read on every matching step, so settings changes apply to trips already searching */
+  config: () => { timeoutSeconds: number; offerSeconds: number; radiiMeters: number[] };
   now?: () => number;
 }
 
 export function createMatcher(deps: MatcherDeps) {
-  const { db, redis, location, mapping, realtime, logger, config } = deps;
+  const { db, redis, location, mapping, realtime, logger } = deps;
   const now = deps.now ?? Date.now;
   const owner = randomUUID();
   let timer: NodeJS.Timeout | undefined;
@@ -81,6 +82,7 @@ export function createMatcher(deps: MatcherDeps) {
 
   /** One step for one trip. Returns when to look again (ms), or null when matching is over. */
   async function step(tripId: string): Promise<number | null> {
+    const config = deps.config();
     const trip = await db.trip.findUnique({ where: { id: tripId } });
     if (!trip || trip.status !== "requested") return null;
     const s = await redis.hgetall(state(tripId));

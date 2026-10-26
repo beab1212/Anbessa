@@ -1,0 +1,130 @@
+// Platform database: live settings (with maker–checker for sensitive ones), cities, vehicle types,
+// announcements. Snake_case via @map; CHECKs and the partial unique index are in the migration.
+
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+/// A value set by an admin (global when city_id is null, else a city override).
+model SettingValue {
+  id        String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  key       String
+  cityId    String?  @map("city_id")
+  value     Json
+  updatedBy String   @map("updated_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  // One row per key and city; the migration creates it NULLS NOT DISTINCT so the global
+  // value (city_id NULL) is also unique. Declared here so Prisma doesn't see a drift.
+  @@unique([key, cityId], map: "ux_setting_value_key_city")
+  @@map("setting_value")
+}
+
+/// Every applied change, newest first (who, approved by whom, why, before → after).
+model SettingHistory {
+  id         String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  key        String
+  cityId     String?  @map("city_id")
+  oldValue   Json?    @map("old_value")
+  newValue   Json?    @map("new_value") // null = back to the default
+  changedBy  String   @map("changed_by") @db.Uuid
+  approvedBy String?  @map("approved_by") @db.Uuid
+  reason     String
+  version    Int
+  at         DateTime @default(now()) @db.Timestamptz
+
+  @@index([key, at(sort: Desc)])
+  @@map("setting_history")
+}
+
+/// A sensitive change waiting for a second super admin (Role.md §11).
+model SettingChange {
+  id             String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  key            String
+  cityId         String?   @map("city_id")
+  value          Json?     // null = back to the default
+  reason         String
+  makerId        String    @map("maker_id") @db.Uuid
+  checkerId      String?   @map("checker_id") @db.Uuid
+  status         String    @default("PENDING") // PENDING | EXECUTED | REJECTED | EXPIRED | CANCELLED
+  decisionReason String?   @map("decision_reason")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  decidedAt      DateTime? @map("decided_at") @db.Timestamptz
+  expiresAt      DateTime  @map("expires_at") @db.Timestamptz
+
+  @@index([status, createdAt])
+  @@map("setting_change")
+}
+
+/// One row; bumped on every change to settings, cities or vehicle types. Services reload when it moves.
+model SettingsVersion {
+  id      Int @id @default(1)
+  version Int @default(0)
+
+  @@map("settings_version")
+}
+
+model City {
+  id        String   @id // "addis-ababa"
+  name      String
+  timezone  String   @default("Africa/Addis_Ababa")
+  enabled   Boolean  @default(true)
+  minLat    Float    @map("min_lat")
+  minLng    Float    @map("min_lng")
+  maxLat    Float    @map("max_lat")
+  maxLng    Float    @map("max_lng")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("city")
+}
+
+model VehicleType {
+  code      String   @id // "economy"
+  name      String
+  seatsMin  Int      @map("seats_min")
+  seatsMax  Int      @map("seats_max")
+  enabled   Boolean  @default(true)
+  /// where it's offered; empty = every city
+  cities    String[]
+  sortOrder Int      @default(0) @map("sort_order")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("vehicle_type")
+}
+
+/// Banners in the apps and the web, by audience, city and time window.
+model Announcement {
+  id        String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  title     String
+  body      String
+  severity  String    @default("info") // info | warning
+  audiences String[]  // rider | driver | partner | staff
+  cities    String[]  // empty = every city
+  startsAt  DateTime  @map("starts_at") @db.Timestamptz
+  endsAt    DateTime? @map("ends_at") @db.Timestamptz
+  archived  Boolean   @default(false)
+  createdBy String    @map("created_by") @db.Uuid
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@index([archived, startsAt])
+  @@map("announcement")
+}
+
+/// Transactional outbox (Database.md §8): audit.recorded and platform.* events.
+model Outbox {
+  id          String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  topic       String
+  key         String
+  payload     Json
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  publishedAt DateTime? @map("published_at") @db.Timestamptz
+
+  @@map("outbox")
+}

@@ -9,9 +9,13 @@
     { "name": "mapping-service",      "path": "../services/mapping-service" },
     { "name": "realtime-gateway",     "path": "../services/realtime-gateway" },
     { "name": "fleet-service",        "path": "../services/fleet-service" },
+    { "name": "platform-service",     "path": "../services/platform-service" },
+    { "name": "audit-service",        "path": "../services/audit-service" },
     { "name": "shared-types",         "path": "../libs/shared-types" },
     { "name": "shared-utils",         "path": "../libs/shared-utils" },
-    { "name": "shared-config",        "path": "../libs/shared-config" }
+    { "name": "shared-config",        "path": "../libs/shared-config" },
+    { "name": "shared-authz",         "path": "../libs/shared-authz" },
+    { "name": "shared-settings",      "path": "../libs/shared-settings" }
   ],
   "settings": {
     "editor.formatOnSave": true,

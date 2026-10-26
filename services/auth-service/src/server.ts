@@ -2,13 +2,21 @@ import { buildApp } from "./app.js";
 import { loadConfig } from "./config/index.js";
 import { createContainer } from "./container.js";
 import { createOutboxRelay } from "./outbox/relay.js";
+import { ensureAuthzSeeded } from "./authz/store.js";
 import { serviceLogger } from "./utils/logger.js";
 
 async function main() {
   const config = loadConfig();
   const logger = serviceLogger(config.NODE_ENV, config.LOG_LEVEL);
   const c = createContainer(config, logger);
+  if (await ensureAuthzSeeded(c.db)) logger.info("permission matrix seeded from libs/shared-authz");
+  await c.authzSync.start();
   const app = await buildApp({ ...c, logger });
+
+  // approvals nobody decided within 7 days are recorded as EXPIRED
+  const sweep = () => c.identity.approvals.expire().catch((err) => logger.error({ err }, "approval expiry sweep failed"));
+  void sweep();
+  const hourly = setInterval(sweep, 3_600_000);
 
   const relay = config.KAFKA_BROKERS?.length ? createOutboxRelay(c.db, config.KAFKA_BROKERS, logger) : undefined;
   if (relay) await relay.start();
@@ -25,6 +33,7 @@ async function main() {
       if (closing) return;
       closing = true;
       logger.info(`${signal} received, shutting down`);
+      clearInterval(hourly);
       await app.close();
       await relay?.stop();
       await c.close();

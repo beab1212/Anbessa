@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { Server } from "socket.io";
 import { createAdapter } from "@socket.io/redis-adapter";
 import { Redis } from "ioredis";
+import { createAuthzSync, fetchAuthzSnapshotFrom } from "@ride-app/shared-authz";
 import { createLogger } from "@ride-app/shared-utils";
 import { config } from "./config/index.js";
 import { kafkaLocationPublisher, noopPublisher } from "./kafka.js";
@@ -55,6 +56,13 @@ io.on("connection", (socket) => {
   }, 60_000);
   socket.on("disconnect", () => clearInterval(recheck));
 });
+
+// the permission matrix follows auth-service live (Role.md §8); without the service token, the built-in one
+if (config.INTERNAL_SERVICE_TOKEN) {
+  void createAuthzSync({ fetchSnapshot: fetchAuthzSnapshotFrom(config.AUTH_INTERNAL_URL, config.INTERNAL_SERVICE_TOKEN), redis: pubClient, logger }).start();
+} else {
+  logger.warn("INTERNAL_SERVICE_TOKEN not set: using the built-in permission matrix");
+}
 
 httpServer.listen(config.PORT, () => logger.info(`realtime-gateway listening on :${config.PORT}`));
 

@@ -34,6 +34,13 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
     purpose: z.enum(["sign_in", "phone_change", "claim_guest"]),
   });
 
+  // system page (platform-service): OTP delivery health, failed notifications in the last day
+  app.get("/internal/ops/integrations", async (req) => {
+    requireService(req);
+    const failed24h = await deps.db.notification.groupBy({ by: ["channel"], where: { status: "FAILED", createdAt: { gte: new Date(Date.now() - 86_400_000) } }, _count: true });
+    return { otp: await deps.otp.status(), failedNotifications24h: Object.fromEntries(failed24h.map((g) => [g.channel, g._count])) };
+  });
+
   // auth-service already rate-limits OTP requests per number and per IP
   app.post("/internal/otp-deliveries", { config: { rateLimit: false } }, async (req, reply) => {
     requireService(req);

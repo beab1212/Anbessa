@@ -1,7 +1,8 @@
 import { useEffect, useState, type ComponentType, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { Building2, CarFront, ClipboardCheck, IdCard, LayoutDashboard, LogOut, Map as MapIcon, Phone, Search, ShieldAlert, UserCog, UsersRound, type LucideProps } from "lucide-react";
-import type { Principal } from "@ride-app/shared-authz";
+import { Activity, Building2, CarFront, CheckCheck, ClipboardCheck, Gauge, IdCard, KeyRound, LayoutDashboard, LogOut, Map as MapIcon, MapPinned, Megaphone, Phone, ScrollText, Search, ShieldAlert, SlidersHorizontal, UserCog, Users, UsersRound, type LucideProps } from "lucide-react";
+import { roleInfo, type Principal } from "@ride-app/shared-authz";
+import { useClientConfig } from "../lib/platform";
 import type { Surface } from "../lib/api";
 import { useSession } from "../lib/session";
 import { Brand } from "./ui";
@@ -19,6 +20,15 @@ export const ICONS: Record<string, ComponentType<LucideProps>> = {
   "/staff/review": ClipboardCheck,
   "/staff/fleet/drivers": IdCard,
   "/staff/fleet/vehicles": CarFront,
+  "/staff/admin": Gauge,
+  "/staff/admin/users": Users,
+  "/staff/admin/roles": KeyRound,
+  "/staff/admin/approvals": CheckCheck,
+  "/staff/admin/settings": SlidersHorizontal,
+  "/staff/admin/cities": MapPinned,
+  "/staff/admin/announcements": Megaphone,
+  "/staff/admin/system": Activity,
+  "/staff/admin/audit": ScrollText,
   "/staff/phone": Phone,
   "/staff/trips": Search,
   "/staff/onboarding": Building2,
@@ -44,7 +54,7 @@ const ROLE_WORD: Record<string, string> = {
 };
 
 export function roleSummary(p: Principal): string {
-  const words = [...new Set(p.roles.map((r) => ROLE_WORD[r.role] ?? r.role.toLowerCase()))];
+  const words = [...new Set(p.roles.map((r) => ROLE_WORD[r.role] ?? roleInfo(r.role)?.label.toLowerCase() ?? r.role.toLowerCase()))];
   return words.length ? words.join(", ") : "no roles yet";
 }
 
@@ -53,7 +63,14 @@ export function Shell({ surface, sections, principal, topbar }: { surface: Surfa
   const navigate = useNavigate();
   const clock = useAddisClock();
   const { pathname } = useLocation();
-  const current = sections.flatMap((s) => s.items).find((i) => pathname.startsWith(i.to));
+  const items = sections.flatMap((s) => s.items);
+  // the most specific item wins (/staff/admin/users over /staff/admin)
+  const current = items.filter((i) => pathname === i.to || pathname.startsWith(`${i.to}/`)).sort((a, b) => b.to.length - a.to.length)[0];
+  const config = useClientConfig();
+  const audience = surface === "staff" ? "staff" : "partner";
+  const banners = (config?.announcements ?? []).filter((a) => a.audiences.includes(audience));
+  const paused = !!config?.maintenance.newTripsPaused;
+  const flush = !!current?.to && ["/staff/board", "/staff/drivers", "/staff/phone"].includes(current.to);
 
   return (
     <div className="shell">
@@ -66,7 +83,7 @@ export function Shell({ surface, sections, principal, topbar }: { surface: Surfa
               {s.items.map((item) => {
                 const Icon = item.icon ?? ICONS[item.to] ?? UsersRound;
                 return (
-                  <NavLink key={item.to} to={item.to} className={({ isActive }) => (isActive ? "active" : "")}>
+                  <NavLink key={item.to} to={item.to} end={items.some((o) => o.to.startsWith(`${item.to}/`))} className={({ isActive }) => (isActive ? "active" : "")}>
                     <Icon />
                     <span>{item.label}</span>
                     {item.badge ? <span className="badge">{item.badge}</span> : null}
@@ -83,13 +100,22 @@ export function Shell({ surface, sections, principal, topbar }: { surface: Surfa
       <header className="topbar">
         <h1>{current?.label ?? "Anbessa"}</h1>
         {topbar}
+        {paused ? <span className="pill red" title={config?.maintenance.message}>new trips paused</span> : null}
         <span className="spacer" />
         <span className="clock">{clock}</span>
         <button className="btn ghost sm" onClick={async () => { await signOut(surface); navigate("/sign-in"); }}>
           <LogOut /> Sign out
         </button>
       </header>
-      <main className={`content ${current?.to && ["/staff/board", "/staff/drivers", "/staff/phone"].includes(current.to) ? "flush" : ""}`}>
+      <main className={`content ${flush ? "flush" : ""}`}>
+        {!flush && (banners.length || paused) ? (
+          <div className="banners">
+            {paused ? <div className="alert error" role="status"><strong>Maintenance:</strong>&nbsp;{config?.maintenance.message}</div> : null}
+            {banners.map((a) => (
+              <div key={a.id} className={`alert ${a.severity === "warning" ? "error" : "info"}`} role="status"><strong>{a.title}</strong>&nbsp;· {a.body}</div>
+            ))}
+          </div>
+        ) : null}
         <Outlet />
       </main>
     </div>

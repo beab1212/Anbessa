@@ -2,7 +2,7 @@
 // Minimal: no PII. Roles are filtered by surface, and staff roles require 2FA.
 
 import { APIError } from "better-auth/api";
-import { ROLES, toRoleClaim, type RoleAssignment } from "@ride-app/shared-authz";
+import { roleInfo, toRoleClaim, type RoleAssignment } from "@ride-app/shared-authz";
 import type { Db } from "../db.js";
 import { toAssignments } from "./roles-codec.js";
 
@@ -27,7 +27,7 @@ export function selectRolesForSurface(
   user: ClaimsUser,
 ): RoleAssignment[] {
   const audience = surface === "app" ? "ride-app" : "ride-admin";
-  const forAudience = assignments.filter((a) => ROLES[a.role].audience === audience);
+  const forAudience = assignments.filter((a) => roleInfo(a.role)?.audience === audience);
   if (surface === "admin") {
     // Staff roles only with two-factor enabled and a changed initial password.
     if (!user.twoFactorEnabled || user.mustChangePassword) return [];

@@ -1,7 +1,8 @@
 // authorize(): the one call every protected action makes (Role.md §9).
 // Grants need a permission in the matrix AND a scope that covers the resource.
 
-import { MATRIX, type ScopeLetter } from "./matrix.js";
+import type { ScopeLetter } from "./matrix.js";
+import { grantsOf } from "./registry.js";
 import type { Permission } from "./permissions.js";
 import type { Principal, RoleAssignment } from "./principal.js";
 
@@ -39,7 +40,7 @@ function covers(letter: ScopeLetter, a: RoleAssignment, principal: Principal, r:
 /** The assignments that grant `permission` on `resource` (empty = denied). */
 export function grantingAssignments(principal: Principal, permission: Permission, resource: ResourceScope = {}): RoleAssignment[] {
   return principal.roles.filter((a) => {
-    const letter = MATRIX[a.role]?.[permission];
+    const letter = grantsOf(a.role)[permission];
     return letter !== undefined && covers(letter, a, principal, resource);
   });
 }
@@ -56,7 +57,7 @@ export function authorize(principal: Principal, permission: Permission, resource
 export function citiesWith(principal: Principal, permission: Permission): string[] | "*" {
   const cities = new Set<string>();
   for (const a of principal.roles) {
-    const letter = MATRIX[a.role]?.[permission];
+    const letter = grantsOf(a.role)[permission];
     if (letter === "G" || (letter === "C" && a.scope === "GLOBAL")) return "*";
     if (letter === "C" && a.scope === "CITY" && a.cityId) cities.add(a.cityId);
   }

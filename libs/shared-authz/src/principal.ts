@@ -1,8 +1,10 @@
-import { isRoleCode, ROLES, type Audience, type RoleCode, type ScopeType } from "./roles.js";
+import { roleInfo } from "./registry.js";
+import type { Audience, ScopeType } from "./roles.js";
 
 /** One role held within one scope, as carried in the token's `roles` claim (Role.md §10). */
 export interface RoleAssignment {
-  role: RoleCode;
+  /** a built-in RoleCode or a custom role's code (see registry.ts) */
+  role: string;
   scope: ScopeType;
   orgId?: string;
   cityId?: string;
@@ -44,8 +46,9 @@ export function parseRoleClaims(raw: unknown, audience: Audience): RoleAssignmen
   for (const item of raw) {
     if (!item || typeof item !== "object") continue;
     const { r, org, city, g } = item as RoleClaim;
-    if (typeof r !== "string" || !isRoleCode(r)) continue;
-    if (ROLES[r].audience !== audience) continue;
+    if (typeof r !== "string") continue;
+    const info = roleInfo(r);
+    if (!info || info.archived || info.audience !== audience) continue;
     if (typeof org === "string" && org) out.push({ role: r, scope: "ORG", orgId: org });
     else if (typeof city === "string" && city) out.push({ role: r, scope: "CITY", cityId: city });
     else if (g === true) out.push({ role: r, scope: "GLOBAL" });
@@ -54,6 +57,6 @@ export function parseRoleClaims(raw: unknown, audience: Audience): RoleAssignmen
   return out;
 }
 
-export function hasRole(principal: Principal, role: RoleCode): boolean {
+export function hasRole(principal: Principal, role: string): boolean {
   return principal.roles.some((a) => a.role === role);
 }

@@ -92,6 +92,29 @@ services:
       - name: rate-limiting
         config: { minute: 120, policy: local }
 
+  - name: platform-service
+    url: http://platform-service:3011
+    routes:
+      # admin settings, cities, announcements, system page; /api/platform/client-config is public
+      - name: platform-routes
+        paths: ["/api/platform"]
+        strip_path: false
+    plugins:
+      - name: rate-limiting
+        config: { minute: 120, policy: local }
+
+  - name: audit-service
+    url: http://audit-service:3010
+    routes:
+      # read only: search and CSV export of the audit log
+      - name: audit-routes
+        paths: ["/api/audit"]
+        methods: ["GET"]
+        strip_path: false
+    plugins:
+      - name: rate-limiting
+        config: { minute: 60, policy: local }
+
   - name: pricing-service
     url: http://pricing-service:3004
     routes:

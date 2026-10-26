@@ -10,6 +10,7 @@ import { socketEmitter, type Realtime } from "./lib/realtime.js";
 import { createMatcher } from "./matching/matcher.js";
 import { builtinQuotes, pricingQuotes, type QuoteProvider } from "./quotes.js";
 import { createTripService } from "./trips/service.js";
+import { createSettingsClient, fetchSettingsSnapshotFrom, type SettingsReader } from "@ride-app/shared-settings";
 
 export interface ContainerOptions {
   db?: Db;
@@ -19,6 +20,8 @@ export interface ContainerOptions {
   quotes?: QuoteProvider;
   realtime?: Realtime;
   verifyAccessToken?: VerifyAccessToken;
+  /** fixed settings (tests) instead of platform-service */
+  settings?: SettingsReader;
   now?: () => Date;
 }
 
@@ -30,7 +33,18 @@ export function createContainer(config: Config, logger: Logger, opts: ContainerO
   const realtime = opts.realtime ?? socketEmitter(redis);
   const now = opts.now ?? (() => new Date());
 
-  const devQuotes = config.PRICING === "builtin" ? builtinQuotes(redis, mapping, now) : undefined;
+  // live settings; this service's env values are the defaults until an admin changes them
+  const settingsClient = opts.settings ? undefined : createSettingsClient({
+    fetchSnapshot: fetchSettingsSnapshotFrom(config.PLATFORM_INTERNAL_URL, config.INTERNAL_SERVICE_TOKEN),
+    redis, logger,
+    defaults: {
+      "match.timeoutSeconds": config.MATCH_TIMEOUT_SECONDS, "match.offerSeconds": config.OFFER_SECONDS,
+      "match.radiiMeters": config.MATCH_RADII_METERS, "trip.pinRequired": config.TRIP_PIN_REQUIRED,
+    },
+  });
+  const settings: SettingsReader = opts.settings ?? settingsClient!;
+
+  const devQuotes = config.PRICING === "builtin" ? builtinQuotes(redis, mapping, settings, now) : undefined;
   const quotes = opts.quotes ?? devQuotes?.provider ?? pricingQuotes(config.PRICING_INTERNAL_URL, config.INTERNAL_SERVICE_TOKEN);
 
   // the matcher cancels through the trip service, and the trip service starts/stops the matcher
@@ -38,12 +52,16 @@ export function createContainer(config: Config, logger: Logger, opts: ContainerO
   const matcher = createMatcher({
     db, redis, location, mapping, realtime, logger,
     onTimeout: async (tripId) => void (await trips.systemCancel(tripId, "NO_DRIVER_FOUND")),
-    config: { timeoutSeconds: config.MATCH_TIMEOUT_SECONDS, offerSeconds: config.OFFER_SECONDS, radiiMeters: config.MATCH_RADII_METERS },
+    config: () => ({
+      timeoutSeconds: settings.get<number>("match.timeoutSeconds"),
+      offerSeconds: settings.get<number>("match.offerSeconds"),
+      radiiMeters: settings.get<number[]>("match.radiiMeters"),
+    }),
     now: () => now().getTime(),
   });
   const trips = createTripService({
     db, redis, quotes, location, realtime, logger, matching: matcher.control, now,
-    config: { pinRequired: config.TRIP_PIN_REQUIRED },
+    settings,
   });
 
   // tokens of suspended users, and tokens older than a role change, are refused (Auth.md §9.5)
@@ -60,7 +78,7 @@ export function createContainer(config: Config, logger: Logger, opts: ContainerO
     });
 
   return {
-    config, db, redis, trips, matcher, devQuotes, verifyAccessToken,
+    config, db, redis, trips, matcher, devQuotes, verifyAccessToken, settings, settingsClient,
     internalToken: config.INTERNAL_SERVICE_TOKEN,
     async close() {
       matcher.stop();

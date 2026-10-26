@@ -105,6 +105,9 @@ Production values that differ from dev:
 | `OTP_DELIVERY` / `NOTIFICATION_INTERNAL_URL` | auth-service: `notification` / in-cluster notification-service URL. `console` is refused in production |
 | `INTERNAL_SERVICE_TOKEN` | auth-service and its internal callers. Required in production |
 | `AUTH_RATE_LIMIT` | leave unset (`on`). `off` is refused in production |
+| `PLATFORM_INTERNAL_URL` | trip, fleet and notification services: in-cluster platform-service URL. Live settings come from there. If it's unreachable at start, a service runs on its env values (the env values are only defaults) |
+| `AUTH_INTERNAL_URL` (+ `INTERNAL_SERVICE_TOKEN` for realtime-gateway) | every service: the live permission matrix (`/internal/authz/snapshot`). Unreachable at start = the built-in matrix, logged |
+| `SERVICE_URLS` / `CONSUMER_GROUPS` | platform-service: in-cluster base URL of every service (`name=url,…`) and the Kafka groups whose lag the system page shows |
 | `DEV_LOGIN` | leave unset (`off`). `on` is refused in production. Never run `seed:dev` against a real database: it refuses unless `NODE_ENV=development` |
 | `PHONE_HASH_KEY` / `OTP_ENCRYPTION_KEY` | notification-service only, 32 random bytes as hex each, from Secrets Manager. Rotating `PHONE_HASH_KEY` only breaks the resend lookup for codes in flight; rotating `OTP_ENCRYPTION_KEY` drops codes in flight (users request a new one) |
 | `OTP_CHANNELS` / `OTP_FALLBACK_SECONDS` | notification-service: `telegram,sms` / `20` |
@@ -212,3 +215,18 @@ These are known gaps in the current scaffold. Each one blocks or weakens a real 
 - **Services:** `kubectl rollout undo deployment/prod-<svc>`, or redeploy the previous git SHA. Images are immutable, so rollback is a redeploy.
 - **Database:** Prisma has no down-migrations. Roll forward with a new migration. This is why migrations must stay backwards-compatible (section 6).
 - **Mobile:** you can't recall store builds. Gate risky features server-side and keep the API backwards-compatible for at least one previous app version.
+
+### Administration in production
+
+- **Who controls what:**
+  - The permission matrix and live settings are changed from the admin dashboard, always by two super admins for sensitive changes.
+  - Keep at least two active super admins (auth-service refuses to go below two).
+  - Review the access-review flags on Staff and roles regularly.
+- **Live reload needs Redis:** auth-service and platform-service publish `authz:changed` / `settings:changed`. Without Redis, services still converge within 30 s by polling.
+- **The audit log is write-once:**
+  - Grant the audit-service database role INSERT/SELECT only.
+  - Export monthly `audit_entry_YYYY_MM` partitions to S3 Object Lock and detach them after the hot retention (Database.md).
+- **Kong:**
+  - `/api/platform/client-config` is public and cacheable (15 s).
+  - `/api/audit` is GET only.
+  - `/internal/*` is never routed.

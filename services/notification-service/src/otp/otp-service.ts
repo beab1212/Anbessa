@@ -41,6 +41,8 @@ export interface OtpServiceDeps {
     senderUsername?: string;
     balanceAlertUsd: number;
   };
+  /** live settings (admin dashboard) override channels and fallbackSeconds per send */
+  live?: { channels(): Channel[]; fallbackSeconds(): number };
   now?: () => Date;
 }
 
@@ -59,14 +61,19 @@ export function smsText(code: string, ttlSeconds: number): string {
 export function createOtpService(deps: OtpServiceDeps) {
   const { db, store, sms, telegram, logger, config } = deps;
   const now = deps.now ?? (() => new Date());
-  const useTelegram = !!telegram && config.channels[0] === "telegram";
-  const smsAllowed = config.channels.includes("sms");
+  const channels = () => deps.live?.channels() ?? config.channels;
+  const fallbackSeconds = () => deps.live?.fallbackSeconds() ?? config.fallbackSeconds;
+  const telegramFirst = () => !!telegram && channels()[0] === "telegram";
+  const smsOn = () => channels().includes("sms");
+  // last Telegram balance seen in a response, for the admin system page
+  let lastBalance: { usd: number; at: string } | null = null;
   const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
 
   const update = (id: string, data: Record<string, unknown>) => db.otpDelivery.update({ where: { id }, data });
 
   function noteBalance(s: RequestStatus) {
     if (s.remaining_balance === undefined) return;
+    lastBalance = { usd: s.remaining_balance, at: now().toISOString() };
     if (s.remaining_balance < config.balanceAlertUsd) {
       logger.warn({ remainingBalanceUsd: s.remaining_balance }, "telegram gateway balance is low: top up the account");
     }
@@ -86,7 +93,7 @@ export function createOtpService(deps: OtpServiceDeps) {
   async function smsFallback(phoneHash: Uint8Array<ArrayBuffer>, ofId: string, reason: string) {
     const active = await store.getCode(hex(phoneHash));
     if (!active || !active.deliveryIds.includes(ofId)) return; // expired, verified, or a newer code exists
-    if (!smsAllowed) {
+    if (!smsOn()) {
       logger.warn({ deliveryId: ofId, reason }, "otp not delivered and SMS fallback is disabled");
       return;
     }
@@ -148,6 +155,19 @@ export function createOtpService(deps: OtpServiceDeps) {
   }
 
   return {
+    /** For the admin system page: channel setup and delivery over the last hour. */
+    async status() {
+      const since = new Date(now().getTime() - 3_600_000);
+      const rows = await db.otpDelivery.groupBy({ by: ["channel", "status"], where: { createdAt: { gte: since } }, _count: true });
+      const fallbacks = await db.otpDelivery.count({ where: { createdAt: { gte: since }, fallbackOfId: { not: null } } });
+      const telegramSent = rows.filter((r) => r.channel === "telegram").reduce((n, r) => n + r._count, 0);
+      return {
+        channels: channels(), fallbackSeconds: fallbackSeconds(), telegramConfigured: !!telegram, telegramBalance: lastBalance,
+        lastHour: rows.map((r) => ({ channel: r.channel, status: r.status, count: r._count })),
+        smsFallbackRate: telegramSent ? fallbacks / telegramSent : null,
+      };
+    },
+
     /**
      * Accepts a code from auth-service and starts delivery. Returns once the attempt is
      * recorded and the fallback is scheduled; `done` settles when the first send finishes.
@@ -160,6 +180,8 @@ export function createOtpService(deps: OtpServiceDeps) {
       const since = new Date(now().getTime() - ttl * 1000);
 
       // Manual resend (step 7): a recent Telegram attempt that wasn't delivered → go straight to SMS.
+      const useTelegram = telegramFirst();
+      const smsAllowed = smsOn();
       const recent = useTelegram
         ? await db.otpDelivery.findFirst({
             where: { phoneHash, channel: "TELEGRAM", createdAt: { gt: since }, status: { in: ["REQUESTED", "SENT"] } },
@@ -184,7 +206,7 @@ export function createOtpService(deps: OtpServiceDeps) {
       let done: Promise<void>;
       if (channel === "telegram") {
         // scheduled before the first Telegram call, so even a crash right now still ends in an SMS
-        if (smsAllowed) await store.scheduleFallback(row.id, new Date(now().getTime() + config.fallbackSeconds * 1000));
+        if (smsAllowed) await store.scheduleFallback(row.id, new Date(now().getTime() + fallbackSeconds() * 1000));
         done = runTelegram(row.id, phoneHash, active);
       } else {
         if (recent) {

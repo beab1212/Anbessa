@@ -5,6 +5,7 @@
 import { v7 as uuidv7 } from "uuid";
 import { authorize, can, type Permission, type Principal } from "@ride-app/shared-authz";
 import { CITIES } from "@ride-app/shared-location";
+import type { SettingsReader } from "@ride-app/shared-settings";
 import type { Logger } from "@ride-app/shared-utils";
 import { Prisma } from "../generated/prisma/client.js";
 import type { Db } from "../db.js";
@@ -35,6 +36,7 @@ export interface FleetDeps {
   logger: Logger;
   now?: () => Date;
   expiryWarningDays?: number;
+  settings?: SettingsReader;
 }
 
 interface UploadTicket {
@@ -103,7 +105,9 @@ export function vehicleView(v: VehicleRow) {
 export function createFleetService(deps: FleetDeps) {
   const { db, pii, store, tickets, auth, logger } = deps;
   const now = deps.now ?? (() => new Date());
-  const warningDays = deps.expiryWarningDays ?? 30;
+  // live settings (admin dashboard), with this service's env value as the default
+  const warningDays = (): number => deps.settings?.get<number>("documents.expiryWarningDays") ?? deps.expiryWarningDays ?? 30;
+  const reminderDays = (): number[] => deps.settings?.get<number[]>("documents.reminderDays") ?? [30, 7, 1];
 
   const driverView = (d: DriverRow, opts: { fullLicence: boolean }) => ({
     userId: d.userId, status: d.status, statusReason: d.statusReason, reviewNote: d.reviewNote, fullName: d.fullName,
@@ -186,7 +190,7 @@ export function createFleetService(deps: FleetDeps) {
       openSessionOfDriver(db, p.userId),
     ]);
     return {
-      driver: d ? { ...driverView(d, { fullLicence: true }), ...checklist("DRIVER", docs, now(), warningDays) } : null,
+      driver: d ? { ...driverView(d, { fullLicence: true }), ...checklist("DRIVER", docs, now(), warningDays()) } : null,
       vehicles: owned.map(vehicleView),
       fleetVehicles: auths.map((a) => ({ ...vehicleView(a.vehicle), authorization: { validUntil: a.validUntil?.toISOString() ?? null } })),
       session: session ? sessionView(session) : null,
@@ -258,7 +262,7 @@ export function createFleetService(deps: FleetDeps) {
     ]);
     return {
       ...vehicleView(v),
-      ...checklist("VEHICLE", docs, now(), warningDays),
+      ...checklist("VEHICLE", docs, now(), warningDays()),
       authorizations: auths.map((a) => ({
         driverUserId: a.driverUserId, status: a.status, validUntil: a.validUntil?.toISOString() ?? null,
         grantedBy: a.grantedBy, createdAt: a.createdAt.toISOString(), revokedAt: a.revokedAt?.toISOString() ?? null,
@@ -468,7 +472,7 @@ export function createFleetService(deps: FleetDeps) {
         },
       });
     });
-    return documentView(doc, now(), warningDays);
+    return documentView(doc, now(), warningDays());
   }
 
   /** May this person see the subject's documents? "staff" views are audited. */
@@ -504,7 +508,7 @@ export function createFleetService(deps: FleetDeps) {
     }
     const docs = await docsOf(db, subjectType, subjectId);
     await readAccess(p, { subjectType, subjectId, cityId: cityId ?? docs[0]?.cityId ?? "" });
-    return { ...checklist(subjectType, docs, now(), warningDays), history: docs.map((d) => documentView(d, now(), warningDays)) };
+    return { ...checklist(subjectType, docs, now(), warningDays()), history: docs.map((d) => documentView(d, now(), warningDays())) };
   }
 
   async function reviewDocument(p: Principal, id: string, input: { decision: "APPROVE" | "REJECT"; reason?: string; expiresAt?: string }) {
@@ -527,7 +531,7 @@ export function createFleetService(deps: FleetDeps) {
       await writeOutbox(tx, audit({ actorId: p.userId, action: `document:${input.decision.toLowerCase()}`, resource: { type: "document", id }, outcome: "EXECUTED", reason: input.reason }));
       return r;
     });
-    return documentView(row, now(), warningDays);
+    return documentView(row, now(), warningDays());
   }
 
   // ── review (workflow 02, part B) ───────────────────────────────────────────
@@ -539,7 +543,7 @@ export function createFleetService(deps: FleetDeps) {
       can(p, "vehicle:read", { cityId }) ? db.vehicle.findMany({ where: { cityId, status: "PENDING_REVIEW" }, orderBy: { submittedAt: "asc" }, take: 200 }) : [],
       db.document.groupBy({ by: ["subjectId"], where: { cityId, subjectType: "ORGANIZATION", status: "PENDING" }, _min: { createdAt: true }, _count: true }),
       db.document.groupBy({ by: ["subjectType", "subjectId"], where: { cityId, status: "PENDING" }, _count: true }),
-      db.document.count({ where: { cityId, status: "APPROVED", expiresAt: { lte: new Date(dayOf(now()).getTime() + warningDays * 86_400_000) } } }),
+      db.document.count({ where: { cityId, status: "APPROVED", expiresAt: { lte: new Date(dayOf(now()).getTime() + warningDays() * 86_400_000) } } }),
     ]);
     const pending = (type: string, id: string) => pendingDocs.find((g) => g.subjectType === type && g.subjectId === id)?._count ?? 0;
     return {
@@ -587,7 +591,7 @@ export function createFleetService(deps: FleetDeps) {
     ]);
     return {
       ...driverView(d, { fullLicence: full }),
-      ...checklist("DRIVER", docs, now(), warningDays),
+      ...checklist("DRIVER", docs, now(), warningDays()),
       vehicles: owned.map(vehicleView),
       fleetVehicles: auths.map((a) => ({ ...vehicleView(a.vehicle), authorization: { status: a.status, validUntil: a.validUntil?.toISOString() ?? null } })),
       session: session ? sessionView(session) : null,
@@ -769,7 +773,7 @@ export function createFleetService(deps: FleetDeps) {
   /** Reminders 30, 7 and 1 days before expiry (notification-service sends push + SMS). Run once a day. */
   async function remindExpiring() {
     const today = dayOf(now()).getTime();
-    const days = [30, 7, 1].map((n) => new Date(today + n * 86_400_000));
+    const days = reminderDays().map((n) => new Date(today + n * 86_400_000));
     const due = await db.document.findMany({ where: { status: "APPROVED", expiresAt: { in: days } } });
     if (due.length) {
       await db.$transaction((tx) => writeOutbox(tx, ...due.map((d): FleetEvent => ({
@@ -780,7 +784,25 @@ export function createFleetService(deps: FleetDeps) {
     return due.length;
   }
 
+  /** Admin overview: counts by status (report:read; a city, or everywhere). */
+  async function stats(p: Principal, cityId?: string) {
+    authorize(p, "report:read", cityId ? { cityId } : {});
+    const where = cityId ? { cityId } : {};
+    const [drivers, vehicles, pendingDocuments, online] = await Promise.all([
+      db.driverProfile.groupBy({ by: ["status"], where, _count: true }),
+      db.vehicle.groupBy({ by: ["status"], where, _count: true }),
+      db.document.count({ where: { ...where, status: "PENDING" } }),
+      db.drivingSession.count({ where: { endedAt: null, ...(cityId ? { vehicle: { cityId } } : {}) } }),
+    ]);
+    return {
+      drivers: Object.fromEntries(drivers.map((g) => [g.status, g._count])),
+      vehicles: Object.fromEntries(vehicles.map((g) => [g.status, g._count])),
+      pendingDocuments, online,
+    };
+  }
+
   return {
+    stats,
     apply, me, submitDriver,
     registerVehicle, getVehicle, listVehicles, submitVehicle, retireVehicle, approveVehicle, rejectVehicle,
     authorizeDriver, revokeDriver, fleetOverview,

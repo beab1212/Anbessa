@@ -10,6 +10,7 @@ import { registerDevRoutes } from "./http/dev.routes.js";
 import { registerIdentityRoutes } from "./http/identity.routes.js";
 import type { RequirePrincipal } from "./http/principal.js";
 import type { IdentityService } from "./identity/service.js";
+import type { AuthzService } from "./authz/service.js";
 import type { OtpInbox } from "./dev/accounts.js";
 import { registerErrorHandler } from "./middlewares/error-handler.js";
 
@@ -19,6 +20,7 @@ export interface AppDeps {
   appAuth: AppAuth;
   adminAuth: AdminAuth;
   identity: IdentityService;
+  authz: AuthzService;
   requirePrincipal: RequirePrincipal;
   /** Set only when DEV_LOGIN=on (refused in production). */
   devInbox?: OtpInbox;
@@ -57,6 +59,8 @@ export async function buildApp(deps: AppDeps) {
   mountBetterAuth(app, deps.adminAuth, { prefix: "/api/admin-auth", surface: "admin", db: deps.db });
   registerIdentityRoutes(app, {
     identity: deps.identity,
+    authz: deps.authz,
+    db: deps.db,
     requirePrincipal: deps.requirePrincipal,
     internalToken: deps.config.INTERNAL_SERVICE_TOKEN,
   });

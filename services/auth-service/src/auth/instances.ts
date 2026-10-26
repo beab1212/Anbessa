@@ -8,7 +8,7 @@ import { admin, bearer, jwt, organization, phoneNumber, twoFactor } from "better
 import { v7 as uuidv7 } from "uuid";
 import type { Config } from "../config/index.js";
 import type { Db } from "../db.js";
-import { writeOutbox } from "../outbox/outbox.js";
+import { audit, writeOutbox } from "../outbox/outbox.js";
 import { globalAc, globalRoles, orgAc, orgRoles } from "./access-control.js";
 import { createClaimsBuilder } from "./claims.js";
 import { createOrganizationHooks } from "./hooks.js";
@@ -68,6 +68,18 @@ function shared(deps: AuthDeps, surface: "app" | "admin") {
           },
         },
       },
+      session: {
+        create: {
+          after: async (session: { userId: string; surface?: string; ipAddress?: string | null; userAgent?: string | null }) => {
+            // staff sign-ins are audited (Auth.md §13); rider sign-ins are too many and not privileged
+            if (surface !== "admin") return;
+            await writeOutbox(db, audit({
+              actorId: session.userId, action: "staff:sign_in", resource: { type: "user", id: session.userId }, outcome: "ALLOWED",
+              reason: [session.ipAddress, session.userAgent?.slice(0, 120)].filter(Boolean).join(" · ") || undefined,
+            }));
+          },
+        },
+      },
       account: {
         update: {
           after: async (account: { userId: string; providerId: string; password?: string | null }) => {
@@ -107,6 +119,8 @@ export function createAppAuth(deps: AuthDeps) {
     session: {
       expiresIn: 30 * DAY,
       updateAge: DAY,
+      // Redis is the fast path; the database copy is what the admin directory lists (sessions, last sign-in)
+      storeSessionInDatabase: true,
       additionalFields: { surface: { type: "string", defaultValue: "app", input: false } },
     },
     plugins: [
@@ -190,6 +204,8 @@ export function createAdminAuth(deps: AuthDeps) {
     session: {
       expiresIn: DAY / 2, // 12 h
       updateAge: 60 * 60,
+      // Redis is the fast path; the database copy is what the admin directory lists (sessions, last sign-in)
+      storeSessionInDatabase: true,
       additionalFields: { surface: { type: "string", defaultValue: "admin", input: false } },
     },
     plugins: [jwtPlugin(deps, "admin"), twoFactor({ issuer: "Anbessa" }), adminPlugin()],

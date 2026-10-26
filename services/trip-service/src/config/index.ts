@@ -18,6 +18,8 @@ export const envSchema = z
 
     INTERNAL_SERVICE_TOKEN: z.string().min(32),
     AUTH_ISSUER: z.string().url().default("http://localhost:3001"),
+    // the live permission matrix (GET /internal/authz/snapshot)
+    AUTH_INTERNAL_URL: z.string().url().default("http://localhost:3001"),
     AUTH_JWKS_URL: z.string().url().default("http://localhost:3001/api/auth/jwks"),
     LOCATION_INTERNAL_URL: z.string().url().default("http://localhost:3003"),
     MAPPING_INTERNAL_URL: z.string().url().default("http://localhost:3007"),
@@ -26,6 +28,10 @@ export const envSchema = z
     // stand-in until pricing-service exists (refused in production)
     PRICING: z.enum(["service", "builtin"]).default("builtin"),
     PRICING_INTERNAL_URL: z.string().url().default("http://localhost:3004"),
+
+    // Live settings (admin dashboard): GET /internal/settings/snapshot. The values below are only the
+    // defaults until a super admin changes them there.
+    PLATFORM_INTERNAL_URL: z.string().url().default("http://localhost:3011"),
 
     // Matching (workflow 05 §6)
     MATCH_TIMEOUT_SECONDS: z.coerce.number().int().min(10).default(120),

@@ -2,8 +2,17 @@
 
 const TZ = "Africa/Addis_Ababa";
 
+/** Cities: the built-in pair until platform-service's client configuration arrives (lib/platform.tsx). */
 export const CITY_NAMES: Record<string, string> = { "addis-ababa": "Addis Ababa", hawassa: "Hawassa" };
-export const CITIES = Object.keys(CITY_NAMES);
+export const CITIES: string[] = Object.keys(CITY_NAMES);
+
+/** Replace the city list in place (every importer sees the new one). */
+export function applyCities(list: { id: string; name: string }[]) {
+  if (list.length === 0) return;
+  for (const k of Object.keys(CITY_NAMES)) delete CITY_NAMES[k];
+  for (const c of list) CITY_NAMES[c.id] = c.name;
+  CITIES.splice(0, CITIES.length, ...list.map((c) => c.id));
+}
 
 export function birr(minor: number | null | undefined): string {
   if (minor === null || minor === undefined) return "—";

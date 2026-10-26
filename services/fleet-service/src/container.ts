@@ -10,12 +10,14 @@ import { authClient, type AuthClient } from "./lib/clients.js";
 import { piiCrypto, signer } from "./lib/crypto.js";
 import { localStore, s3Store, type ObjectStore } from "./lib/storage.js";
 import { createFleetService } from "./fleet/service.js";
+import { createSettingsClient, fetchSettingsSnapshotFrom, type SettingsReader } from "@ride-app/shared-settings";
 
 export interface ContainerOptions {
   db?: Db;
   auth?: AuthClient;
   store?: ObjectStore;
   verifyAccessToken?: VerifyAccessToken;
+  settings?: SettingsReader;
   now?: () => Date;
 }
 
@@ -36,7 +38,14 @@ export function createContainer(config: Config, logger: Logger, opts: ContainerO
       : localStore(config.STORAGE_DIR, fileTickets));
   const auth = opts.auth ?? authClient(config.AUTH_INTERNAL_URL, config.INTERNAL_SERVICE_TOKEN);
 
+  const settingsClient = opts.settings ? undefined : createSettingsClient({
+    fetchSnapshot: fetchSettingsSnapshotFrom(config.PLATFORM_INTERNAL_URL, config.INTERNAL_SERVICE_TOKEN),
+    ...(redis ? { redis } : {}), logger, defaults: { "documents.expiryWarningDays": config.EXPIRY_WARNING_DAYS },
+  });
+  const settings: SettingsReader = opts.settings ?? settingsClient!;
+
   const fleet = createFleetService({
+    settings,
     db, store, tickets, auth, logger, now,
     pii: piiCrypto(config.PII_ENCRYPTION_KEY, config.PII_BLIND_INDEX_KEY),
     expiryWarningDays: config.EXPIRY_WARNING_DAYS,
@@ -60,7 +69,7 @@ export function createContainer(config: Config, logger: Logger, opts: ContainerO
     });
 
   return {
-    config, db, fleet, store, fileTickets, verifyAccessToken,
+    config, db, redis, fleet, store, fileTickets, verifyAccessToken, settingsClient,
     internalToken: config.INTERNAL_SERVICE_TOKEN,
     async close() {
       await db.$disconnect();

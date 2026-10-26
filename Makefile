@@ -16,8 +16,9 @@
 
 SHELL := /bin/bash
 SERVICES := auth-service trip-service location-service pricing-service \
-            payment-service notification-service mapping-service realtime-gateway fleet-service
-PRISMA_SERVICES := auth-service notification-service trip-service fleet-service
+            payment-service notification-service mapping-service realtime-gateway fleet-service \
+            platform-service audit-service
+PRISMA_SERVICES := auth-service notification-service trip-service fleet-service platform-service audit-service
 
 # ── colours ────────────────────────────────────────────────────────────────────
 BOLD  := \033[1m
@@ -182,9 +183,13 @@ infra-reset:
 # ── database ───────────────────────────────────────────────────────────────────
 db-migrate:
 	@# Only services with a Prisma schema (payment will join once it has one).
+	@# `migrate deploy` creates a missing database and applies the committed migrations without
+	@# prompting. `migrate dev` would diff the schema too, and trip-service's generated PostGIS
+	@# columns always look like drift to it. To write a new migration, run
+	@# `pnpm exec prisma migrate dev --create-only` in that service.
 	@for svc in $(PRISMA_SERVICES); do \
 	  echo "  migrating $$svc..."; \
-	  pnpm --filter @ride-app/$$svc exec prisma migrate dev || exit 1; \
+	  pnpm --filter @ride-app/$$svc exec prisma migrate deploy || exit 1; \
 	done
 
 db-seed:

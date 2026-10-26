@@ -38,7 +38,7 @@ make setup-mobile     # Flutter: dart pub get for the whole workspace
    - root `.env`, used by `infra/docker/docker-compose.yml`
    - `services/*/.env`, used by each service's `pnpm dev`
 3. `make infra-up`: starts Postgres 18 + PostGIS, Redis 8 and Redpanda in Docker.
-4. `make db-migrate`: `prisma migrate dev` for every service in `PRISMA_SERVICES` (auth-service today). It creates the database if it's missing and applies `prisma/migrations`.
+4. `make db-migrate`: `prisma migrate deploy` for every service in `PRISMA_SERVICES` (auth, notification, trip, fleet, platform, audit). It creates each database if it's missing and applies the committed `prisma/migrations`, without prompting. Run it again whenever you pull new migrations or a service logs `Database "<name>" does not exist`.
 
 ### Dev secrets (required once)
 
@@ -138,6 +138,9 @@ tsx watch --conditions=development --env-file-if-exists=.env src/server.ts
 | 3005 | payment-service |
 | 3006 | notification-service |
 | 3007 | mapping-service |
+| 3008 | fleet-service |
+| 3010 | audit-service |
+| 3011 | platform-service (settings, cities, system page) |
 | 5173 | web app (Vite) |
 | 5432 / 6379 / 9092 | Postgres / Redis / Redpanda (Kafka API) |
 | 8000 | Kong. Only in `make stack-up` |
@@ -179,7 +182,9 @@ pnpm prisma studio                                   # browse data
 - Connection settings live in `prisma.config.ts` (reads `DATABASE_URL` from `.env`), not in `schema.prisma`.
 - Import the client from `../generated/prisma/client.js`. Queries go through `@prisma/adapter-pg`.
 - Commit the generated `prisma/migrations/*` folder; production applies exactly those.
-- trip-service and payment-service have empty `prisma/` folders. Copy auth-service's setup when they get a schema, and add them to `PRISMA_SERVICES` in the `Makefile`.
+- If you edit a migration after it ran, Prisma refuses to continue ("was modified after it was applied"). Write a new migration instead.
+- Indexes written by hand in `migration.sql` also need a matching `@@index` / `@@unique` with `map:` in the schema, or `migrate dev` sees drift and asks for a new migration. trip-service's generated PostGIS columns can't be described in the schema, so there `migrate dev` always sees drift. Use `pnpm prisma migrate dev --create-only --name <change>`, delete the lines that drop the `pickup`/`dropoff` defaults and `ix_trip_pickup_gix`, then `pnpm prisma migrate deploy`.
+- payment-service has an empty `prisma/` folder. Copy auth-service's setup when it gets a schema, and add it to `PRISMA_SERVICES` in the `Makefile`.
 
 ### Shared contracts
 
@@ -207,6 +212,14 @@ One app, three areas: the staff dashboard, the fleet portal and the corporate po
 The browser only calls `/api/*` on `localhost:5173`; Vite forwards each prefix to its service (targets in `apps/web/.env`). Run auth, trip, location and mapping (`make dev-services`). To sign in as staff locally, bootstrap a super admin (section 2), then sign in at `/sign-in/staff`: the first sign-in walks through the new password and authenticator setup. Partners sign in at `/sign-in/partner` with a console OTP.
 
 To go through Kong instead (`make stack-up`), point every target in `apps/web/.env` at `http://localhost:8000`.
+
+**Administration** (web → Administration, as a dev super admin) needs:
+- **platform-service:** settings, cities, announcements, the system page;
+- **audit-service:** the audit log;
+- **Redis:** the permission matrix and settings reload at once (without it, within 30 s);
+- **Kafka:** audit events reach the log.
+
+To try maker–checker, sign in as the two dev super admins in two browsers (or one private window). Every service reads the permission matrix from auth-service and its settings from platform-service at start. If those aren't running, services use the built-in matrix and their env values, and log a warning.
 
 Map tiles come from OpenFreeMap by default (`VITE_MAP_STYLE_URL` in `apps/web/.env`), so the maps work without running anything else. To use the self-hosted tile server instead, run `make dev-infra` and set `VITE_MAP_STYLE_URL` to one of its styles (listed at `http://localhost:8081/`).
 

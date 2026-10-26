@@ -1,3 +1,4 @@
+import { createAuthzSync, fetchAuthzSnapshotFrom } from "@ride-app/shared-authz";
 import { Redis } from "ioredis";
 import { createTokenVerifier } from "@ride-app/shared-authz";
 import { buildApp } from "./app.js";
@@ -33,6 +34,14 @@ async function main() {
     verifyAccessToken: createTokenVerifier({ issuer: config.AUTH_ISSUER, jwksUrl: config.AUTH_JWKS_URL }),
     devRoutes: config.NODE_ENV === "development",
   });
+  // the permission matrix follows auth-service live (Role.md §8)
+  const authzSync = createAuthzSync({
+    fetchSnapshot: fetchAuthzSnapshotFrom(config.AUTH_INTERNAL_URL, config.INTERNAL_SERVICE_TOKEN),
+    ...(redis ? { redis: redis } : {}),
+    logger,
+  });
+  await authzSync.start();
+
   await app.listen({ port: config.PORT, host: "0.0.0.0" });
 
   let closing = false;
@@ -41,6 +50,7 @@ async function main() {
       if (closing) return;
       closing = true;
       logger.info(`${signal} received, shutting down`);
+      await authzSync.stop();
       sweeper.stop();
       await app.close();
       await kafka?.stop();

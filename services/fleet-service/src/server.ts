@@ -1,3 +1,4 @@
+import { createAuthzSync, fetchAuthzSnapshotFrom } from "@ride-app/shared-authz";
 import { buildApp } from "./app.js";
 import { loadConfig } from "./config/index.js";
 import { createContainer } from "./container.js";
@@ -22,8 +23,17 @@ async function main() {
   else logger.warn("KAFKA_BROKERS not set: driver.online/offline stay in the outbox table, so location-service won't see drivers go online");
   await consumer?.start().catch((err) => logger.error({ err }, "Kafka consumer failed to start; sessions won't end on connection loss"));
 
+  await c.settingsClient?.start();
   const stopExpiry = startExpiryJob(c.fleet, logger);
   const daily = setInterval(() => void purgeIdempotencyKeys(c.db).catch((err) => logger.error({ err }, "idempotency purge failed")), 24 * 3600 * 1000);
+
+  // the permission matrix follows auth-service live (Role.md §8)
+  const authzSync = createAuthzSync({
+    fetchSnapshot: fetchAuthzSnapshotFrom(config.AUTH_INTERNAL_URL, config.INTERNAL_SERVICE_TOKEN),
+    ...(c.redis ? { redis: c.redis } : {}),
+    logger,
+  });
+  await authzSync.start();
 
   await app.listen({ port: config.PORT, host: "0.0.0.0" });
 
@@ -33,6 +43,8 @@ async function main() {
       if (closing) return;
       closing = true;
       logger.info(`${signal} received, shutting down`);
+      await authzSync.stop();
+      await c.settingsClient?.stop();
       stopExpiry();
       clearInterval(daily);
       await app.close();

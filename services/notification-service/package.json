@@ -21,6 +21,7 @@
     "@prisma/client": "^7.10.1",
     "@ride-app/shared-authz": "workspace:*",
     "@ride-app/shared-config": "workspace:*",
+    "@ride-app/shared-settings": "workspace:*",
     "@ride-app/shared-types": "workspace:*",
     "@ride-app/shared-utils": "workspace:*",
     "fastify": "^5.12.7",

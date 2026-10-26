@@ -6,6 +6,7 @@ import { Redis } from "ioredis";
 import pino from "pino";
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { createTokenVerifier } from "@ride-app/shared-authz";
+import { staticSettings } from "@ride-app/shared-settings";
 import { getDriverState, goOnline, haversineMeters, nearbyAvailable, recordPing, startTrip, type LatLng } from "@ride-app/shared-location";
 import { buildApp } from "../../src/app.js";
 import { loadConfig } from "../../src/config/index.js";
@@ -52,8 +53,10 @@ export async function createHarness() {
     new SignJWT({ roles, pv: 0, amr: ["otp"] }).setProtectedHeader({ alg: "ES256", kid: "k" })
       .setSubject(sub).setIssuer(ISSUER).setAudience(aud).setIssuedAt().setExpirationTime("15m").sign(privateKey);
 
+  // the admin dashboard's live settings, changeable by tests
+  const settings = staticSettings({ "match.timeoutSeconds": 120, "match.offerSeconds": 15 });
   const c = createContainer(config, pino({ level: "silent" }), {
-    redis, location, mapping, now: () => new Date(clock.now),
+    redis, location, mapping, settings, now: () => new Date(clock.now),
     realtime: { toUser: (userId, event, payload) => void pushes.push({ userId, event, payload: payload as Record<string, unknown> }) },
     verifyAccessToken: createTokenVerifier({ issuer: ISSUER, keySet: createLocalJWKSet({ keys: [jwk as never] }) }),
   });
@@ -121,7 +124,7 @@ export async function createHarness() {
   }
 
   return {
-    app, c, redis, clock, pushes, mappingState, token, rider, staff, driver, req, quote, requestTrip, offerFor, matchedTrip,
+    app, c, redis, clock, pushes, mappingState, settings, token, rider, staff, driver, req, quote, requestTrip, offerFor, matchedTrip,
     close: async () => {
       await app.close();
       await c.close();

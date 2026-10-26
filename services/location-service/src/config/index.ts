@@ -19,6 +19,8 @@ export const envSchema = z
     MAPPING_INTERNAL_URL: z.string().url().default("http://localhost:3007"),
     INTERNAL_SERVICE_TOKEN: z.string().min(32),
     AUTH_ISSUER: z.string().url().default("http://localhost:3001"),
+    // the live permission matrix (GET /internal/authz/snapshot)
+    AUTH_INTERNAL_URL: z.string().url().default("http://localhost:3001"),
     AUTH_JWKS_URL: z.string().url().default("http://localhost:3001/api/auth/jwks"),
     SWEEP_INTERVAL_MS: z.coerce.number().int().min(1000).default(5000),
   })

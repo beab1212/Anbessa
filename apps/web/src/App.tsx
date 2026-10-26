@@ -16,13 +16,26 @@ import { Safety } from "./pages/staff/Safety";
 import { People } from "./pages/staff/People";
 import { CorporateBooking, OrgPage, PartnerHome, RegisterCompany, useOrgs } from "./pages/partner/Partner";
 import { FleetVehiclePage } from "./pages/partner/Fleet";
+import { OverviewPage } from "./pages/admin/Overview";
+import { UserPage, UsersPage } from "./pages/admin/Users";
+import { RolesPage } from "./pages/admin/Roles";
+import { ApprovalsPage } from "./pages/admin/Approvals";
+import { SettingsPage } from "./pages/admin/Settings";
+import { CitiesPage } from "./pages/admin/Cities";
+import { AnnouncementsPage } from "./pages/admin/Announcements";
+import { SystemPage } from "./pages/admin/System";
+import { AuditPage } from "./pages/admin/Audit";
+import { useClientConfig } from "./lib/platform";
+
+/** Who sees the Approvals inbox: anyone who asks for or decides maker–checker changes. */
+const APPROVERS: Permission[] = ["role:request", "role:approve", "staff:manage", "authz:propose", "authz:approve", "settings:propose", "settings:approve"];
 import { DriverDirectory, DriverRecord, ReviewQueuePage, VehicleDirectory, VehicleRecord } from "./pages/staff/Fleet";
 
 /** Has the permission in any city (staff pages pick the city inside). */
 const inAnyCity = (p: Principal, permission: Permission) => CITIES.some((cityId) => can(p, permission, { cityId })) || can(p, permission);
 
 /** The staff index, built from the token's roles: you only see what you can do. */
-export function staffSections(p: Principal): { title: string; items: Section[] }[] {
+export function staffSections(p: Principal, flags: { phoneBooking?: boolean } = {}): { title: string; items: Section[] }[] {
   const item = (ok: boolean, to: string, label: string) => (ok ? [{ to, label }] : []);
   return [
     {
@@ -30,7 +43,7 @@ export function staffSections(p: Principal): { title: string; items: Section[] }
       items: [
         ...item(inAnyCity(p, "trip:read"), "/staff/board", "Live board"),
         ...item(inAnyCity(p, "location:read_live"), "/staff/drivers", "Live map"),
-        ...item(inAnyCity(p, "trip:create_on_behalf"), "/staff/phone", "Book by phone"),
+        ...item(inAnyCity(p, "trip:create_on_behalf") && flags.phoneBooking !== false, "/staff/phone", "Book by phone"),
         ...item(inAnyCity(p, "trip:read"), "/staff/trips", "Find a trip"),
       ],
     },
@@ -45,9 +58,21 @@ export function staffSections(p: Principal): { title: string; items: Section[] }
     },
     {
       title: "Accounts",
+      items: [...item(inAnyCity(p, "user:suspend"), "/staff/safety", "Suspend")],
+    },
+    {
+      title: "Administration",
       items: [
-        ...item(inAnyCity(p, "user:suspend"), "/staff/safety", "Suspend"),
+        ...item(can(p, "report:read") || can(p, "system:read"), "/staff/admin", "Overview"),
+        ...item(can(p, "user:read_masked"), "/staff/admin/users", "Users"),
         ...item(can(p, "role:request") || can(p, "role:approve") || can(p, "staff:manage"), "/staff/people", "Staff and roles"),
+        ...item(can(p, "authz:read"), "/staff/admin/roles", "Roles and permissions"),
+        ...item(APPROVERS.some((perm) => can(p, perm)), "/staff/admin/approvals", "Approvals"),
+        ...item(can(p, "settings:read"), "/staff/admin/settings", "Settings"),
+        ...item(can(p, "settings:read"), "/staff/admin/cities", "Cities and vehicles"),
+        ...item(can(p, "announcement:manage"), "/staff/admin/announcements", "Announcements"),
+        ...item(can(p, "system:read"), "/staff/admin/system", "System"),
+        ...item(can(p, "audit_log:read"), "/staff/admin/audit", "Audit log"),
       ],
     },
   ];
@@ -59,10 +84,11 @@ function firstStaffPage(p: Principal) {
 
 function StaffArea() {
   const { staff } = useSession();
+  const config = useClientConfig();
   if (staff.loading) return null;
   if (!staff.principal) return <Navigate to="/sign-in/staff" replace />;
   if (staff.claims?.setup) return <StaffSetup />;
-  return <Shell surface="staff" principal={staff.principal} sections={staffSections(staff.principal)} />;
+  return <Shell surface="staff" principal={staff.principal} sections={staffSections(staff.principal, { phoneBooking: config?.features.phoneBooking })} />;
 }
 
 function PartnerArea() {
@@ -127,6 +153,16 @@ export function App() {
           <Route path="fleet/vehicles/:id" element={<Guard ok={(p) => inAnyCity(p, "vehicle:read")}><VehicleRecord /></Guard>} />
           <Route path="safety" element={<Guard ok={(p) => inAnyCity(p, "user:suspend")}><Safety /></Guard>} />
           <Route path="people" element={<Guard ok={(p) => can(p, "role:request") || can(p, "role:approve") || can(p, "staff:manage")}><People /></Guard>} />
+          <Route path="admin" element={<Guard ok={(p) => can(p, "report:read") || can(p, "system:read")}><OverviewPage /></Guard>} />
+          <Route path="admin/users" element={<Guard ok={(p) => can(p, "user:read_masked")}><UsersPage /></Guard>} />
+          <Route path="admin/users/:id" element={<Guard ok={(p) => can(p, "user:read_masked")}><UserPage /></Guard>} />
+          <Route path="admin/roles" element={<Guard ok={(p) => can(p, "authz:read")}><RolesPage /></Guard>} />
+          <Route path="admin/approvals" element={<Guard ok={(p) => APPROVERS.some((perm) => can(p, perm))}><ApprovalsPage /></Guard>} />
+          <Route path="admin/settings" element={<Guard ok={(p) => can(p, "settings:read")}><SettingsPage /></Guard>} />
+          <Route path="admin/cities" element={<Guard ok={(p) => can(p, "settings:read")}><CitiesPage /></Guard>} />
+          <Route path="admin/announcements" element={<Guard ok={(p) => can(p, "announcement:manage")}><AnnouncementsPage /></Guard>} />
+          <Route path="admin/system" element={<Guard ok={(p) => can(p, "system:read")}><SystemPage /></Guard>} />
+          <Route path="admin/audit" element={<Guard ok={(p) => can(p, "audit_log:read")}><AuditPage /></Guard>} />
           <Route path="none" element={<NoAccess />} />
         </Route>
 

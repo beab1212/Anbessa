@@ -20,6 +20,10 @@ export const envSchema = z
 
     // Access tokens (device registration) are verified against auth-service's JWKS
     AUTH_ISSUER: z.string().url().default("http://localhost:3001"),
+    // Live settings (admin dashboard): OTP channels and fallback delay; the env values are the defaults
+    PLATFORM_INTERNAL_URL: z.string().url().default("http://localhost:3011"),
+    // the live permission matrix (GET /internal/authz/snapshot)
+    AUTH_INTERNAL_URL: z.string().url().default("http://localhost:3001"),
     AUTH_JWKS_URL: z.string().url().default("http://localhost:3001/api/auth/jwks"),
     // Shared with auth-service for /internal/* calls until mTLS (Auth.md §17, I7)
     INTERNAL_SERVICE_TOKEN: z.string().min(32),

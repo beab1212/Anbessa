@@ -1,3 +1,4 @@
+import { createAuthzSync, fetchAuthzSnapshotFrom } from "@ride-app/shared-authz";
 import { buildApp } from "./app.js";
 import { loadConfig } from "./config/index.js";
 import { createContainer } from "./container.js";
@@ -25,7 +26,16 @@ async function main() {
   if (relay) relay.start();
   else logger.warn("KAFKA_BROKERS not set: trip events stay in the outbox table until a relay runs");
 
+  await c.settingsClient?.start();
   c.matcher.start();
+  // the permission matrix follows auth-service live (Role.md §8)
+  const authzSync = createAuthzSync({
+    fetchSnapshot: fetchAuthzSnapshotFrom(config.AUTH_INTERNAL_URL, config.INTERNAL_SERVICE_TOKEN),
+    ...(c.redis ? { redis: c.redis } : {}),
+    logger,
+  });
+  await authzSync.start();
+
   await app.listen({ port: config.PORT, host: "0.0.0.0" });
 
   let closing = false;
@@ -34,6 +44,8 @@ async function main() {
       if (closing) return;
       closing = true;
       logger.info(`${signal} received, shutting down`);
+      await authzSync.stop();
+      await c.settingsClient?.stop();
       clearInterval(daily);
       c.matcher.stop();
       await app.close();

@@ -86,6 +86,13 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
     return fleet.reinstateDriver(await principal(req), userId, z.object({ reason: z.string().trim().min(10).max(500) }).parse(req.body).reason);
   });
 
+  // admin overview: aggregates only (report:read)
+  app.get("/api/fleet/stats", async (req) => {
+    const p = await principal(req);
+    const q = z.object({ cityId: cityId.optional() }).parse(req.query);
+    return fleet.stats(p, q.cityId);
+  });
+
   // ── vehicles ────────────────────────────────────────────────────────────────
   app.post("/api/fleet/vehicles", async (req, reply) => {
     const body = z.object({
@@ -207,6 +214,18 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
     const expected = Buffer.from(deps.internalToken);
     if (given.length !== expected.length || !timingSafeEqual(given, expected)) throw unauthorized("invalid service credentials");
   };
+  // system page (platform-service)
+  app.get("/internal/ops/outbox", async (req) => {
+    internal(req);
+    const [row] = await db.$queryRaw<{ pending: bigint; oldest: Date | null }[]>`
+      SELECT count(*) AS pending, min(created_at) AS oldest FROM outbox WHERE published_at IS NULL`;
+    return { pending: Number(row?.pending ?? 0), oldestAt: row?.oldest?.toISOString() ?? null };
+  });
+  app.get("/internal/ops/storage", async (req) => {
+    internal(req);
+    return deps.store.health();
+  });
+
   // trip-service / payment-service: which vehicle a driver is in right now
   app.get("/internal/drivers/:userId/session", async (req) => {
     internal(req);

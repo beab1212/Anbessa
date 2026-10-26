@@ -14,6 +14,7 @@
   "dependencies": {
     "@ride-app/shared-authz": "workspace:*",
     "@ride-app/shared-location": "workspace:*",
+    "@ride-app/shared-settings": "workspace:*",
     "@ride-app/shared-types": "workspace:*",
     "@tanstack/react-query": "^5.104.5",
     "axios": "^1.20.0",

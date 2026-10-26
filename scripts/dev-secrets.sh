@@ -6,7 +6,7 @@
 #   - fills BETTER_AUTH_SECRET, INTERNAL_SERVICE_TOKEN, PHONE_HASH_KEY, OTP_ENCRYPTION_KEY and
 #     fleet-service's PII_ENCRYPTION_KEY, PII_BLIND_INDEX_KEY and UPLOAD_SIGNING_KEY with fresh
 #     random values when blank, and copies INTERNAL_SERVICE_TOKEN to notification, location,
-#     mapping, trip and fleet services
+#     mapping, trip, fleet, platform and audit services and realtime-gateway
 #
 # Staging and production secrets come from the secrets manager (docs/production/README.md).
 set -euo pipefail
@@ -61,7 +61,8 @@ fill_secret() {
 sync_keys "$AUTH_ENV"
 # services that receive /internal/* calls get the same INTERNAL_SERVICE_TOKEN as auth-service
 FLEET_ENV=services/fleet-service/.env
-TOKEN_ENVS=("$NOTIF_ENV" services/location-service/.env services/mapping-service/.env services/trip-service/.env "$FLEET_ENV")
+TOKEN_ENVS=("$NOTIF_ENV" services/location-service/.env services/mapping-service/.env services/trip-service/.env "$FLEET_ENV" \
+  services/platform-service/.env services/audit-service/.env services/realtime-gateway/.env)
 for f in "${TOKEN_ENVS[@]}"; do
   git check-ignore -q "$f" || { echo "Refusing: $f is not gitignored"; exit 1; }
   sync_keys "$f"

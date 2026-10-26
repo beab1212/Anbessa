@@ -88,9 +88,13 @@ export const MATRIX: Record<RoleCode, Grants> = {
     "topup:approve_cash", "adjustment:approve", "writeoff:approve", "commission_rule:approve",
     "balance_policy:approve", "policy_override:approve", "report:read", "report:read_finance"),
 
-  SUPER_ADMIN: each("G", "user:read_masked", "staff:manage", "role:request", "role:approve", "audit_log:read"),
+  // who has which role, what each role may do, and the platform's settings — not money, safety or dispatch
+  SUPER_ADMIN: each("G", "user:read_masked", "staff:manage", "role:request", "role:approve", "audit_log:read",
+    "report:read", "authz:read", "authz:propose", "authz:approve", "settings:read", "settings:propose",
+    "settings:approve", "city:manage", "announcement:manage", "system:read", "session:revoke"),
 
-  AUDITOR: each("G", "audit_log:read", "report:read", "report:read_finance", "report:read_regulatory"),
+  AUDITOR: each("G", "audit_log:read", "report:read", "report:read_finance", "report:read_regulatory",
+    "authz:read", "settings:read", "system:read"),
 
   REGULATOR: each("G", "report:read_regulatory"),
 };

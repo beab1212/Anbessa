@@ -44,8 +44,19 @@ describe("claims → navigation (UI only; services check again)", () => {
     expect(pages(staff([{ r: "ONBOARDING_OFFICER", city: "addis-ababa" }]))).toEqual(["Review queue", "Drivers", "Vehicles", "Companies"]);
   });
 
-  it("a super admin manages people, not trips", () => {
-    expect(pages(staff([{ r: "SUPER_ADMIN", g: true }]))).toEqual(["Staff and roles"]);
+  it("a super admin runs the platform (people, permissions, settings, health, audit), not trips", () => {
+    expect(pages(staff([{ r: "SUPER_ADMIN", g: true }]))).toEqual([
+      "Overview", "Users", "Staff and roles", "Roles and permissions", "Approvals", "Settings", "Cities and vehicles", "Announcements", "System", "Audit log",
+    ]);
+  });
+
+  it("an auditor reads the matrix, settings, system and audit log, nothing else", () => {
+    expect(pages(staff([{ r: "AUDITOR", g: true }]))).toEqual(["Overview", "Roles and permissions", "Settings", "Cities and vehicles", "System", "Audit log"]);
+  });
+
+  it("the phone booking page disappears when its feature flag is off", () => {
+    const agent = staff([{ r: "CALL_CENTER_AGENT", city: "addis-ababa" }]);
+    expect(staffSections(agent, { phoneBooking: false }).flatMap((s) => s.items.map((i) => i.label))).not.toContain("Book by phone");
   });
 
   it("the call center books by phone; onboarding sees companies; safety suspends", () => {

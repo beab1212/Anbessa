@@ -1,4 +1,4 @@
-import { roleFromStored, ROLES, type OrgKind, type RoleAssignment, type RoleCode } from "@ride-app/shared-authz";
+import { roleByStored, type OrgKind, type RoleAssignment } from "@ride-app/shared-authz";
 
 // Better Auth stores several roles as a comma-separated string (user.role, member.role).
 
@@ -24,18 +24,19 @@ export interface MembershipRow {
 export function toAssignments(userRole: string | null | undefined, memberships: MembershipRow[], now = new Date()): RoleAssignment[] {
   const out: RoleAssignment[] = [];
   for (const stored of splitRoles(userRole)) {
-    const role = roleFromStored(stored);
-    if (!role || ROLES[role].storage.type !== "user") continue;
-    out.push({ role, scope: ROLES[role].audience === "ride-admin" ? "GLOBAL" : "SELF" });
+    const info = roleByStored(stored);
+    if (!info || info.archived || info.storage.type !== "user") continue;
+    out.push({ role: info.code, scope: info.audience === "ride-admin" ? "GLOBAL" : "SELF" });
   }
   for (const m of memberships) {
     if (m.validUntil && m.validUntil <= now) continue;
     if (m.organization.status === "SUSPENDED") continue;
     const kind = m.organization.kind as OrgKind;
     for (const stored of splitRoles(m.role)) {
-      const role: RoleCode | undefined = roleFromStored(stored);
-      if (!role) continue;
-      const storage = ROLES[role].storage;
+      const info = roleByStored(stored);
+      if (!info || info.archived) continue;
+      const role = info.code;
+      const storage = info.storage;
       if (storage.type !== "member" || !(storage.orgKinds as readonly OrgKind[]).includes(kind)) continue;
       if (kind === "STAFF_CITY") out.push({ role, scope: "CITY", cityId: m.organization.cityId });
       else if (kind === "FLEET" || kind === "CORPORATE") {

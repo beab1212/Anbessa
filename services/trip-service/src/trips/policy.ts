@@ -1,5 +1,7 @@
-// Trip rules that cost or pay money (workflows 06 and 07). Values are per city; until the
-// city-settings store exists they live here, reviewed like code.
+// Trip rules that cost or pay money (workflows 06 and 07). The values are live settings
+// (platform-service, libs/shared-settings), per city; fee changes need a second super admin.
+
+import type { SettingsReader } from "@ride-app/shared-settings";
 
 export interface CityPolicy {
   /** driver must be this close to the pickup to tap "Arrived" / start (workflow 06 §6) */
@@ -26,11 +28,16 @@ export const DEFAULT_POLICY: CityPolicy = {
   completeFarFromDropoffMeters: 300,
 };
 
-export const CITY_POLICIES: Record<string, Partial<CityPolicy>> = {
-  "addis-ababa": {},
-};
-
-export const policyFor = (cityId: string): CityPolicy => ({ ...DEFAULT_POLICY, ...CITY_POLICIES[cityId] });
+/** The rules in force in a city right now. */
+export const policyFor = (settings: SettingsReader, cityId: string): CityPolicy => ({
+  arrivalRadiusMeters: settings.get<number>("trip.arrivalRadiusMeters", cityId),
+  freeWaitingSeconds: settings.get<number>("trip.freeWaitingSeconds", cityId),
+  noShowAfterSeconds: settings.get<number>("trip.noShowAfterSeconds", cityId),
+  freeCancelSeconds: settings.get<number>("cancel.freeSeconds", cityId),
+  cancellationFeeMinor: settings.get<number>("cancel.feeMinor", cityId),
+  driverCompensationShare: settings.get<number>("cancel.driverShare", cityId),
+  completeFarFromDropoffMeters: settings.get<number>("trip.completeFarFromDropoffMeters", cityId),
+});
 
 /** Paid waiting after the free minutes, per started minute (workflow 06 step 7). */
 export function waitingFee(p: CityPolicy, arrivedAt: Date | null, until: Date, perMinuteMinor: bigint): bigint {

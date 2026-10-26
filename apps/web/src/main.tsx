@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ApiError } from "./lib/api";
 import { SessionProvider } from "./lib/session";
+import { ConfigProvider } from "./lib/platform";
 import { App } from "./App";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./styles/tokens.css";
@@ -23,9 +24,11 @@ const queryClient = new QueryClient({
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <SessionProvider>
-        <App />
-      </SessionProvider>
+      <ConfigProvider>
+        <SessionProvider>
+          <App />
+        </SessionProvider>
+      </ConfigProvider>
     </QueryClientProvider>
   </StrictMode>,
 );

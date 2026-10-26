@@ -917,3 +917,175 @@
     justify-content: flex-start;
   }
 }
+
+/* admin: role list, permission editor, matrix */
+.role-item {
+  appearance: none;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 1rem;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 0.875rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.role-item > span:first-child {
+  flex: 1;
+}
+
+.role-item:hover {
+  background: var(--surface-2);
+}
+
+.role-item.on {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
+.perm-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  gap: 0.35rem;
+}
+
+.perm {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  cursor: pointer;
+  min-width: 0;
+}
+
+.perm > span:first-of-type {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.perm.on {
+  border-color: var(--accent);
+  background: #fffbeb;
+}
+
+.perm.changed {
+  box-shadow: 0 0 0 2px var(--accent-ring);
+}
+
+.perm input {
+  accent-color: var(--accent);
+  margin: 0;
+}
+
+.perm select {
+  font: inherit;
+  font-size: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.1rem 0.25rem;
+  background: var(--surface);
+}
+
+.matrix {
+  max-height: 70vh;
+}
+
+.matrix th {
+  position: sticky;
+  top: 0;
+  background: var(--surface-2);
+  z-index: 1;
+  vertical-align: bottom;
+}
+
+.matrix td,
+.matrix th {
+  padding: 0.3rem 0.45rem;
+}
+
+.matrix .vertical {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  white-space: nowrap;
+  font-size: 0.75rem;
+}
+
+.matrix td.cell-on {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 600;
+  text-align: center;
+}
+
+.audit-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr));
+  gap: 0 0.75rem;
+}
+
+.section-title {
+  font-size: 0.8125rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin: 0 0 0.6rem;
+}
+
+.role-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-size: 0.75rem;
+}
+
+.role-chip button {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.role-chip button:hover {
+  color: var(--danger);
+}
+
+.role-chip svg {
+  width: 0.8rem;
+  height: 0.8rem;
+}
+
+.roles-layout {
+  display: grid;
+  grid-template-columns: minmax(14rem, 1fr) minmax(0, 3fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+@media (max-width: 860px) {
+  .roles-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.audit-line {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}

@@ -2,6 +2,7 @@
 
 import { Redis } from "ioredis";
 import { createTokenVerifier } from "@ride-app/shared-authz";
+import { createSettingsClient, fetchSettingsSnapshotFrom } from "@ride-app/shared-settings";
 import type { Logger } from "@ride-app/shared-utils";
 import type { Config } from "./config/index.js";
 import { createDb, type Db } from "./db.js";
@@ -43,7 +44,18 @@ export function createContainer(config: Config, logger: Logger, opts: ContainerO
       ? fcmPush({ projectId: config.FCM_PROJECT_ID!, clientEmail: config.FCM_CLIENT_EMAIL!, privateKey: config.FCM_PRIVATE_KEY! })
       : consolePush(logger));
 
+  const settingsClient = createSettingsClient({
+    fetchSnapshot: fetchSettingsSnapshotFrom(config.PLATFORM_INTERNAL_URL, config.INTERNAL_SERVICE_TOKEN),
+    ...(redis ? { redis } : {}), logger,
+    defaults: { "otp.channels": config.OTP_CHANNELS, "otp.fallbackSeconds": config.OTP_FALLBACK_SECONDS },
+  });
+
   const otp = createOtpService({
+    // the env decides which channels exist (a Telegram token); settings choose among them
+    live: opts.store ? undefined : {
+      channels: () => settingsClient.get<("telegram" | "sms")[]>("otp.channels").filter((c) => c === "sms" || !!config.TELEGRAM_GATEWAY_TOKEN),
+      fallbackSeconds: () => settingsClient.get<number>("otp.fallbackSeconds"),
+    },
     db, store, sms, telegram, logger,
     hashPhone: phoneHasher(config.PHONE_HASH_KEY),
     config: {
@@ -60,7 +72,7 @@ export function createContainer(config: Config, logger: Logger, opts: ContainerO
   const handlers = createHandlers(notifier);
 
   return {
-    config, db, redis, store, otp, notifier, handlers,
+    config, db, redis, store, otp, notifier, handlers, settingsClient,
     internalToken: config.INTERNAL_SERVICE_TOKEN,
     verifyAccessToken: createTokenVerifier({ issuer: config.AUTH_ISSUER, jwksUrl: config.AUTH_JWKS_URL }),
     verifyTelegramReport: config.TELEGRAM_GATEWAY_TOKEN ? reportVerifier(config.TELEGRAM_GATEWAY_TOKEN) : undefined,
