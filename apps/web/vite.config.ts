@@ -17,6 +17,7 @@ export default defineConfig(({ mode }) => {
         "/api/identity": auth,
         "/api/dev": auth, // development sign-in (DEV_LOGIN=on in auth-service; never in production)
         "/api/trips": target("TRIP_URL", 3002),
+        "/api/fleet": target("FLEET_URL", 3008),
         "/api/locations": target("LOCATION_URL", 3003),
         "/api/maps": target("MAPPING_URL", 3007),
       },

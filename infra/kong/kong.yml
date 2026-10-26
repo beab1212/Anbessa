@@ -80,6 +80,18 @@ services:
       - name: rate-limiting
         config: { minute: 60, policy: local }
 
+  - name: fleet-service
+    url: http://fleet-service:3008
+    routes:
+      # drivers, vehicles, documents, sessions; /internal/* is never routed. Document files go
+      # straight to S3 with pre-signed URLs, so no upload body passes through Kong.
+      - name: fleet-routes
+        paths: ["/api/fleet"]
+        strip_path: false
+    plugins:
+      - name: rate-limiting
+        config: { minute: 120, policy: local }
+
   - name: pricing-service
     url: http://pricing-service:3004
     routes:

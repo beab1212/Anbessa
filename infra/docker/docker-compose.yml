@@ -72,6 +72,12 @@ services:
     env_file: ../../.env
     ports: ["3007:3007"]
 
+  fleet-service:
+    build: { context: ../.., dockerfile: services/fleet-service/Dockerfile }
+    env_file: ../../.env
+    depends_on: [postgres, redis, redpanda]
+    ports: ["3008:3008"]
+
   realtime-gateway:
     build: { context: ../.., dockerfile: services/realtime-gateway/Dockerfile }
     env_file: ../../.env

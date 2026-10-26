@@ -6,19 +6,21 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { Db } from "../db.js";
-import { DEV_ACCOUNTS, DEV_PASSWORD, devTotp, type OtpInbox } from "../dev/accounts.js";
+import { DEV_ACCOUNTS, DEV_ORGS, DEV_PASSWORD, devTotp, type OtpInbox } from "../dev/accounts.js";
 import { phoneToEmail } from "../auth/password.js";
 
 export function registerDevRoutes(app: FastifyInstance, deps: { db: Db; inbox: OtpInbox }) {
   app.get("/api/dev/accounts", async () => {
     const emails = DEV_ACCOUNTS.map((a) => (a.surface === "staff" ? a.email : phoneToEmail(a.phone)));
-    const seeded = new Set((await deps.db.user.findMany({ where: { email: { in: emails } }, select: { email: true } })).map((u) => u.email));
+    const users = new Map((await deps.db.user.findMany({ where: { email: { in: emails } }, select: { id: true, email: true } })).map((u) => [u.email, u.id]));
+    const orgs = await deps.db.organization.findMany({ where: { slug: { in: DEV_ORGS.map((o) => o.slug) } }, select: { id: true, slug: true } });
     return {
       accounts: DEV_ACCOUNTS.map((a) =>
         a.surface === "staff"
-          ? { key: a.key, surface: a.surface, name: a.name, label: a.label, email: a.email, password: DEV_PASSWORD, seeded: seeded.has(a.email) }
-          : { key: a.key, surface: a.surface, name: a.name, label: a.label, phone: a.phone, seeded: seeded.has(phoneToEmail(a.phone)) },
+          ? { key: a.key, surface: a.surface, name: a.name, label: a.label, email: a.email, password: DEV_PASSWORD, userId: users.get(a.email) ?? null, seeded: users.has(a.email) }
+          : { key: a.key, surface: a.surface, app: a.app ?? "web", name: a.name, label: a.label, phone: a.phone, userId: users.get(phoneToEmail(a.phone)) ?? null, seeded: users.has(phoneToEmail(a.phone)) },
       ),
+      orgs: orgs.map((o) => ({ slug: o.slug, id: o.id })),
     };
   });
 

@@ -377,6 +377,7 @@ Scope legend: **S** = own data (`SELF`) · **O** = own organisation (`ORG`) · *
 | `vehicle:register` | — | S (becomes owner-driver) | O | — | — |
 | `vehicle:authorize_driver` | — | — | O | — | — |
 | `vehicle:retire` | — | S (own vehicle) | O | — | — |
+| `vehicle:read` / `driver:read` | — | — | O (fleet cars, fleet drivers' onboarding) | — | — |
 | `document:upload` | — | S | O | O (company docs) | — |
 | `org:update` / `org:manage_members` | — | — | O | O | — |
 | `corporate:manage_policies` | — | — | — | O | — |
@@ -399,6 +400,8 @@ Scope legend: **S** = own data (`SELF`) · **O** = own organisation (`ORG`) · *
 | `user:read_masked` | C | C | C | C | C | G | G | C | C | C | G |
 | `user:read_pii` | — | — | C (logged) | C | C | G | G | — | — | — | — |
 | `user:suspend` / `user:reinstate` | — | — | — | — | C | — | — | — | — | — | — |
+| `driver:read` / `vehicle:read` | — | — | — | C | C | — | — | — | — | — | — |
+| `document:read` | — | — | — | C | — | — | — | — | — | — | — |
 | `driver:verify` / `driver:activate` | — | — | — | C | — | — | — | — | — | — | — |
 | `driver:suspend` / `driver:reinstate` | — | — | — | C (documents) | C | — | — | — | — | — | — |
 | `vehicle:verify` / `document:review` | — | — | — | C | — | — | — | — | — | — | — |
@@ -932,7 +935,7 @@ flowchart LR
 | Change | Service |
 |---|---|
 | Extend | **auth-service**: adopt **Better Auth** (phone OTP, bearer, JWT/JWKS, organisation, admin, two-factor plugins), two surfaces (`ride-app` / `ride-admin`), `iss`/`aud`/`roles`/`pv` claims via `definePayload` ([Auth.md](Auth.md)) |
-| New | **fleet-service** (port 3008): drivers, vehicles, ownership, authorisations, sessions, documents |
+| New | **fleet-service** (port 3008): drivers, vehicles, ownership, authorisations, sessions, documents. ✅ Implemented ([README](../../services/fleet-service/README.md)) |
 | New | **support-service** (port 3009): tickets, lost items, SOS, incidents |
 | New | **audit-service** (port 3010): consumes `audit.recorded` and stores it write-once |
 | Extend | **trip-service**: booking channel, on-behalf bookings, billing, earnings snapshot, city scope |
@@ -978,7 +981,7 @@ flowchart LR
 |---|---|---|
 | **0–1. Better Auth identity** | Adopt Better Auth in auth-service ([Auth.md §14](Auth.md#14-migration-from-the-current-auth-service)). This replaces the broken hand-written register/login. Migrate `User.role` → `user.role` (`RIDER → rider`, `DRIVER → driver`, `ADMIN → super_admin`, flagged for review). Seed `City` and a `STAFF_CITY` organisation per city. Tokens carry `iss`/`aud`/`roles`/`pv`. Services verify via JWKS, and Kong's `jwt` plugin is removed | Users can hold several roles. Login works |
 | **2. Shared authz** | `libs/shared-authz` with the matrix + `require()`. Use it in auth-service and realtime-gateway | One enforcement pattern |
-| **3. Organisations + fleet-service** | `Organization`, `Membership`; fleet-service with drivers, vehicles, ownership rules V1–V10, documents, onboarding queue | Owner-drivers and company cars |
+| **3. Organisations + fleet-service** ✅ | `Organization`, `Membership`; fleet-service with drivers, vehicles, ownership rules V1–V10, documents, onboarding queue | Owner-drivers and company cars |
 | **4. Staff roles in staff dashboard** | MFA, `ride-admin` audience, permission-driven UI; call center, dispatcher, onboarding and support views | Staff can operate |
 | **5. Money** | Beneficiary balances and limits, top-ups, approvals, payouts, refunds, corporate invoices ([Payment.md §18](Payment.md#18-rollout-plan)) | Finance roles live |
 | **6. Safety + audit** | support-service (SOS, incidents), audit-service, PII masking, access reviews | Compliance-ready |

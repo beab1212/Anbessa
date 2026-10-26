@@ -357,6 +357,26 @@ export function createIdentityService(deps: IdentityDeps) {
       if (pv !== undefined) await signals.permissionVersion(userId, pv);
       return { userId, driver: active };
     },
+
+    /** For other services (fleet-service): an organisation's kind, status, city and legal name. */
+    async organizationForService(id: string) {
+      const org = await db.organization.findUnique({
+        where: { id },
+        select: { id: true, name: true, kind: true, cityId: true, legalName: true, status: true },
+      });
+      if (!org) throw notFound("organization");
+      return org;
+    },
+
+    /** For other services: a user's roles in one organisation (404 when not a member). */
+    async membershipForService(organizationId: string, userId: string) {
+      const m = await db.member.findUnique({
+        where: { organizationId_userId: { organizationId, userId } },
+        select: { role: true, validUntil: true, user: { select: { name: true, phoneNumber: true, banned: true } } },
+      });
+      if (!m || (m.validUntil && m.validUntil < now())) throw notFound("membership");
+      return { organizationId, userId, roles: splitRoles(m.role), name: m.user.name, phoneNumber: m.user.phoneNumber, banned: !!m.user.banned };
+    },
   };
 }
 

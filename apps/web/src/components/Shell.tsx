@@ -1,6 +1,6 @@
 import { useEffect, useState, type ComponentType, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { Building2, Car, LayoutDashboard, LogOut, Phone, Search, ShieldAlert, UserCog, UsersRound, type LucideProps } from "lucide-react";
+import { Building2, CarFront, ClipboardCheck, IdCard, LayoutDashboard, LogOut, Map as MapIcon, Phone, Search, ShieldAlert, UserCog, UsersRound, type LucideProps } from "lucide-react";
 import type { Principal } from "@ride-app/shared-authz";
 import type { Surface } from "../lib/api";
 import { useSession } from "../lib/session";
@@ -15,7 +15,10 @@ export interface Section {
 
 export const ICONS: Record<string, ComponentType<LucideProps>> = {
   "/staff/board": LayoutDashboard,
-  "/staff/drivers": Car,
+  "/staff/drivers": MapIcon,
+  "/staff/review": ClipboardCheck,
+  "/staff/fleet/drivers": IdCard,
+  "/staff/fleet/vehicles": CarFront,
   "/staff/phone": Phone,
   "/staff/trips": Search,
   "/staff/onboarding": Building2,

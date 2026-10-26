@@ -73,8 +73,11 @@ It prints a one-time temporary password. Sign in at `/api/admin-auth/sign-in/ema
 For day-to-day work you don't need to go through bootstrap, setup and maker–checker each time:
 
 ```bash
-pnpm --filter @ride-app/auth-service seed:dev
+pnpm --filter @ride-app/auth-service seed:dev    # accounts and companies
+pnpm --filter @ride-app/fleet-service seed:dev   # drivers, cars and documents for them (auth-service running with DEV_LOGIN=on)
 ```
+
+fleet-service's seed gives the onboarding officer something to review (an owner-driver and their car, a fleet car, a company's papers), an approved owner-driver with a car, and the dev fleet's car given to its driver. Its documents are generated PDFs marked "development sample".
 
 It creates (or resets) staff accounts with a fixed password, an authenticator already enrolled and their roles in Addis Ababa (two super admins, dispatcher, call center, onboarding, safety, an all-round "ops floor" account), plus partners: a verified fleet with its owner, a verified company account with its admin, travel desk and an employee, and a partner with no company yet. The list is in `services/auth-service/src/dev/accounts.ts`.
 
@@ -238,9 +241,9 @@ Nominatim imports the extract on its first start (slow). Most developers point `
 
 **You don't need the engines to work on the backend.** Without them, mapping-service answers routes and ETAs with straight-line estimates flagged `"approximate": true`, and address search returns `503`.
 
-### Drivers online without fleet-service
+### Drivers online
 
-fleet-service (which publishes `driver.online`) doesn't exist yet. In development, location-service has a stand-in route, so a driver account can go online and stream pings through realtime-gateway:
+A driver goes online through fleet-service (`POST /api/fleet/sessions {vehicleId}` with an approved profile and a verified car), which publishes `driver.online`; location-service picks it up from Kafka. `seed:dev` (below) gives you approved drivers with cars. For a quick test without fleet-service or Kafka, location-service still has a development stand-in route:
 
 ```bash
 TOKEN=$(grep ^INTERNAL_SERVICE_TOKEN= services/location-service/.env | cut -d= -f2)

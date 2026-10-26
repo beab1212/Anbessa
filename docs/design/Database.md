@@ -367,6 +367,8 @@ CREATE INDEX ix_document_expiring ON document (expires_at) WHERE status = 'APPRO
 CREATE INDEX ix_document_review   ON document (created_at) WHERE status = 'PENDING';     -- onboarding queue
 ```
 
+> **Implemented** (`services/fleet-service/prisma`), with these additions: `driver_profile.full_name`, `license_last4` (for masked display), `status_reason` (`DOCUMENT_EXPIRED` / `SAFETY`), `review_note`, `submitted_at`, `activated_at`; vehicle `make`, `model`, `year`, `color`, a `REJECTED` status and `status_reason`; `vehicle_authorization.created_at` / `revoked_at`; `driving_session.end_reason`; document `content_type`, `size_bytes`, `city_id` (the reviewer's scope), `uploaded_by`, `reject_reason` and a `SUPERSEDED` status (a new upload of the same kind replaces the old one), with the review index on `(city_id, created_at)`. Plus `idempotency_key` and `outbox` as in the other services.
+
 ### 7.3 Trip (trip-service)
 
 ```sql

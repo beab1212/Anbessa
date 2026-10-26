@@ -8,6 +8,8 @@
 | **Outcome** | An **owner-driver** with role `DRIVER` and a `VERIFIED` vehicle they own, ready to go online ([04](04-driver-shift.md)). Fleet drivers skip the vehicle part ([03](03-fleet-onboarding.md)) |
 | **Related** | [← Workflows](README.md) · [Role.md §6 (vehicle ownership)](../Role.md#6-vehicle-ownership) · [Role.md §13.1](../Role.md#131-owner-driver-onboarding-vehicle-owned-by-the-driver) · [Database.md §7.2](../Database.md#72-fleet-fleet-service) |
 
+> **Implemented** in fleet-service ([README](../../../services/fleet-service/README.md)) and the web app's staff review queue: application with encrypted licence and duplicate check, pre-signed uploads, submit, document review (every staff view audited), approval adding `DRIVER` through auth-service, changes requested, expiry job (suspension + `document.expiring` reminders). An applicant registers their own car under `driver:apply` (they don't hold `DRIVER` yet). **Not yet:** the phone app's application screens (step 1–6 are API only), and notification-service sending the step 12 / reminder messages for these new events.
+
 ## 1. Summary
 
 The driver applies in the app, uploads their own documents (licence, national ID, photo) and, if they own their car, registers it with its documents (registration showing their name, insurance, inspection). An onboarding officer in the same city reviews everything in a queue. When both the driver and their vehicle are approved, fleet-service activates the driver and asks auth-service to add the `driver` role. Documents are re-checked automatically when they expire.

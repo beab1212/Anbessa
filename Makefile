@@ -16,8 +16,8 @@
 
 SHELL := /bin/bash
 SERVICES := auth-service trip-service location-service pricing-service \
-            payment-service notification-service mapping-service realtime-gateway
-PRISMA_SERVICES := auth-service notification-service
+            payment-service notification-service mapping-service realtime-gateway fleet-service
+PRISMA_SERVICES := auth-service notification-service trip-service fleet-service
 
 # ── colours ────────────────────────────────────────────────────────────────────
 BOLD  := \033[1m
@@ -181,7 +181,7 @@ infra-reset:
 
 # ── database ───────────────────────────────────────────────────────────────────
 db-migrate:
-	@# Only services with a Prisma schema (trip/payment will join once they have one).
+	@# Only services with a Prisma schema (payment will join once it has one).
 	@for svc in $(PRISMA_SERVICES); do \
 	  echo "  migrating $$svc..."; \
 	  pnpm --filter @ride-app/$$svc exec prisma migrate dev || exit 1; \

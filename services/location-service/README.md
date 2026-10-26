@@ -19,7 +19,7 @@ make -C ../.. secrets                             # .env + the shared INTERNAL_S
 pnpm dev                                          # http://localhost:3003
 ```
 
-**Until fleet-service exists**, put a driver online with the development route. It only exists when `NODE_ENV=development`:
+Drivers normally go online through **fleet-service**, which publishes `driver.online` to Kafka. For a quick test without it (or without Kafka), put a driver online with the development route. It only exists when `NODE_ENV=development`:
 
 ```bash
 TOKEN=$(grep ^INTERNAL_SERVICE_TOKEN= .env | cut -d= -f2)

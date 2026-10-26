@@ -3,9 +3,10 @@
 #
 #   - creates services/*/.env from .env.example where missing
 #   - adds keys that are new in the auth/notification .env.example to an existing .env
-#   - fills BETTER_AUTH_SECRET, INTERNAL_SERVICE_TOKEN, PHONE_HASH_KEY and OTP_ENCRYPTION_KEY
-#     with fresh random values when blank, and copies INTERNAL_SERVICE_TOKEN to notification,
-#     location, mapping and trip services
+#   - fills BETTER_AUTH_SECRET, INTERNAL_SERVICE_TOKEN, PHONE_HASH_KEY, OTP_ENCRYPTION_KEY and
+#     fleet-service's PII_ENCRYPTION_KEY, PII_BLIND_INDEX_KEY and UPLOAD_SIGNING_KEY with fresh
+#     random values when blank, and copies INTERNAL_SERVICE_TOKEN to notification, location,
+#     mapping, trip and fleet services
 #
 # Staging and production secrets come from the secrets manager (docs/production/README.md).
 set -euo pipefail
@@ -59,7 +60,8 @@ fill_secret() {
 
 sync_keys "$AUTH_ENV"
 # services that receive /internal/* calls get the same INTERNAL_SERVICE_TOKEN as auth-service
-TOKEN_ENVS=("$NOTIF_ENV" services/location-service/.env services/mapping-service/.env services/trip-service/.env)
+FLEET_ENV=services/fleet-service/.env
+TOKEN_ENVS=("$NOTIF_ENV" services/location-service/.env services/mapping-service/.env services/trip-service/.env "$FLEET_ENV")
 for f in "${TOKEN_ENVS[@]}"; do
   git check-ignore -q "$f" || { echo "Refusing: $f is not gitignored"; exit 1; }
   sync_keys "$f"
@@ -69,6 +71,9 @@ fill_secret BETTER_AUTH_SECRET "$AUTH_ENV"
 fill_secret INTERNAL_SERVICE_TOKEN "$AUTH_ENV"
 fill_secret PHONE_HASH_KEY "$NOTIF_ENV"
 fill_secret OTP_ENCRYPTION_KEY "$NOTIF_ENV"
+fill_secret PII_ENCRYPTION_KEY "$FLEET_ENV"
+fill_secret PII_BLIND_INDEX_KEY "$FLEET_ENV"
+fill_secret UPLOAD_SIGNING_KEY "$FLEET_ENV"
 
 # one interim service token for all /internal/* calls (until mTLS)
 auth_token="$(grep -E '^INTERNAL_SERVICE_TOKEN=' "$AUTH_ENV" | cut -d= -f2-)"

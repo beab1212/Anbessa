@@ -15,6 +15,8 @@ import { Onboarding } from "./pages/staff/Onboarding";
 import { Safety } from "./pages/staff/Safety";
 import { People } from "./pages/staff/People";
 import { CorporateBooking, OrgPage, PartnerHome, RegisterCompany, useOrgs } from "./pages/partner/Partner";
+import { FleetVehiclePage } from "./pages/partner/Fleet";
+import { DriverDirectory, DriverRecord, ReviewQueuePage, VehicleDirectory, VehicleRecord } from "./pages/staff/Fleet";
 
 /** Has the permission in any city (staff pages pick the city inside). */
 const inAnyCity = (p: Principal, permission: Permission) => CITIES.some((cityId) => can(p, permission, { cityId })) || can(p, permission);
@@ -27,15 +29,23 @@ export function staffSections(p: Principal): { title: string; items: Section[] }
       title: "Today",
       items: [
         ...item(inAnyCity(p, "trip:read"), "/staff/board", "Live board"),
-        ...item(inAnyCity(p, "location:read_live"), "/staff/drivers", "Drivers"),
+        ...item(inAnyCity(p, "location:read_live"), "/staff/drivers", "Live map"),
         ...item(inAnyCity(p, "trip:create_on_behalf"), "/staff/phone", "Book by phone"),
         ...item(inAnyCity(p, "trip:read"), "/staff/trips", "Find a trip"),
       ],
     },
     {
+      title: "Onboarding",
+      items: [
+        ...item(inAnyCity(p, "document:review"), "/staff/review", "Review queue"),
+        ...item(inAnyCity(p, "driver:read"), "/staff/fleet/drivers", "Drivers"),
+        ...item(inAnyCity(p, "vehicle:read"), "/staff/fleet/vehicles", "Vehicles"),
+        ...item(inAnyCity(p, "org:read"), "/staff/onboarding", "Companies"),
+      ],
+    },
+    {
       title: "Accounts",
       items: [
-        ...item(inAnyCity(p, "org:read"), "/staff/onboarding", "Companies"),
         ...item(inAnyCity(p, "user:suspend"), "/staff/safety", "Suspend"),
         ...item(can(p, "role:request") || can(p, "role:approve") || can(p, "staff:manage"), "/staff/people", "Staff and roles"),
       ],
@@ -110,6 +120,11 @@ export function App() {
           <Route path="trips" element={<Guard ok={(p) => inAnyCity(p, "trip:read")}><TripDetail /></Guard>} />
           <Route path="trips/:tripId" element={<Guard ok={(p) => inAnyCity(p, "trip:read")}><TripDetail /></Guard>} />
           <Route path="onboarding" element={<Guard ok={(p) => inAnyCity(p, "org:read")}><Onboarding /></Guard>} />
+          <Route path="review" element={<Guard ok={(p) => inAnyCity(p, "document:review")}><ReviewQueuePage /></Guard>} />
+          <Route path="fleet/drivers" element={<Guard ok={(p) => inAnyCity(p, "driver:read")}><DriverDirectory /></Guard>} />
+          <Route path="fleet/drivers/:userId" element={<Guard ok={(p) => inAnyCity(p, "driver:read")}><DriverRecord /></Guard>} />
+          <Route path="fleet/vehicles" element={<Guard ok={(p) => inAnyCity(p, "vehicle:read")}><VehicleDirectory /></Guard>} />
+          <Route path="fleet/vehicles/:id" element={<Guard ok={(p) => inAnyCity(p, "vehicle:read")}><VehicleRecord /></Guard>} />
           <Route path="safety" element={<Guard ok={(p) => inAnyCity(p, "user:suspend")}><Safety /></Guard>} />
           <Route path="people" element={<Guard ok={(p) => can(p, "role:request") || can(p, "role:approve") || can(p, "staff:manage")}><People /></Guard>} />
           <Route path="none" element={<NoAccess />} />
@@ -120,6 +135,7 @@ export function App() {
           <Route path="register" element={<RegisterCompany />} />
           <Route path="org/:orgId" element={<OrgPage />} />
           <Route path="org/:orgId/book" element={<CorporateBooking />} />
+          <Route path="org/:orgId/vehicles/:vehicleId" element={<FleetVehiclePage />} />
         </Route>
 
         <Route path="*" element={<div style={{ display: "grid", placeItems: "center", minHeight: "100vh", padding: "1rem" }}><Empty title="No such page."><a href="/">Back to the start</a></Empty></div>} />

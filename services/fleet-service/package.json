@@ -1,0 +1,45 @@
+{
+  "name": "@ride-app/fleet-service",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --conditions=development --env-file-if-exists=.env src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "test": "vitest run --passWithNoTests --exclude \"tests/integration/**\"",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit --customConditions development",
+    "postinstall": "prisma generate",
+    "generate": "prisma generate",
+    "seed:dev": "tsx --conditions=development --env-file-if-exists=.env src/dev/seed.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1100.0",
+    "@aws-sdk/s3-request-presigner": "^3.1100.0",
+    "@fastify/helmet": "^13.2.0",
+    "@fastify/rate-limit": "^11.2.1",
+    "@prisma/adapter-pg": "^7.10.1",
+    "@prisma/client": "^7.10.1",
+    "@ride-app/shared-authz": "workspace:*",
+    "@ride-app/shared-config": "workspace:*",
+    "@ride-app/shared-location": "workspace:*",
+    "@ride-app/shared-types": "workspace:*",
+    "@ride-app/shared-utils": "workspace:*",
+    "fastify": "^5.12.7",
+    "ioredis": "^6.0.0",
+    "kafkajs": "^2.2.4",
+    "uuid": "^11.1.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "dotenv": "^18.0.9",
+    "jose": "^6.2.13",
+    "pino": "^10.4.0",
+    "prisma": "^7.10.1",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}

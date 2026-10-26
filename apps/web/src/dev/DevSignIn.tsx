@@ -21,6 +21,8 @@ interface DevAccount {
   email?: string;
   password?: string;
   phone?: string;
+  /** drivers use the phone app; they're left out here */
+  app?: "web" | "phone";
   seeded: boolean;
 }
 
@@ -59,8 +61,9 @@ export default function DevSignIn({ initial = "staff" }: { initial?: Surface }) 
     }
   }
 
-  const list = (accounts.data ?? []).filter((a) => a.surface === tab);
-  const unseeded = (accounts.data ?? []).some((a) => !a.seeded);
+  const web = (accounts.data ?? []).filter((a) => a.app !== "phone");
+  const list = web.filter((a) => a.surface === tab);
+  const unseeded = web.some((a) => !a.seeded);
 
   return (
     <section className="card pad dev-signin" aria-label="Development sign-in">

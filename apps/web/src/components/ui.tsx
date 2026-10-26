@@ -127,7 +127,7 @@ export function Stat({ label, value, sub, alert = false }: { label: string; valu
   );
 }
 
-export function Drawer({ title, onClose, children }: { title: ReactNode; onClose: () => void; children: ReactNode }) {
+export function Drawer({ title, onClose, wide = false, children }: { title: ReactNode; onClose: () => void; wide?: boolean; children: ReactNode }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
@@ -136,7 +136,7 @@ export function Drawer({ title, onClose, children }: { title: ReactNode; onClose
   return (
     <>
       <div className="drawer-backdrop" onClick={onClose} />
-      <aside className="drawer" role="dialog" aria-modal="true">
+      <aside className={`drawer ${wide ? "wide" : ""}`} role="dialog" aria-modal="true">
         <div className="drawer-head">
           <h2>{title}</h2>
           <button className="icon-btn" onClick={onClose} aria-label="Close"><X /></button>

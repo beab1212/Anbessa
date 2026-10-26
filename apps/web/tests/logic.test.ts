@@ -36,8 +36,12 @@ describe("claims → navigation (UI only; services check again)", () => {
   const staff = (roles: object[]): Principal => principalOf("staff", decodeClaims(token({ sub: "u", exp: 0, pv: 0, amr: [], roles })));
   const pages = (p: Principal) => staffSections(p).flatMap((s) => s.items.map((i) => i.label));
 
-  it("a dispatcher sees the board, drivers and trips, nothing about accounts", () => {
-    expect(pages(staff([{ r: "DISPATCHER", city: "addis-ababa" }]))).toEqual(["Live board", "Drivers", "Find a trip"]);
+  it("a dispatcher sees the board, the live map and trips, nothing about accounts", () => {
+    expect(pages(staff([{ r: "DISPATCHER", city: "addis-ababa" }]))).toEqual(["Live board", "Live map", "Find a trip"]);
+  });
+
+  it("an onboarding officer reviews drivers, vehicles and companies", () => {
+    expect(pages(staff([{ r: "ONBOARDING_OFFICER", city: "addis-ababa" }]))).toEqual(["Review queue", "Drivers", "Vehicles", "Companies"]);
   });
 
   it("a super admin manages people, not trips", () => {

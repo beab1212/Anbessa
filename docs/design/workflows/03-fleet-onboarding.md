@@ -8,6 +8,8 @@
 | **Outcome** | A `VERIFIED` fleet organisation with company-owned `VERIFIED` vehicles, invited drivers authorised to drive specific cars, and a fleet balance in payment-service |
 | **Related** | [← Workflows](README.md) · [Role.md §6](../Role.md#6-vehicle-ownership) · [Role.md §13.2](../Role.md#132-company-car-vehicle-owned-by-a-fleet-company) · [Payment.md §11](../Payment.md#11-fleet-companies) · [Auth.md §7](../Auth.md#7-mapping-roles-and-scopes-onto-better-auth) |
 
+> **Implemented:** company documents (step 3) and their review next to `org:verify` on the staff Companies page, company vehicles with documents (6–7), invitations (9–11, auth-service), driver authorisations (13) with the V7 check when going online (14), revoking (15, ends the session) — in fleet-service and the web app's fleet portal (Vehicles and Documents tabs, one page per car). **Not yet:** CSV bulk upload (8), statements and balances (16–17, payment-service), and the phone app's onboarding screens for fleet drivers (12).
+
 ## 1. Summary
 
 The fleet owner signs in, creates a `FLEET` organisation and uploads company documents. After verification they register **company-owned** vehicles (the registration names the company), invite drivers by phone number, and authorise each driver for specific vehicles. Every trip in a company car credits or debits the **fleet's** balance, not the driver's.

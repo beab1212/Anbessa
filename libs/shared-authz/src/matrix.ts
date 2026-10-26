@@ -24,7 +24,8 @@ export const MATRIX: Record<RoleCode, Grants> = {
     "balance:read", "topup:create", "ticket:create", "sos:trigger"),
 
   FLEET_OWNER: each("O",
-    "trip:read", "location:read_live", "vehicle:register", "vehicle:authorize_driver", "vehicle:retire",
+    "trip:read", "location:read_live", "vehicle:register", "vehicle:read", "vehicle:authorize_driver", "vehicle:retire",
+    "driver:read", // onboarding status of the fleet's own drivers
     "document:upload", "org:update", "org:manage_members", "earnings:read", "payment:read",
     "balance:read", "topup:create", "ticket:create", "sos:trigger"),
 
@@ -62,7 +63,7 @@ export const MATRIX: Record<RoleCode, Grants> = {
 
   SAFETY_OFFICER: each("C",
     "trip:read", "trip:cancel", "trip:read_gps_trace", "location:read_live", "user:read_masked",
-    "user:read_pii", "user:suspend", "user:reinstate", "driver:suspend", "driver:reinstate",
+    "user:read_pii", "user:suspend", "user:reinstate", "driver:read", "driver:suspend", "driver:reinstate", "vehicle:read",
     "org:suspend", "refund:request", "ticket:read", "ticket:update", "sos:respond",
     "incident:manage", "report:read"),
 

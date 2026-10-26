@@ -1,11 +1,15 @@
 import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { FileText } from "lucide-react";
 import { allowed, api } from "../../lib/api";
 import { dayAndTime, since } from "../../lib/format";
 import { useNow, useStaffCity } from "../../lib/hooks";
 import { useSession } from "../../lib/session";
 import { CityPicker } from "../../components/CityPicker";
-import { Empty, PageHead, Pill, Problem } from "../../components/ui";
+import { DocumentChecklist, useDocuments } from "../../components/Documents";
+import { KIND_LABEL } from "../../lib/fleet";
+import { Drawer, Empty, Notice, PageHead, Pill, Problem } from "../../components/ui";
 
 interface Org {
   id: string;
@@ -37,6 +41,10 @@ export function Onboarding() {
     mutationFn: (a: { id: string; reason: string }) => api("staff", `/api/identity/organizations/${a.id}/suspend`, { body: { reason: a.reason } }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["orgs"] }),
   });
+  const [params, setParams] = useSearchParams();
+  const openId = params.get("org");
+  const all = useQuery({ queryKey: ["orgs", cityId, "all"], enabled: !!cityId && !!openId, queryFn: () => api<Org[]>("staff", `/api/identity/organizations?cityId=${cityId}`) });
+  const open = (orgs.data ?? []).find((o) => o.id === openId) ?? all.data?.find((o) => o.id === openId) ?? null;
   const canVerify = allowed(staff.principal, "org:verify", { cityId: cityId ?? undefined });
   const canSuspend = allowed(staff.principal, "org:suspend", { cityId: cityId ?? undefined });
   const list = orgs.data ?? [];
@@ -71,7 +79,7 @@ export function Onboarding() {
                 <td className="num mono">{o.members}</td>
                 <td className="small">{dayAndTime(o.createdAt)}<div className="muted">{since(o.createdAt, now)} ago</div></td>
                 <td style={{ whiteSpace: "nowrap" }}>
-                  {o.status === "PENDING" && canVerify ? <button className="btn sm" disabled={verify.isPending} onClick={() => verify.mutate(o.id)}>Verify</button> : null}{" "}
+                  <button className="btn ghost sm" onClick={() => setParams({ org: o.id })}><FileText /> Documents</button>{" "}
                   {o.status !== "SUSPENDED" && canSuspend ? (
                     <button className="link danger" onClick={() => {
                       const reason = prompt(`Why suspend ${o.name}? (10+ characters, goes to the audit log)`);
@@ -85,6 +93,37 @@ export function Onboarding() {
         </table>
         </div>
       ) : null}
+      {open && cityId ? (
+        <CompanyDrawer org={open} cityId={cityId} canVerify={canVerify} verifying={verify.isPending}
+          onVerify={() => verify.mutate(open.id)} onClose={() => setParams({})} />
+      ) : null}
     </div>
+  );
+}
+
+/** The company's papers (fleet-service documents) next to the verify decision (auth-service). */
+function CompanyDrawer({ org, cityId, canVerify, verifying, onVerify, onClose }: { org: Org; cityId: string; canVerify: boolean; verifying: boolean; onVerify: () => void; onClose: () => void }) {
+  const { staff } = useSession();
+  const docs = useDocuments("staff", "ORGANIZATION", org.id);
+  const missing = docs.data?.missingForApproval ?? [];
+  return (
+    <Drawer title={org.name} onClose={onClose} wide>
+      <div className="stack" style={{ gap: "1rem" }}>
+        <dl className="kv">
+          <dt>Legal name</dt><dd>{org.legalName ?? "—"}</dd>
+          <dt>TIN</dt><dd className="mono">{org.tin ?? "—"}</dd>
+          <dt>Kind</dt><dd>{org.kind === "FLEET" ? "fleet company" : "company account"}</dd>
+          <dt>Status</dt><dd><Pill tone={org.status === "VERIFIED" ? "green" : org.status === "PENDING" ? "amber" : "red"}>{org.status.toLowerCase()}</Pill></dd>
+        </dl>
+        <p className="small muted" style={{ margin: 0 }}>Check that the business licence and TIN certificate name <strong>{org.legalName ?? org.name}</strong> and the TIN above.</p>
+        <DocumentChecklist surface="staff" subjectType="ORGANIZATION" subjectId={org.id} mode="staff" canReview={allowed(staff.principal, "document:review", { cityId })} />
+        {org.status === "PENDING" && canVerify ? (
+          <div className="stack" style={{ gap: "0.5rem" }}>
+            {missing.length ? <Notice>Approve the {missing.map((k) => KIND_LABEL[k]?.toLowerCase() ?? k).join(" and ")} first.</Notice> : null}
+            <div><button className="btn" disabled={verifying || missing.length > 0} onClick={onVerify}>Verify {org.name}</button></div>
+          </div>
+        ) : null}
+      </div>
+    </Drawer>
   );
 }

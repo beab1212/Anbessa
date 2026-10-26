@@ -8,6 +8,7 @@
     { "name": "notification-service", "path": "../services/notification-service" },
     { "name": "mapping-service",      "path": "../services/mapping-service" },
     { "name": "realtime-gateway",     "path": "../services/realtime-gateway" },
+    { "name": "fleet-service",        "path": "../services/fleet-service" },
     { "name": "shared-types",         "path": "../libs/shared-types" },
     { "name": "shared-utils",         "path": "../libs/shared-utils" },
     { "name": "shared-config",        "path": "../libs/shared-config" }

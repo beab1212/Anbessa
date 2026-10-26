@@ -30,13 +30,17 @@ What each person sees comes from the roles in their access token, read with the 
 | Area | Who (permission @ scope) | Signs in with |
 |---|---|---|
 | **Live board** `/staff/board`: active trips, assign, cancel | `trip:read @ CITY` (assign: dispatchers) | email + password + TOTP (`/api/admin-auth`) |
-| **Drivers** `/staff/drivers`: every online driver on the map, filters, list | `location:read_live @ CITY` | 〃 |
+| **Live map** `/staff/drivers`: every online driver on the map, filters, list | `location:read_live @ CITY` | 〃 |
 | **Book by phone** `/staff/phone`: guest caller, places (search or tap the map), fare, request | `trip:create_on_behalf @ CITY` | 〃 |
 | **Find a trip** `/staff/trips/:id`: route and live driver on a map, timeline, money, cancel | `trip:read @ CITY` | 〃 |
-| **Companies** `/staff/onboarding`: verification queue | `org:read @ CITY` (verify, suspend) | 〃 |
+| **Review queue** `/staff/review`: drivers, vehicles and company papers waiting, oldest first | `document:review @ CITY` | 〃 |
+| **Drivers** `/staff/fleet/drivers` and `/:userId`: applications and drivers; review documents, approve, request changes, suspend, reinstate | `driver:read @ CITY` (decisions: `driver:verify`, `driver:suspend`…) | 〃 |
+| **Vehicles** `/staff/fleet/vehicles` and `/:id`: cars; review documents, approve or reject | `vehicle:read @ CITY` (decisions: `vehicle:verify`) | 〃 |
+| **Companies** `/staff/onboarding`: verification queue, each company's papers in a drawer | `org:read @ CITY` (verify, suspend; documents: `document:review`) | 〃 |
 | **Suspend** `/staff/safety` | `user:suspend @ CITY` (staff targets: super admins) | 〃 |
 | **Staff and roles** `/staff/people`: accounts, maker–checker requests | `staff:manage`, `role:request`, `role:approve` | 〃 |
-| **Company** `/partner/org/:id`: people, invitations by phone | the org's owner or admin | phone + 6-digit code (`/api/auth`) |
+| **Company** `/partner/org/:id`: people and invitations by phone (fleets: each driver's onboarding status and cars); **Vehicles** tab (fleets); **Documents** tab (company papers) | the org's owner or admin | phone + 6-digit code (`/api/auth`) |
+| **Fleet car** `/partner/org/:id/vehicles/:vehicleId`: documents, submit for review, who may drive it, remove | `vehicle:read` / `vehicle:authorize_driver @ ORG` | 〃 |
 | **Book a ride** `/partner/org/:id/book` (company accounts) | `trip:create_on_behalf @ ORG` | 〃 |
 | **Register a company** `/partner/register` | any signed-in partner | 〃 |
 
@@ -57,6 +61,7 @@ The browser only calls `/api/*` **on its own origin**. In development Vite forwa
 | `/api/trips` | trip-service (3002) |
 | `/api/locations` | location-service (3003) |
 | `/api/maps` | mapping-service (3007) |
+| `/api/fleet` | fleet-service (3008) |
 
 In development the sign-in page also has a **Sign in as…** panel with ready-made accounts: run `pnpm --filter @ride-app/auth-service seed:dev` once, with `DEV_LOGIN=on` in auth-service's `.env`. The panel lives in `src/dev/`, is loaded only when `import.meta.env.DEV` is true, and isn't in production builds ([docs/development](../../docs/development/README.md#ready-made-accounts-web-app-dev-sign-in)).
 

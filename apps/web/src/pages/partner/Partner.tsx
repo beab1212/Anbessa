@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Building2, Truck } from "lucide-react";
 import type { Trip } from "@ride-app/shared-types";
@@ -10,6 +10,7 @@ import { PlacePicker, type Place } from "../../components/PlacePicker";
 import { CityMap } from "../../components/map/CityMap";
 import { DropoffMarker, PickupMarker, TripLine } from "../../components/map/markers";
 import { Empty, Field, Notice, PageHead, Pill, Problem, SelectField } from "../../components/ui";
+import { CompanyDocuments, DriverCell, FleetVehicles, useFleetOverview, type Member } from "./Fleet";
 
 export interface Org {
   id: string;
@@ -24,7 +25,7 @@ export interface Org {
 }
 
 interface FullOrg extends Org {
-  members: { id: string; userId: string; role: string; createdAt: string; user: { name: string; email: string } }[];
+  members: Member[];
   invitations: { id: string; email: string; role: string; status: string; expiresAt: string }[];
 }
 
@@ -132,6 +133,9 @@ export function OrgPage() {
     mutationFn: (memberId: string) => authCall("partner", "/organization/remove-member", { memberIdOrEmail: memberId, organizationId: orgId }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["org", orgId] }),
   });
+  const [params, setParams] = useSearchParams();
+  const isFleet = org.data?.kind === "FLEET";
+  const overview = useFleetOverview(orgId!, org.data?.members ?? [], isFleet && allowed(partner.principal, "vehicle:read", { orgId }));
 
   if (org.isLoading) return <p className="muted">Loading…</p>;
   if (org.error) return <Problem error={org.error} />;
@@ -144,6 +148,8 @@ export function OrgPage() {
   const chosenRole = role || inviteRoles[0]!;
   const e164 = toE164(raw);
   const pendingInvites = o.invitations.filter((i) => i.status === "pending");
+  const tabs = [["people", fleet ? "Drivers and people" : "People"], ...(fleet && allowed(p, "vehicle:read", { orgId: o.id }) ? [["vehicles", "Vehicles"]] : []), ...(allowed(p, "document:upload", { orgId: o.id }) ? [["documents", "Documents"]] : [])];
+  const tab = tabs.some(([t]) => t === params.get("tab")) ? params.get("tab")! : "people";
 
   return (
     <div className="page stack" style={{ gap: "1rem" }}>
@@ -157,17 +163,26 @@ export function OrgPage() {
       {o.status === "SUSPENDED" ? <Notice tone="error">This account is suspended. Contact Anbessa support.</Notice> : null}
       <Problem error={invite.error ?? cancelInvite.error ?? remove.error} />
 
-      <div className="two-col wide-left">
+      {tabs.length > 1 ? (
+        <div className="tabs" role="tablist">
+          {tabs.map(([t, label]) => <button key={t} role="tab" aria-selected={tab === t} onClick={() => setParams(t === "people" ? {} : { tab: t! })}>{label}</button>)}
+        </div>
+      ) : null}
+      {tab === "vehicles" ? <FleetVehicles orgId={o.id} verified={o.status === "VERIFIED"} members={o.members} /> : null}
+      {tab === "documents" ? <CompanyDocuments orgId={o.id} kind={o.kind} status={o.status} /> : null}
+
+      {tab === "people" ? <div className="two-col wide-left">
         <section className="card">
           <div className="card-head"><h2>{fleet ? "Drivers" : "People"} <span className="muted mono small">{o.members.length}</span></h2></div>
           <div style={{ overflowX: "auto" }}>
           <table className="table">
-            <thead><tr><th>Who</th><th>Role</th><th>Since</th><th /></tr></thead>
+            <thead><tr><th>Who</th><th>Role</th>{fleet ? <th>As a driver</th> : null}<th>Since</th><th /></tr></thead>
             <tbody>
               {o.members.map((m) => (
                 <tr key={m.id}>
                   <td className="mono">{who(m)}</td>
                   <td>{m.role.split(",").map((r) => ROLE_WORD[r] ?? r).join(", ")}</td>
+                  {fleet ? <td>{m.role.includes("fleet_driver") ? <DriverCell overview={overview.data} userId={m.userId} /> : null}</td> : null}
                   <td className="small muted">{dayAndTime(m.createdAt)}</td>
                   <td>{manages && m.userId !== p?.userId && !m.role.includes("owner") && !m.role.includes("corporate_admin") ? <button className="link danger" onClick={() => confirm(`Remove ${who(m)}?`) && remove.mutate(m.id)}>remove</button> : null}</td>
                 </tr>
@@ -216,8 +231,18 @@ export function OrgPage() {
               <Link className="btn secondary" to={`/partner/org/${o.id}/book`}>Book for someone</Link>
             </div>
           ) : null}
+          {fleet && o.status === "VERIFIED" ? (
+            <div className="card pad">
+              <h2 style={{ marginBottom: "0.25rem" }}>Getting drivers on the road</h2>
+              <ol className="small muted" style={{ margin: "0.4rem 0 0", paddingLeft: "1.1rem", lineHeight: 1.7 }}>
+                <li>Invite them here by phone.</li>
+                <li>They accept and apply as a driver in the Anbessa app (licence, ID, photo).</li>
+                <li>Once we approve them, give them a car on the <button className="link" onClick={() => setParams({ tab: "vehicles" })}>Vehicles</button> tab.</li>
+              </ol>
+            </div>
+          ) : null}
         </aside>
-      </div>
+      </div> : null}
     </div>
   );
 }

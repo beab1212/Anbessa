@@ -47,7 +47,7 @@ With `OTP_DELIVERY=console` (the default), login codes are printed in the log. S
 | `/api/auth/*` | Phone app (bearer session) | Better Auth **app surface**: `phone-number/send-otp`, `phone-number/verify`, `token` (15-min JWT, `aud=ride-app`), `jwks`, sessions, self-service fleet/corporate organisations and invitations |
 | `/api/admin-auth/*` | Staff dashboard (cookie) | Better Auth **admin surface**: `sign-in/email`, `change-password`, `two-factor/*`, `token` (10-min JWT, `aud=ride-admin`) |
 | `/api/identity/*` | Staff dashboard (staff JWT) | Guests, staff accounts, role requests/approvals/revocation, suspension, organisation verification |
-| `/internal/*` | Other services (`INTERNAL_SERVICE_TOKEN`) | Driver role on activation. Never routed by Kong |
+| `/internal/*` | Other services (`INTERNAL_SERVICE_TOKEN`) | Driver role on activation; an organisation's kind, status, city and legal name; whether a user is a member (fleet-service). Never routed by Kong |
 | `/api/dev/*` | Web app dev sign-in, **development only** | `accounts` (the `seed:dev` roster) and `code` (current TOTP of a dev staff account, last console OTP of a phone). Mounted only with `DEV_LOGIN=on`, which config refuses in production; never routed by Kong |
 
 Only allowlisted Better Auth endpoints are served (`src/auth/allowlist.ts`). Everything else is 404, including every admin-plugin endpoint. The full route table is in [Auth.md §17](../../docs/design/Auth.md#identity-api).

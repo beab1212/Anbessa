@@ -108,6 +108,8 @@ Production values that differ from dev:
 | `DEV_LOGIN` | leave unset (`off`). `on` is refused in production. Never run `seed:dev` against a real database: it refuses unless `NODE_ENV=development` |
 | `PHONE_HASH_KEY` / `OTP_ENCRYPTION_KEY` | notification-service only, 32 random bytes as hex each, from Secrets Manager. Rotating `PHONE_HASH_KEY` only breaks the resend lookup for codes in flight; rotating `OTP_ENCRYPTION_KEY` drops codes in flight (users request a new one) |
 | `OTP_CHANNELS` / `OTP_FALLBACK_SECONDS` | notification-service: `telegram,sms` / `20` |
+| `STORAGE` / `S3_BUCKET` / `S3_REGION` | fleet-service: `s3` (`local` is refused in production) and the private documents bucket. Give the service role `s3:PutObject`/`GetObject` on it only; block public access; CORS on the bucket must allow `PUT` from the web origin (browsers upload straight to S3) |
+| `PII_ENCRYPTION_KEY` / `PII_BLIND_INDEX_KEY` / `UPLOAD_SIGNING_KEY` | fleet-service, 32 random bytes as hex each, all different, from Secrets Manager. Losing `PII_ENCRYPTION_KEY` makes stored licence numbers unreadable; changing `PII_BLIND_INDEX_KEY` breaks duplicate-licence detection |
 | `TELEGRAM_CALLBACK_URL` | notification-service: `https://api.anbessa.et/api/webhooks/telegram-gateway` (required, https) |
 | `SMS_PROVIDER` + `TWILIO_*` | notification-service: `twilio` (console is refused in production) |
 | `PUSH_PROVIDER` + `FCM_PROJECT_ID`, `FCM_CLIENT_EMAIL`, `FCM_PRIVATE_KEY` | notification-service: `fcm`, a Firebase service account with the *Firebase Cloud Messaging API* role only (console is refused) |
@@ -176,6 +178,7 @@ Serve `dist/` with a fallback to `index.html` for client-side routes, and a stri
 - `default-src 'self'`
 - `style-src` and `font-src`: Google Fonts
 - `connect-src` and `img-src`: the tile host (style, tiles, sprites, glyphs)
+- `connect-src`, `img-src` and `frame-src`: the documents bucket (`https://<bucket>.s3.<region>.amazonaws.com`): uploads go straight to it, and reviewers view files (images, PDFs) from it
 - `worker-src 'self' blob:` (MapLibre's worker)
 
 Keep the OpenStreetMap attribution in the map corner visible; it is a licence condition.

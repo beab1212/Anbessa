@@ -43,6 +43,8 @@ export interface DevPartner extends Base {
   surface: "partner";
   phone: string;
   memberships: { org: string; role: RoleCode }[];
+  /** used from the phone app (drivers); the web sign-in panel leaves these out */
+  app?: "phone";
 }
 
 export type DevAccount = DevStaff | DevPartner;
@@ -64,6 +66,10 @@ export const DEV_ACCOUNTS: DevAccount[] = [
   { surface: "partner", key: "corporate-coordinator", name: "Samuel Tadesse", label: "Company travel desk (books rides)", phone: "+251900000202", memberships: [{ org: "dev-corporate", role: "CORPORATE_COORDINATOR" }] },
   { surface: "partner", key: "employee", name: "Ruth Desta", label: "Company employee (rider)", phone: "+251900000203", memberships: [{ org: "dev-corporate", role: "CORPORATE_EMPLOYEE" }] },
   { surface: "partner", key: "new-partner", name: "Kebede Worku", label: "New partner, no company yet", phone: "+251900000301", memberships: [] },
+  // drivers (fleet-service's seed:dev gives them applications, documents and cars)
+  { surface: "partner", app: "phone", key: "fleet-driver", name: "Tesfaye Alemu", label: "Fleet driver (Selam Transport)", phone: "+251900000102", memberships: [{ org: "dev-fleet", role: "FLEET_DRIVER" }] },
+  { surface: "partner", app: "phone", key: "driver-applicant", name: "Mulugeta Bekele", label: "Owner-driver waiting for review", phone: "+251900000401", memberships: [] },
+  { surface: "partner", app: "phone", key: "driver-active", name: "Almaz Tadesse", label: "Owner-driver, approved", phone: "+251900000402", memberships: [] },
 ];
 
 /** RFC 6238 TOTP (HMAC-SHA1, 30 s, 6 digits) over the secret's UTF-8 bytes, like Better Auth. */

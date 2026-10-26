@@ -1,0 +1,157 @@
+// Fleet database (docs/design/Database.md §7.2, Role.md §6 and §14). Tables and columns are
+// snake_case via @map. Constraints Prisma can't express (single-owner CHECK, partial unique
+// indexes for one active session per vehicle and per driver, status CHECKs) are in the SQL migration.
+
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+/// One per user who applied to drive (workflow 02). Same id as auth-service's user (no cross-DB FK).
+model DriverProfile {
+  userId        String    @id @map("user_id") @db.Uuid
+  /// APPLIED | PENDING_REVIEW | ACTIVE | SUSPENDED
+  status        String    @default("APPLIED")
+  /// DOCUMENT_EXPIRED | SAFETY | ONBOARDING, when SUSPENDED
+  statusReason  String?   @map("status_reason")
+  /// last note from the onboarding officer (changes requested, suspension reason)
+  reviewNote    String?   @map("review_note")
+  fullName      String    @map("full_name")
+  /// AES-256-GCM, application-level (Database.md §17)
+  licenseNumber Bytes     @map("license_number")
+  /// HMAC-SHA256 blind index: duplicate applications and banned licences
+  licenseHash   Bytes     @unique @map("license_hash")
+  licenseLast4  String    @map("license_last4")
+  cityId        String    @map("city_id")
+  submittedAt   DateTime? @map("submitted_at") @db.Timestamptz
+  activatedAt   DateTime? @map("activated_at") @db.Timestamptz
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@index([cityId, status])
+  @@map("driver_profile")
+}
+
+model Vehicle {
+  id            String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  plateNumber   String    @unique @map("plate_number")
+  /// INDIVIDUAL | ORGANIZATION
+  ownerType     String    @map("owner_type")
+  ownerUserId   String?   @map("owner_user_id") @db.Uuid
+  ownerOrgId    String?   @map("owner_org_id") @db.Uuid
+  /// economy | comfort | minivan (matching uses the same codes)
+  vehicleType   String    @map("vehicle_type")
+  make          String
+  model         String
+  year          Int
+  color         String
+  seats         Int
+  /// DRAFT | PENDING_REVIEW | VERIFIED | REJECTED | SUSPENDED | RETIRED
+  status        String    @default("DRAFT")
+  statusReason  String?   @map("status_reason")
+  reviewNote    String?   @map("review_note")
+  cityId        String    @map("city_id")
+  submittedAt   DateTime? @map("submitted_at") @db.Timestamptz
+  verifiedAt    DateTime? @map("verified_at") @db.Timestamptz
+  version       Int       @default(0)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  authorizations VehicleAuthorization[]
+  sessions       DrivingSession[]
+
+  @@index([cityId, status])
+  @@map("vehicle")
+}
+
+/// A fleet driver allowed to drive one fleet vehicle (rule V7).
+model VehicleAuthorization {
+  vehicleId    String    @map("vehicle_id") @db.Uuid
+  driverUserId String    @map("driver_user_id") @db.Uuid
+  grantedBy    String    @map("granted_by") @db.Uuid
+  /// ACTIVE | REVOKED
+  status       String    @default("ACTIVE")
+  validUntil   DateTime? @map("valid_until") @db.Timestamptz
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  revokedAt    DateTime? @map("revoked_at") @db.Timestamptz
+
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id])
+
+  @@id([vehicleId, driverUserId])
+  @@index([driverUserId])
+  @@map("vehicle_authorization")
+}
+
+/// Online with one vehicle (workflow 04). Partial unique indexes: one open session per vehicle (V4) and per driver (V5).
+model DrivingSession {
+  id           String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  driverUserId String    @map("driver_user_id") @db.Uuid
+  vehicleId    String    @map("vehicle_id") @db.Uuid
+  startedAt    DateTime  @default(now()) @map("started_at") @db.Timestamptz
+  endedAt      DateTime? @map("ended_at") @db.Timestamptz
+  /// DRIVER | CONNECTION_LOST | SUSPENDED | VEHICLE_UNAVAILABLE | FLEET_SUSPENDED | BALANCE_BLOCKED
+  endReason    String?   @map("end_reason")
+
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id])
+
+  @@index([driverUserId, startedAt(sort: Desc)])
+  @@map("driving_session")
+}
+
+/// Metadata only; the file is in object storage (S3, or a local directory in development).
+model Document {
+  id            String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  /// DRIVER | VEHICLE | ORGANIZATION
+  subjectType   String    @map("subject_type")
+  /// driver user id, vehicle id or organisation id
+  subjectId     String    @map("subject_id") @db.Uuid
+  /// LICENSE | NATIONAL_ID | PHOTO | REGISTRATION | INSURANCE | INSPECTION | BUSINESS_LICENSE | TIN
+  kind          String
+  objectKey     String    @map("object_key")
+  contentType   String    @map("content_type")
+  sizeBytes     Int       @map("size_bytes")
+  sha256        Bytes
+  expiresAt     DateTime? @map("expires_at") @db.Date
+  /// PENDING | APPROVED | REJECTED | EXPIRED | SUPERSEDED
+  status        String    @default("PENDING")
+  rejectReason  String?   @map("reject_reason")
+  /// city of the subject, for the onboarding officer's scope
+  cityId        String    @map("city_id")
+  uploadedBy    String    @map("uploaded_by") @db.Uuid
+  reviewedBy    String?   @map("reviewed_by") @db.Uuid
+  reviewedAt    DateTime? @map("reviewed_at") @db.Timestamptz
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([subjectType, subjectId])
+  @@map("document")
+}
+
+/// HTTP idempotency keys (Database.md §9): POST /api/fleet/sessions.
+model IdempotencyKey {
+  userId      String   @map("user_id") @db.Uuid
+  key         String
+  requestHash Bytes    @map("request_hash")
+  status      String   @default("IN_PROGRESS")
+  statusCode  Int?     @map("status_code")
+  response    Json?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@id([userId, key])
+  @@map("idempotency_key")
+}
+
+/// Transactional outbox (Database.md §8). Published to Kafka by the relay.
+model Outbox {
+  id          String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  topic       String
+  key         String
+  payload     Json
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  publishedAt DateTime? @map("published_at") @db.Timestamptz
+
+  @@map("outbox")
+}

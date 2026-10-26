@@ -8,7 +8,7 @@
 | **Outcome** | The driver is visible to matching in their city and vehicle type, streams GPS every ~4 s, and can go offline cleanly |
 | **Related** | [← Workflows](README.md) · [Role.md §6 (going online)](../Role.md#going-online-which-vehicle-is-allowed) · [Database.md §10](../Database.md#10-hot-path-live-location-in-redis) · [Payment.md §8](../Payment.md#8-balance-limits-and-blocking) |
 
-> **Implemented:** parts B and C (pings, plausibility checks, Redis pipeline, guarded `driver.location`, the sweeper) and the Redis side of A and D (`driver.online` / `driver.offline` handled by location-service). Not yet: fleet-service (sessions, step 2–5, 14–17), so in development drivers go online through location-service's dev route. Details: [Database.md §10, implementation](../Database.md#implementation-v1).
+> **Implemented:** all four parts. fleet-service ([README](../../../services/fleet-service/README.md)) runs steps 2, 3, 5, 14 and 16 (sessions with the V4–V7 checks, `driver.online` / `driver.offline` through the outbox, `driver.connection_lost` consumed), location-service the Redis side, realtime-gateway the pings. **Not yet:** step 4 (balance state from payment-service): every driver is `cashAllowed: true` until it exists. The phone app's go-online screen doesn't call fleet-service yet. Details: [Database.md §10, implementation](../Database.md#implementation-v1).
 
 ## 1. Summary
 

@@ -114,4 +114,16 @@ export function registerIdentityRoutes(
     const body = z.object({ active: z.boolean() }).parse(req.body);
     return identity.setDriverRole(userId, body.active, service);
   });
+
+  app.get("/internal/organizations/:id", async (req) => {
+    internal(req);
+    const { id } = z.object({ id: uuid }).parse(req.params);
+    return identity.organizationForService(id);
+  });
+
+  app.get("/internal/organizations/:id/members/:userId", async (req) => {
+    internal(req);
+    const { id, userId } = z.object({ id: uuid, userId: uuid }).parse(req.params);
+    return identity.membershipForService(id, userId);
+  });
 }
