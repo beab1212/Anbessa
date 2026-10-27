@@ -23,7 +23,7 @@ Most of the logic is in **`libs/shared-location`**:
 | File | Contents |
 |---|---|
 | `src/keys.ts` | The Redis key layout and the `assertCity` / `assertVehicleType` guards |
-| `src/drivers.ts` | `recordPing` (used by realtime-gateway), `goOnline`, `goOffline`, `startTrip`, `endTrip`, `applyBalanceState`, `nearbyAvailable`, `cityDrivers`, `sweepCity`, `LOCATION_TIMING` |
+| `src/drivers.ts` | `recordPing` (used by realtime-gateway), `goOnline`, `goOffline`, `startTrip`, `endTrip`, `reassignTrip`, `applyBalanceState`, `nearbyAvailable`, `cityDrivers`, `sweepCity`, `LOCATION_TIMING` |
 | `src/geo.ts` | `haversineMeters`, `isValidLatLng`, `checkPing`, `PING_LIMITS` |
 | `src/cities.ts` | Served cities as bounding boxes (`addis-ababa`, `hawassa`), `cityAt()` |
 
@@ -49,7 +49,7 @@ Each driver has a hash `driver:{driverId}` (fields in [data-model.md](data-model
 stateDiagram-v2
   [*] --> available: driver.online (goOnline)
   available --> on_trip: trip.matched (startTrip)
-  on_trip --> available: trip.completed / trip.cancelled (endTrip, same tripId)
+  on_trip --> available: trip.completed / trip.cancelled (endTrip, same tripId), or trip.reassigned away (reassignTrip)
   available --> offline: driver.offline (goOffline)
   on_trip --> offline: driver.offline (goOffline clears tripId)
   offline --> available: driver.online
@@ -73,8 +73,9 @@ Notes from the code:
 - **The client can't choose its set or trip.** The set comes from `status`, and the trip from `tripId` in the hash, which only `trip.matched` writes.
 - **`goOnline`** deletes and rewrites the hash. It keeps `status = on_trip` and `tripId` if the driver was on a trip (so a session restart mid-trip doesn't free the driver). If the city or vehicle type changed, the driver is removed from the old city's geo sets and `seen` set. The driver has no position until the first ping, so they are not in any geo set yet.
 - **`goOffline`** removes the driver from both geo sets and `seen:{city}`, removes them from `beneficiary:{id}:drivers`, sets `status = offline`, `tripId = ""`, and refreshes the 15 min TTL. Later pings get `not_online`.
-- **`startTrip`** adds rider and driver to `trip:{tripId}:members` (12 h), deletes `offer:driver:{id}`, sets `on_trip` + `tripId` (unless offline), and moves the driver from `available` to `busy` right away if they have a fresh position. The members set is written even when the driver hash is missing.
-- **`endTrip`** shortens `trip:{id}:members` and `trip:{id}:last` to 300 s (the rider screen can still show the final position for 5 min). It frees the driver only if `status = on_trip` **and** `tripId` matches the event's trip, so an old event can't free a driver from a newer trip.
+- **`startTrip`** adds rider and driver (and `bookedById` when the event carries one) to `trip:{tripId}:members` (12 h), stores `billingOrgId` in `trip:{tripId}:billing_org` (same TTL) for company trips, deletes `offer:driver:{id}`, sets `on_trip` + `tripId` (unless offline), and moves the driver from `available` to `busy` right away if they have a fresh position. The members set is written even when the driver hash is missing.
+- **`endTrip`** shortens `trip:{id}:members`, `trip:{id}:billing_org` and `trip:{id}:last` to 300 s (the rider screen can still show the final position for 5 min). It frees the driver only if `status = on_trip` **and** `tripId` matches the event's trip, so an old event can't free a driver from a newer trip.
+- **`reassignTrip`** (`trip.reassigned`) moves the live trip from `fromDriverId` to `toDriverId`: the old driver leaves the members set, goes back to `available` if still on this trip, and their position is dropped from `trip:{id}:last`; the new driver joins the members set and becomes `on_trip` (unless on another trip), and `trip:{id}:last` is seeded from their current position. Without `toDriverId` (back to matching) only the old-driver half runs; the next `trip.matched` does the rest.
 - The hash TTL is 15 min (`LOCATION_TIMING.stateTtlSeconds`), refreshed on every ping and on `goOnline`/`goOffline`. `startTrip`, `endTrip` and `applyBalanceState` do not refresh it.
 
 ## 4. Ping validation (done in realtime-gateway, defined here)
@@ -138,11 +139,15 @@ In the built-in matrix (`libs/shared-authz/src/matrix.ts`), `location:read_live`
 
 The rider's fallback while the socket is reconnecting (the app polls every 5 s only while not joined to the trip room, `active_trip_controller.dart`).
 
-1. Read `trip:{tripId}:last` and check `trip:{tripId}:members` for the caller.
-2. Not a member → allowed only if the trip's driver (from `last.driverId`) has a `fleetOrgId`, is **currently** on this trip, and the caller has `location:read_live` for that org (`FLEET_OWNER`). Any failure answers **404 `trip not found`**, never 403, so the trip's existence isn't confirmed.
+1. Read `trip:{tripId}:last` and check `trip:{tripId}:members` for the caller (rider, driver and, for phone or company bookings, the booker).
+2. Not a member → allowed if either:
+   - the trip's driver (from `last.driverId`) has a `fleetOrgId`, is **currently** on this trip, and the caller has `location:read_live` for that org (`FLEET_OWNER`); or
+   - `trip:{tripId}:billing_org` is set (a company-billed trip) and the caller has `trip:read` for that org (the company's bookers and admins).
+
+   Otherwise **404 `trip not found`**, never 403, so the trip's existence isn't confirmed. Code: `tripDriver()` in `src/locations.ts`.
 3. A member with no position yet (no ping since the match) → **404 `driver position not found`**.
 
-Members don't need any permission besides membership. The fleet owner path stops working once the trip ends (the driver's `tripId` changes), while members keep access for the 5 min grace period.
+Members don't need any permission besides membership. The fleet owner path stops working once the trip ends (the driver's `tripId` changes), while members and the billing-org path keep access for the 5 min grace period (`endTrip` shortens both keys to 300 s).
 
 ## 10. Balance-state mirror
 

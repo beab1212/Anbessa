@@ -16,7 +16,8 @@ The key builders are in `libs/shared-location/src/keys.ts`. City ids must match 
 | `driver:{driverId}` | hash | see below | **15 min**, refreshed by every accepted ping, `goOnline`, `goOffline` | gateway, location | gateway, location, trip-service (through `GET /internal/drivers/:id`) |
 | `offer:driver:{driverId}` | string | tripId of the open offer (soft lock) | `EX offerSeconds` (trip-service setting) | trip-service (`SET NX EX`), deleted by trip-service and by location's `startTrip` | location (`EXISTS` in `nearbyAvailable`) |
 | `trip:{tripId}:last` | hash | `driverId`, `lat`, `lng`, `at` (device ms), `stale` (`"0"`), `heading?` | 3600 s, refreshed on each on-trip ping; set to 300 s by `endTrip` | gateway (`recordPing`, only while `on_trip`) | location (`tripDriver`) |
-| `trip:{tripId}:members` | set | riderId and driverId | 12 h from `trip.matched`; 300 s after `trip.completed`/`cancelled` | location (`startTrip`, `endTrip`) | gateway (`trip:subscribe`), location (`tripDriver`) |
+| `trip:{tripId}:members` | set | riderId and driverId, plus the booker (`bookedById`) for phone and company bookings | 12 h from `trip.matched`; 300 s after `trip.completed`/`cancelled` | location (`startTrip`, `endTrip`) | gateway (`trip:subscribe`), location (`tripDriver`) |
+| `trip:{tripId}:billing_org` | string | the company the trip is billed to (`billingOrgId`); only for company trips | 12 h from `trip.matched`; 300 s after `trip.completed`/`cancelled` | location (`startTrip`, `endTrip`) | location (`tripDriver`: `trip:read` holders for that org may watch the car) |
 | `balance:{beneficiaryId}` | hash | `state`, `cashAllowed` (`"1"`/`"0"`), `at` (ms) | 30 days | location (`applyBalanceState`) | location (`goOnline`) |
 | `beneficiary:{beneficiaryId}:drivers` | set | online drivers earning for that beneficiary | 24 h, refreshed by `goOnline` | location (`goOnline`, `goOffline`, `applyBalanceState` cleanup) | location (`applyBalanceState`) |
 | `lock:sweep:{city}` | string | random owner id of the replica sweeping this round | `PX max(1000, SWEEP_INTERVAL_MS - 500)` | location (sweeper) | location (sweeper) |
@@ -56,7 +57,7 @@ All values are strings. `parseState()` in `drivers.ts` returns `null` (driver un
 | `staleAfterMs` | 20 000 | sweeper threshold and the freshness filter in `nearbyAvailable` |
 | `lostAfterMs` | 600 000 (10 min) | `driver.connection_lost` |
 | `stateTtlSeconds` | 900 (15 min) | `driver:{id}` TTL |
-| `tripMembersTtlSeconds` | 43 200 (12 h) | `trip:{id}:members` |
+| `tripMembersTtlSeconds` | 43 200 (12 h) | `trip:{id}:members`, `trip:{id}:billing_org` |
 | `tripLastTtlSeconds` | 3600 | `trip:{id}:last` |
 | `maxAccuracyMeters` | 100 | ping check |
 | `maxSpeedMps` | 200 km/h | ping check |

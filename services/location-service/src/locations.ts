@@ -2,10 +2,10 @@
 
 import type { Redis } from "ioredis";
 import {
-  cityAt, cityDrivers, getDriverState, haversineMeters, isTripMember, keys, nearbyAvailable,
+  cityAt, cityDrivers, getDriverState, haversineMeters, isTripMember, keys, nearbyAvailable, tripBillingOrg,
   type DriverState, type LatLng, type NearbyDriver,
 } from "@ride-app/shared-location";
-import { authorize, type Principal } from "@ride-app/shared-authz";
+import { authorize, can, type Principal } from "@ride-app/shared-authz";
 import type { Logger } from "@ride-app/shared-utils";
 import { notFound } from "./lib/errors.js";
 import type { Mapping } from "./lib/mapping.js";
@@ -101,13 +101,12 @@ export function createLocations(deps: { redis: Redis; mapping: Mapping; logger: 
       const member = await isTripMember(redis, tripId, principal.userId);
       if (!member) {
         const driver = last.driverId ? await getDriverState(redis, last.driverId) : null;
+        const billingOrg = await tripBillingOrg(redis, tripId);
+        // the fleet that owns the car, or the company the trip is billed to (its trip readers);
         // 404 rather than 403: don't confirm that someone else's trip exists
-        if (!driver?.fleetOrgId || driver.tripId !== tripId) throw notFound("trip");
-        try {
-          authorize(principal, "location:read_live", { orgId: driver.fleetOrgId });
-        } catch {
-          throw notFound("trip");
-        }
+        const fleetSees = !!driver?.fleetOrgId && driver.tripId === tripId && can(principal, "location:read_live", { orgId: driver.fleetOrgId });
+        const companySees = !!billingOrg && can(principal, "trip:read", { orgId: billingOrg });
+        if (!fleetSees && !companySees) throw notFound("trip");
       }
       if (!last.lat) throw notFound("driver position");
       return {

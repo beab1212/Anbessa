@@ -8,10 +8,10 @@ Source: `src/events/kafka.ts`, `src/events/handlers.ts`, contracts in `libs/shar
 |---|---|
 | Client id | `location-service` |
 | Consumer group | `location-service` (platform-service's system page shows its lag: `CONSUMER_GROUPS` default in `services/platform-service/src/config/index.ts`) |
-| Subscription | the six topics below, one `consumer.subscribe({ topics })`. `fromBeginning` is not set (kafkajs default: a new group starts at the latest offset) |
+| Subscription | the seven topics below, one `consumer.subscribe({ topics })`. `fromBeginning` is not set (kafkajs default: a new group starts at the latest offset) |
 | Processing | `eachMessage`, one message at a time per partition, auto-commit (kafkajs default) |
 | Producer | `idempotent: true`, `maxInFlightRequests: 1`, sends with `acks: -1` (all in-sync replicas) |
-| Topic creation | outside production, `start()` creates any missing topic among the six consumed plus `driver.connection_lost` (default partitions/replication of the broker). In production topics must exist already |
+| Topic creation | outside production, `start()` creates any missing topic among the seven consumed plus `driver.connection_lost` (default partitions/replication of the broker). In production topics must exist already |
 | Without `KAFKA_BROKERS` | nothing consumed or produced (allowed outside production; required in production by config validation) |
 
 ### Error handling
@@ -31,12 +31,13 @@ Schemas are the Zod objects in `src/events/handlers.ts`. Extra fields (such as t
 |---|---|---|---|---|
 | `driver.online` | fleet-service (`driverId`) | `driverId` uuid, `vehicleId` 1–64, `vehicleType` (key guard), `cityId` (key guard), `fleetOrgId?` uuid, `beneficiaryId?` uuid, `cashAllowed` boolean, `balanceState?` ≤ 20 chars | `goOnline` | hash rewritten with `status = available` (or kept `on_trip`), city and type registered for the sweeper, beneficiary membership updated. See [architecture.md §3](architecture.md#3-driver-state) |
 | `driver.offline` | fleet-service (`driverId`) | `driverId` uuid, `reason` ≤ 40 chars (not used) | `goOffline` | out of every geo set and `seen`, `status = offline` |
-| `trip.matched` | trip-service (`tripId`) | `tripId`, `riderId`, `driverId` (uuids) | `startTrip` | members set, offer lock deleted, driver `on_trip` and moved to `busy` |
+| `trip.matched` | trip-service (`tripId`) | `tripId`, `riderId`, `driverId` (uuids), `bookedById?` uuid, `billingOrgId?` uuid | `startTrip` | members set (rider, driver, booker), `trip:{id}:billing_org` for company trips, offer lock deleted, driver `on_trip` and moved to `busy` |
 | `trip.completed` | trip-service (`tripId`) | `tripId` uuid, `driverId?` uuid | `endTrip` (only if `driverId` present) | 5 min grace on trip keys; driver back to `available` if still on this trip |
 | `trip.cancelled` | trip-service (`tripId`) | same as `trip.completed` | `endTrip` (only if `driverId` present) | same. A trip cancelled before a match has no `driverId` and is a no-op |
+| `trip.reassigned` | trip-service (`tripId`) | `tripId`, `riderId`, `fromDriverId` (uuids), `toDriverId?` uuid (absent = back to matching) | `reassignTrip` | old driver out of the members set, back to `available` (if still on this trip) and its last position dropped; with `toDriverId`: new driver added to members, offer lock deleted, `on_trip` with this trip unless already on another one, and the trip's last position seeded from them so the rider's map switches cars at once. trip-service writes `trip.matched` for the new driver just before (same key, so in order); trip-service also frees the old driver in Redis synchronously, so this handler mostly confirms that state and makes a replay or a missed sync step converge |
 | `balance.state_changed` | payment-service (beneficiary owner id) | `beneficiary { type: INDIVIDUAL\|ORGANIZATION, id uuid }`, `state` OK\|WARNING\|CASH_BLOCKED\|BLOCKED, `cashAllowed` boolean | `applyBalanceState` | `balance:{id}` stored; every online driver of that beneficiary updated |
 
-Full contract types: `DriverOnlineEvent`, `DriverOfflineEvent`, `TripMatchedEvent`, `BalanceStateChangedEvent` in `libs/shared-types/src/events.ts`. `trip.completed` / `trip.cancelled` carry many more fields (fare, beneficiary…) that location-service ignores.
+Full contract types: `DriverOnlineEvent`, `DriverOfflineEvent`, `TripMatchedEvent`, `TripReassignedEvent`, `BalanceStateChangedEvent` in `libs/shared-types/src/events.ts`. `trip.completed` / `trip.cancelled` carry many more fields (fare, beneficiary…) that location-service ignores.
 
 ## Produced topics
 

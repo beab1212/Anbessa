@@ -148,8 +148,9 @@ Last driver position for a trip. `tripId` must be a UUID. `ride-app` token.
 
 | Caller | Allowed when |
 |---|---|
-| The trip's rider or driver | member of `trip:{tripId}:members` (written on `trip.matched`, kept 5 min after the trip ends) |
+| The trip's rider, driver or booker | member of `trip:{tripId}:members` (written on `trip.matched`; the booker is added from `bookedById` for phone and company bookings; kept 5 min after the trip ends) |
 | A fleet owner | the trip's driver currently has `tripId` = this trip and a `fleetOrgId`, and the caller has `location:read_live` for that org |
+| The billed company | `trip:{tripId}:billing_org` is set (from `trip.matched.billingOrgId`) and the caller has `trip:read` for that org (bookers, company admins); kept 5 min after the trip ends |
 | Anyone else | never: `404 trip not found` |
 
 Response `200`: `{ "tripId", "driverId", "lat", "lng", "heading"?, "at" }` (`at` = device time, unix ms). `404 driver position not found` for a member before the first ping after the match.

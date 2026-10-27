@@ -220,6 +220,80 @@ describe("trips", () => {
     expect((await app.inject({ method: "GET", url: `/api/locations/trips/${tripId}/driver`, headers: { authorization: `Bearer ${owner}` } })).statusCode).toBe(200);
   });
 
+  it("a company booking: the booker and the company's trip readers may follow the car, other companies may not", async () => {
+    const d = await onlineDriver(BOLE);
+    const tripId = uuid();
+    const company = uuid();
+    const booker = uuid();
+    await createHandlers(redis)["trip.matched"]({ eventId: uuid(), tripId, riderId: uuid(), driverId: d, cityId: CITY, vehicleType: "economy", bookedById: booker, billingOrgId: company });
+    clock += 4000;
+    await recordPing(redis, d, { ...near(40), at: clock }, clock);
+    const get = async (token: string) => (await app.inject({ method: "GET", url: `/api/locations/trips/${tripId}/driver`, headers: { authorization: `Bearer ${token}` } })).statusCode;
+
+    expect(await get(await sign(booker, "ride-app", [{ r: "RIDER" }]))).toBe(200);
+    expect(await get(await sign(uuid(), "ride-app", [{ r: "CORPORATE_ADMIN", org: company }]))).toBe(200);
+    expect(await get(await sign(uuid(), "ride-app", [{ r: "CORPORATE_COORDINATOR", org: company }]))).toBe(200);
+    expect(await get(await sign(uuid(), "ride-app", [{ r: "CORPORATE_ADMIN", org: uuid() }]))).toBe(404);
+    expect(await get(await sign(uuid(), "ride-app", [{ r: "CORPORATE_EMPLOYEE", org: company }]))).toBe(404); // no trip:read
+  });
+
+  it("trip.reassigned to another driver: the trip follows the new car, the old driver is freed and can't watch", async () => {
+    const h = createHandlers(redis);
+    const a = await onlineDriver(BOLE);
+    const b = await onlineDriver(near(300));
+    const tripId = uuid();
+    const riderId = uuid();
+    await h["trip.matched"]({ eventId: uuid(), tripId, riderId, driverId: a, cityId: CITY, vehicleType: "economy" });
+    clock += 4000;
+    await recordPing(redis, a, { ...near(40), at: clock }, clock);
+    const driverOf = async () => (await app.inject({ method: "GET", url: `/api/locations/trips/${tripId}/driver`, headers: { authorization: `Bearer ${await sign(riderId, "ride-app", [{ r: "RIDER" }])}` } }));
+    expect((await driverOf()).json()).toMatchObject({ driverId: a });
+
+    // trip-service writes trip.matched (new driver) then trip.reassigned, keyed by trip id
+    await h["trip.matched"]({ eventId: uuid(), tripId, riderId, driverId: b, cityId: CITY, vehicleType: "economy" });
+    const reassigned = { eventId: uuid(), tripId, riderId, cityId: CITY, fromDriverId: a, toDriverId: b, byUserId: uuid() };
+    await h["trip.reassigned"](reassigned);
+    await h["trip.reassigned"](reassigned); // replay: same state
+
+    // the rider sees the new car at once (seeded from its last ping), then its pings
+    expect((await driverOf()).json()).toMatchObject({ driverId: b, lat: near(300).lat });
+    clock += 4000;
+    await recordPing(redis, b, { ...near(250), at: clock }, clock);
+    // a late ping of the old driver no longer feeds the trip
+    await recordPing(redis, a, { ...near(60), at: clock }, clock);
+    expect((await driverOf()).json()).toMatchObject({ driverId: b, lat: near(250).lat });
+
+    expect(await getDriverState(redis, a)).toMatchObject({ status: "available", tripId: undefined });
+    expect(await getDriverState(redis, b)).toMatchObject({ status: "on_trip", tripId });
+    expect(await redis.sismember(keys.tripMembers(tripId), a)).toBe(0);
+    expect(await redis.sismember(keys.tripMembers(tripId), b)).toBe(1);
+    expect((await nearby()).json<{ drivers: { driverId: string }[] }>().drivers.map((x) => x.driverId)).toEqual([a]);
+    const oldDriver = await sign(a, "ride-app", [{ r: "DRIVER" }]);
+    expect((await app.inject({ method: "GET", url: `/api/locations/trips/${tripId}/driver`, headers: { authorization: `Bearer ${oldDriver}` } })).statusCode).toBe(404);
+  });
+
+  it("trip.reassigned back to matching frees the old driver; a new driver busy on another trip isn't taken over", async () => {
+    const h = createHandlers(redis);
+    const a = await onlineDriver(BOLE);
+    const tripId = uuid();
+    const riderId = uuid();
+    await h["trip.matched"]({ eventId: uuid(), tripId, riderId, driverId: a, cityId: CITY, vehicleType: "economy" });
+    clock += 4000;
+    await recordPing(redis, a, { ...near(40), at: clock }, clock);
+    await h["trip.reassigned"]({ eventId: uuid(), tripId, riderId, cityId: CITY, fromDriverId: a, byUserId: uuid() });
+    expect(await getDriverState(redis, a)).toMatchObject({ status: "available" });
+    expect(await redis.exists(keys.tripLast(tripId))).toBe(0);
+    expect(await redis.smembers(keys.tripMembers(tripId))).toEqual([riderId]);
+
+    // an out-of-date event naming a driver who is now on another trip
+    const c = await onlineDriver(near(100));
+    const other = uuid();
+    await startTrip(redis, { tripId: other, driverId: c, riderId: uuid() });
+    await h["trip.reassigned"]({ eventId: uuid(), tripId, riderId, cityId: CITY, fromDriverId: a, toDriverId: c, byUserId: uuid() });
+    expect(await getDriverState(redis, c)).toMatchObject({ status: "on_trip", tripId: other });
+    await expect(h["trip.reassigned"]({ tripId, riderId, fromDriverId: "nope" })).rejects.toThrow();
+  });
+
   it("invalid events are rejected by the contract", async () => {
     await expect(createHandlers(redis)["driver.online"]({ driverId: "nope", cityId: CITY })).rejects.toThrow();
     await expect(createHandlers(redis)["driver.online"]({ driverId: uuid(), vehicleId: "v", vehicleType: "eco}", cityId: CITY, cashAllowed: true })).rejects.toThrow();
