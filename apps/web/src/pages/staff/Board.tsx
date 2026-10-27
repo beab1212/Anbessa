@@ -11,7 +11,10 @@ import { useSession } from "../../lib/session";
 import { CityMap } from "../../components/map/CityMap";
 import { DriverMarker, PickupMarker } from "../../components/map/markers";
 import { CityPicker } from "../../components/CityPicker";
-import { Drawer, Empty, Pill, Problem, TripStatus, tripTone } from "../../components/ui";
+import { Drawer, Empty, Notice, Pill, Problem, TripStatus, tripTone } from "../../components/ui";
+import { cancelReasonLabel, carLine, isCancellable, useTripParties, type StaffCancelReason } from "../../lib/trips";
+import { CancelTripDrawer } from "./TripDetail";
+import { ReassignButton } from "./Trace";
 
 const WAITING_TOO_LONG_MS = 60_000;
 const where = (t: Trip) => t.pickup.address ?? `${t.pickup.lat.toFixed(3)}, ${t.pickup.lng.toFixed(3)}`;
@@ -27,17 +30,19 @@ export function Board() {
   const drivers = useCityDrivers(cityId, allowed(p, "location:read_live", { cityId: cityId ?? undefined }));
   const [selected, setSelected] = useState<string | null>(null);
   const [assigning, setAssigning] = useState<Trip | null>(null);
+  const [cancelling, setCancelling] = useState<Trip | null>(null);
   const [changed, setChanged] = useState<string | null>(null);
   const now = useNow(5000);
   const qc = useQueryClient();
 
   const act = useMutation({
-    mutationFn: async (a: { kind: "assign"; tripId: string; driverId: string } | { kind: "cancel"; tripId: string }) =>
+    mutationFn: async (a: { kind: "assign"; tripId: string; driverId: string } | { kind: "cancel"; tripId: string; reason: StaffCancelReason }) =>
       a.kind === "assign"
         ? api<Trip>("staff", `/api/trips/${a.tripId}/assign`, { body: { driverId: a.driverId }, idempotencyKey: newIdempotencyKey() })
-        : api<Trip>("staff", `/api/trips/${a.tripId}/cancel`, { body: { reason: "STAFF_DECISION" }, idempotencyKey: newIdempotencyKey() }),
+        : api<Trip>("staff", `/api/trips/${a.tripId}/cancel`, { body: { reason: a.reason }, idempotencyKey: newIdempotencyKey() }),
     onSuccess: (t) => {
       setAssigning(null);
+      setCancelling(null);
       setChanged(t.id);
       void qc.invalidateQueries({ queryKey: ["board"] });
       void qc.invalidateQueries({ queryKey: ["drivers"] });
@@ -85,12 +90,17 @@ export function Board() {
           <CityPicker cities={cities} value={cityId} onChange={setCityId} />
         </div>
         <div className="panel-body">
-          <Problem error={board.error ?? act.error} />
+          <Problem error={board.error ?? (assigning || cancelling ? null : act.error)} />
+          {act.data?.status === "cancelled" && act.data.cancellation ? (
+            <Notice tone="ok">
+              Trip <span className="mono">{shortId(act.data.id)}</span> cancelled: {cancelReasonLabel(act.data.cancellation.reason).toLowerCase()}. {act.data.cancellation.feeMinor ? `Fee ${birr(act.data.cancellation.feeMinor)}.` : "No fee."}
+            </Notice>
+          ) : null}
           {board.isLoading ? <p className="muted small">Loading the board…</p> : null}
           {!board.isLoading && trips.length === 0 ? <Empty title="Nothing on the road">No active trips in this city right now.</Empty> : null}
           {trips.map((t) => {
             const urgent = t.status === "requested" && now - new Date(t.times.requestedAt).getTime() > WAITING_TOO_LONG_MS;
-            const cancellable = ["requested", "matched", "en_route"].includes(t.status);
+            const cancellable = isCancellable(t.status);
             return (
               <div key={t.id} className={`card pad selectable trip-card ${t.id === selected ? "selected" : ""} ${changed === t.id ? "just-changed" : ""}`} onClick={() => setSelected(t.id === selected ? null : t.id)} style={{ padding: "0.75rem 0.85rem" }}>
                 <div className="row between" style={{ marginBottom: "0.35rem" }}>
@@ -102,10 +112,13 @@ export function Board() {
                   <span>{t.vehicleType} · {t.paymentMethod.toLowerCase().replace("_", " ")} · {t.channel.toLowerCase().replace("_", " ")}</span>
                   <span className="mono">{birr(t.fare.estimateMinor)}</span>
                 </div>
+                {t.id === selected ? <TripPeople trip={t} /> : null}
                 {t.id === selected ? (
                   <div className="row" style={{ marginTop: "0.6rem", gap: "0.5rem" }} onClick={(e) => e.stopPropagation()}>
-                    {canAssign && t.status === "requested" ? <button className="btn sm" onClick={() => setAssigning(t)}>Assign driver</button> : null}
-                    {canCancel && cancellable ? <button className="btn danger sm" disabled={act.isPending} onClick={() => confirm(`Cancel trip ${shortId(t.id)}? The rider isn't charged.`) && act.mutate({ kind: "cancel", tripId: t.id })}>Cancel</button> : null}
+                    {/* assign: still finding a driver; reassign: matched or on the way (trip:reassign) */}
+                    {canAssign && t.status === "requested" ? <button className="btn sm" onClick={() => { act.reset(); setAssigning(t); }}>Assign driver</button> : null}
+                    <ReassignButton trip={t} />
+                    {canCancel && cancellable ? <button className="btn danger sm" disabled={act.isPending} onClick={() => { act.reset(); setCancelling(t); }}>Cancel</button> : null}
                     <Link className="btn ghost sm" to={`/staff/trips/${t.id}`}><ExternalLink /> Details</Link>
                   </div>
                 ) : null}
@@ -118,8 +131,31 @@ export function Board() {
 
       {assigning ? (
         <Drawer title={`Assign trip ${shortId(assigning.id)}`} onClose={() => setAssigning(null)}>
+          <Problem error={act.error} />
           <AssignPanel trip={assigning} drivers={free} busy={act.isPending} onAssign={(driverId) => act.mutate({ kind: "assign", tripId: assigning.id, driverId })} />
         </Drawer>
+      ) : null}
+      {cancelling ? (
+        <CancelTripDrawer trip={cancelling} busy={act.isPending} error={act.error} onClose={() => setCancelling(null)} onCancel={(reason) => act.mutate({ kind: "cancel", tripId: cancelling.id, reason })} />
+      ) : null}
+    </div>
+  );
+}
+
+/** Names for the selected card only: one parties lookup at a time, cached by trip-service for 60 s. */
+function TripPeople({ trip }: { trip: Trip }) {
+  const parties = useTripParties(trip.id);
+  const d = parties.data;
+  if (parties.isLoading) return <div className="xs muted" style={{ marginTop: "0.35rem" }}>Loading names…</div>;
+  if (!d) return null;
+  return (
+    <div className="xs" style={{ marginTop: "0.35rem" }}>
+      <div><span className="muted">Rider</span> {d.rider?.name ?? <span className="mono">{shortId(trip.riderUserId)}</span>}</div>
+      {trip.driver ? (
+        <div>
+          <span className="muted">Driver</span> {d.driver?.name ?? <span className="mono">{shortId(trip.driver.userId)}</span>}
+          {d.vehicle ? <span className="muted"> · {carLine(d.vehicle)} · <span className="mono">{d.vehicle.plateNumber}</span></span> : null}
+        </div>
       ) : null}
     </div>
   );

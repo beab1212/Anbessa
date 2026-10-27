@@ -55,13 +55,20 @@ Turborepo runs the same tasks across the workspace (`pnpm turbo run build|test|l
 
 ## Tests
 
-No DOM environment is configured (no jsdom or Testing Library), so the tests cover plain modules. Vitest picks up every `*.test.ts`; there are three files and 18 tests (all passing when this was written).
+No DOM environment is configured (no jsdom or Testing Library), so the tests cover plain modules and the pure helpers exported from pages. Vitest picks up every `*.test.ts`; there are 10 files and 68 tests (`pnpm test` in `apps/web`, all passing on 2026-10-27).
 
-| File | Covers |
-|---|---|
-| [tests/api.test.ts](../tests/api.test.ts) | The HTTP client with stubbed axios adapters: bearer token and `Idempotency-Key` are sent; one token refresh after a 401, then `signed_out`; failures become `ApiError` with the server's message; a missing session is treated as signed out |
-| [tests/logic.test.ts](../tests/logic.test.ts) | `toE164`, placeholder emails, `birr` and times; `staffSections()` for dispatcher, onboarding officer, super admin, auditor, finance officer/manager, support and operations, call center, safety; phone booking hidden by the flag; app-audience roles in a staff token give nothing |
-| [src/lib/polyline.test.ts](../src/lib/polyline.test.ts) | `decodePolyline6` on Google's reference line and on an empty string |
+| File | Tests | Covers |
+|---|---|---|
+| [tests/api.test.ts](../tests/api.test.ts) | 4 | The HTTP client with stubbed axios adapters: bearer token and `Idempotency-Key` are sent; one token refresh after a 401, then `signed_out`; failures become `ApiError` with the server's message; a missing session is treated as signed out |
+| [tests/logic.test.ts](../tests/logic.test.ts) | 12 | `toE164`, placeholder emails, `birr` and times; `staffSections()` for dispatcher, onboarding officer, super admin, auditor, finance officer/manager, support and operations, call center, safety (city-scoped `report:read` and `user:read_masked` now show Overview, Reports and Users); phone booking hidden by the flag; app-audience roles in a staff token give nothing |
+| [tests/trips.test.ts](../tests/trips.test.ts) | 11 | `src/lib/trips.ts`: staff cancel reasons and labels, cancellable statuses, `carLine`, recent trips (newest first, capped, full ids only, survives missing storage), `routeSummary`, `vehicleOptions`, `phoneMethods`, live-map filters |
+| [tests/money.test.ts](../tests/money.test.ts) | 14 | `src/lib/money.ts`: CSV quoting and formula defusing, headers and CRLF, amounts, file names; query strings, `before` paging, joining pages, `decided()`, trip id check, payout line totals; which money lists a person may ask for |
+| [tests/partner.test.ts](../tests/partner.test.ts) | 9 | `src/lib/partner.ts`: employee ↔ coordinator switch, open invitations, cancellable and live statuses, `cancelFeeNote`, `quoteUsable`, trips booked in this tab, `vehicleChoices`, device labels, phone-number names |
+| [tests/account.test.ts](../tests/account.test.ts) | 6 | `src/lib/account.ts`: name and password rules, backup-code input and clipboard text, device labels, session order |
+| [tests/admin.test.ts](../tests/admin.test.ts) | 4 | `reportScope`, `statsPath`, `inAnyCity`, `suspendUntil` |
+| [tests/onboarding.test.ts](../tests/onboarding.test.ts) | 3 | `companyCities`, `companyPowers`, `orgActions` from pages/staff/Onboarding.tsx |
+| [tests/safety.test.ts](../tests/safety.test.ts) | 3 | `isUserId`, Addis Ababa `datetime-local` conversion, `actionProblems` from pages/staff/Safety.tsx |
+| [src/lib/polyline.test.ts](../src/lib/polyline.test.ts) | 2 | `decodePolyline6` on Google's reference line and on an empty string |
 
 There are no component, page or end-to-end tests.
 
@@ -104,4 +111,8 @@ What the code requires, and what [docs/production/README.md](../../../docs/produ
 | "Address search is offline: common places only." | `/api/maps/search` failed (mapping-service or Nominatim down) | mapping-service; the page keeps working with `COMMON_PLACES` |
 | Document upload: "The file didn't upload…" | The signed `PUT` failed: bucket CORS, CSP, or local storage not reachable | fleet-service `STORAGE` settings; bucket CORS for `PUT` from the web origin |
 | Book by phone missing from the sidebar | `features.phoneBooking` is off in platform settings, or no `trip:create_on_behalf` | Administration → Settings |
+| Book by phone: "No car types are offered in this city" or no payment choice | Client config has no enabled vehicle type for the city, or the city has neither cash nor mobile money switched on | Administration → Cities and vehicles; Settings → payments |
+| Support or safety pages: "Can't reach the server…" | support-service (port 3009) isn't running, or `SUPPORT_URL` points elsewhere | `make dev-services`; [configuration.md](configuration.md) |
+| Find a trip timeline shows only timestamps, no "by …" | `GET /api/trips/:id/events` failed (staff need `trip:read` in the trip's city; others get 404) | Network tab; trip-service |
+| Partner trip page: no car on the map | `GET /api/locations/trips/:id/driver` answers 404: not the booker, the billed company or the fleet, the driver hasn't pinged yet, or the trip ended over 5 min ago | location-service |
 | Shared trip shows "This link has ended" | trip-service answered 404: the trip ended over 30 minutes ago or sharing was stopped | trip-service |

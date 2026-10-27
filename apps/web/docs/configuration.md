@@ -18,11 +18,13 @@ Values come from `apps/web/.env` (and the other files Vite loads for the mode, s
 | `PAYMENT_URL` | `/api/payments` | `http://localhost:3005` | payment-service |
 | `MAPPING_URL` | `/api/maps` | `http://localhost:3007` | mapping-service |
 | `FLEET_URL` | `/api/fleet` | `http://localhost:3008` | fleet-service |
+| `SUPPORT_URL` | `/api/support` | `http://localhost:3009` | support-service |
+| `NOTIFICATION_URL` | `/api/notifications` | `http://localhost:3006` | notification-service (campaigns) |
 | `AUDIT_URL` | `/api/audit` | `http://localhost:3010` | audit-service |
 | `PLATFORM_URL` | `/api/platform` | `http://localhost:3011` | platform-service |
 | `GATEWAY_URL` | every prefix whose own variable is unset | unset | Send traffic through Kong, e.g. `http://localhost:8000` with `make dev-gateway` |
 
-Lookup order for each prefix: the service variable, then `GATEWAY_URL`, then the localhost default. Because `.env.example` defines all nine service variables, a `.env` copied from it makes `GATEWAY_URL` ineffective until those lines are removed or pointed at Kong.
+Lookup order for each prefix: the service variable, then `GATEWAY_URL`, then the localhost default. Because `.env.example` defines all ten service variables, a `.env` copied from it makes `GATEWAY_URL` ineffective until those lines are removed or pointed at Kong.
 
 The dev server port is fixed at `5173` in `vite.config.ts` (`server.port`); it is not configurable through an env var.
 
@@ -43,10 +45,12 @@ Not environment variables, but they change behaviour without a rebuild. [src/lib
 |---|---|
 | `cities` | Replaces the built-in city list (`addis-ababa`, `hawassa`) used by city pickers, labels and `inAnyCity()` ([src/lib/format.ts](../src/lib/format.ts)) |
 | `features.phoneBooking` | `false` hides "Book by phone" in the staff sidebar |
-| `features.corporateBooking`, `features.tripPin` | In the type, not read by any page |
-| `maintenance.newTripsPaused`, `maintenance.message` | Red "new trips paused" pill in the top bar and a maintenance banner on non-map pages |
+| `features.corporateBooking` | `false` makes the partner booking page refuse ("Company booking is switched off") |
+| `features.tripPin` | In the type, not read by any page |
+| `maintenance.newTripsPaused`, `maintenance.message` | Red "new trips paused" pill in the top bar and a maintenance banner on non-map pages; the partner booking page shows the message too |
 | `announcements` | Banners in the Shell for announcements whose `audiences` include `staff` (staff area) or `partner` (partner area) |
-| `vehicleTypes`, `version` | In the type, not read by any page. Vehicle choices on Book by phone and Add vehicle are hard-coded (economy, comfort, minivan) |
+| `vehicleTypes` | Car choices on Book by phone (`vehicleOptions()` in [src/lib/trips.ts](../src/lib/trips.ts): enabled types whose `cities` is empty or includes the city; the built-in economy / comfort / minivan when the list is empty) and on the partner booking page (`vehicleChoices()` in [src/lib/partner.ts](../src/lib/partner.ts): types listing the city; the built-in three before the config loads). Add vehicle still uses the hard-coded `VEHICLE_TYPES` |
+| `version` | In the type, not read by any page |
 
 The permission matrix (`GET /api/identity/authz`, every 60 s) is the other piece of runtime configuration; see [architecture.md §4](architecture.md#4-auth-and-sessions).
 
@@ -62,6 +66,11 @@ The permission matrix (`GET /api/identity/authz`, every 60 s) is the other piece
 | Token refresh margin 60 s | `src/lib/api.ts` |
 | "Waiting too long" on the board: 60 s | `src/pages/staff/Board.tsx` |
 | Idempotency key format `web-<uuid>` | `src/lib/api.ts` |
+| Browser storage keys: `anbessa.staff.recentTrips` (localStorage, 8 ids), `anbessa.partner.booked` (sessionStorage, 30 trips) | `src/lib/trips.ts`, `src/lib/partner.ts` |
+| Report and search date ranges: 1–92 days, default the last 7 Addis Ababa days | `src/lib/reports.ts` |
+| Staff cancel reasons (`STAFF_CANCEL_REASONS`), booker cancel reasons (`BOOKER_CANCEL_REASONS`) | `src/lib/trips.ts`, `src/lib/partner.ts` |
+| Phone booking payment methods: cash and mobile money only | `PHONE_METHODS` in `src/lib/trips.ts` |
+| Fleet directory page sizes 50, then 200 | `src/pages/staff/Fleet.tsx` |
 
 ## TypeScript
 

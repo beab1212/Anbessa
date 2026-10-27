@@ -6,13 +6,15 @@ import { useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { allowed, api } from "../../lib/api";
 import { birr, CITIES, CITY_NAMES, dayAndTime } from "../../lib/format";
-import { percent, toMinor, type RuleChange } from "../../lib/money";
+import { CHANGE_LABEL, citiesWithAny, percent, RULE_VIEWERS, toMinor, type RuleChange } from "../../lib/money";
+import { useNow } from "../../lib/hooks";
 import { useSession } from "../../lib/session";
-import { Drawer, Field, Notice, PageHead, Pill, Problem, SelectField, TextArea } from "../../components/ui";
+import { Drawer, Empty, Field, Notice, PageHead, Pill, Problem, SelectField, TextArea } from "../../components/ui";
+import { useStaffNames } from "../admin/Approvals";
 import { describeRuleChange } from "./Approvals";
 
-interface Rule { id: string | null; model: string; rateBp: number | null; fixedMinor: number | null; minMinor: number | null; maxMinor: number | null; vehicleType: string | null; beneficiaryId: string | null; validFrom: string; validTo: string | null; inForce: boolean }
-interface Policy { mode: string; warningMinor: number; cashLimitMinor: number; hardLimitMinor: number; prepaidMinimumMinor: number; dueDays: number; minPaymentBp: number; minPayoutMinor: number; taxBasis: string; vatRateBp: number; validFrom: string | null; builtIn?: boolean }
+interface Rule { id: string | null; model: string; rateBp: number | null; fixedMinor: number | null; minMinor: number | null; maxMinor: number | null; vehicleType: string | null; beneficiaryId: string | null; validFrom: string; validTo: string | null; inForce: boolean; proposedBy?: string | null; approvedBy?: string | null }
+interface Policy { mode: string; warningMinor: number; cashLimitMinor: number; hardLimitMinor: number; prepaidMinimumMinor: number; dueDays: number; minPaymentBp: number; minPayoutMinor: number; taxBasis: string; vatRateBp: number; validFrom: string | null; builtIn?: boolean; proposedBy?: string | null; approvedBy?: string | null }
 interface RulesOverview { cityId: string; defaults: { rule: Rule; policy: Policy }; policy: Policy; rules: Rule[]; policies: Policy[]; changes: RuleChange[] }
 
 const describeRule = (r: Pick<Rule, "model" | "rateBp" | "fixedMinor" | "minMinor" | "maxMinor">) =>
@@ -22,13 +24,24 @@ const describeRule = (r: Pick<Rule, "model" | "rateBp" | "fixedMinor" | "minMino
 export function RulesPage() {
   const { staff } = useSession();
   const p = staff.principal;
+  const name = useStaffNames();
   const [params, setParams] = useSearchParams();
-  const city = params.get("city") ?? CITIES[0]!;
+  // only the cities whose rules payment-service will show this person
+  const cities = citiesWithAny(p, RULE_VIEWERS, CITIES);
+  const asked = params.get("city");
+  const city = asked && cities.includes(asked) ? asked : (cities[0] ?? null);
   const [proposing, setProposing] = useState<"COMMISSION_RULE" | "BALANCE_POLICY" | null>(null);
-  const q = useQuery({ queryKey: ["money", "rules", city], queryFn: () => api<RulesOverview>("staff", `/api/payments/rules?cityId=${city}`) });
+  const q = useQuery({ queryKey: ["money", "rules", city], enabled: !!city, queryFn: () => api<RulesOverview>("staff", `/api/payments/rules?cityId=${city}`) });
   const o = q.data;
+  const now = useNow(60_000);
   const inForce = o?.rules.filter((r) => r.inForce) ?? [];
-  const scheduled = o?.rules.filter((r) => !r.inForce && new Date(r.validFrom) > new Date()) ?? [];
+  const scheduled = o?.rules.filter((r) => !r.inForce && new Date(r.validFrom).getTime() > now) ?? [];
+  const ended = o?.rules.filter((r) => !r.inForce && new Date(r.validFrom).getTime() <= now) ?? [];
+  const policyNow = o?.policy.validFrom ?? null;
+  const pastPolicies = o?.policies.filter((x) => x.validFrom !== policyNow) ?? [];
+  if (!city) {
+    return <div className="page"><PageHead title="Commission and limits" /><Empty title="No city to show.">Your roles don't cover any city's rules.</Empty></div>;
+  }
 
   return (
     <div className="page stack" style={{ gap: "1rem" }}>
@@ -37,15 +50,18 @@ export function RulesPage() {
         lede="Operations proposes, finance approves. Changes apply to trips completed after they take effect."
         right={
           <>
-            {allowed(p, "commission_rule:propose", { cityId: city }) ? <button className="btn secondary" onClick={() => setProposing("COMMISSION_RULE")}>Propose a commission</button> : null}
-            {allowed(p, "balance_policy:propose", { cityId: city }) ? <button className="btn secondary" onClick={() => setProposing("BALANCE_POLICY")}>Propose limits</button> : null}
+            {allowed(p, "commission_rule:propose", { cityId: city }) ? <button className="btn secondary" disabled={!o} onClick={() => setProposing("COMMISSION_RULE")}>Propose a commission</button> : null}
+            {allowed(p, "balance_policy:propose", { cityId: city }) ? <button className="btn secondary" disabled={!o} onClick={() => setProposing("BALANCE_POLICY")}>Propose limits</button> : null}
           </>
         }
       />
-      <div className="chips">
-        {CITIES.map((c) => <button key={c} className="chip" aria-pressed={city === c} onClick={() => setParams({ city: c })}>{CITY_NAMES[c] ?? c}</button>)}
-      </div>
+      {cities.length > 1 ? (
+        <div className="chips">
+          {cities.map((c) => <button key={c} className="chip" aria-pressed={city === c} onClick={() => setParams({ city: c })}>{CITY_NAMES[c] ?? c}</button>)}
+        </div>
+      ) : <p className="small muted" style={{ margin: 0 }}>{CITY_NAMES[city] ?? city}</p>}
       <Problem error={q.error} />
+      {q.isPending ? <p className="small muted">Loading the rules…</p> : null}
       {o ? (
         <div className="two-col">
           <section className="card">
@@ -54,7 +70,7 @@ export function RulesPage() {
               {inForce.length === 0 ? <p className="small" style={{ marginTop: 0 }}><strong>{describeRule(o.defaults.rule)}</strong> <span className="muted">(default; no rule approved for this city yet)</span></p> : null}
               <dl className="kv">
                 {inForce.map((r) => (
-                  <Fragment key={r.id}><dt>{r.vehicleType ?? "every vehicle type"}{r.beneficiaryId ? " (contract)" : ""}</dt><dd><strong>{describeRule(r)}</strong> <span className="xs muted">since {dayAndTime(r.validFrom)}</span></dd></Fragment>
+                  <Fragment key={r.id}><dt>{r.vehicleType ?? "every vehicle type"}{r.beneficiaryId ? " (contract)" : ""}</dt><dd><strong>{describeRule(r)}</strong> <span className="xs muted">since {dayAndTime(r.validFrom)}{r.validTo ? `, until ${dayAndTime(r.validTo)}` : ""}{r.approvedBy ? ` · approved by ${name(r.approvedBy)}` : ""}</span></dd></Fragment>
                 ))}
                 {scheduled.map((r) => (
                   <Fragment key={r.id}><dt>{r.vehicleType ?? "every vehicle type"}</dt><dd>{describeRule(r)} <Pill tone="amber">from {dayAndTime(r.validFrom)}</Pill></dd></Fragment>
@@ -73,6 +89,8 @@ export function RulesPage() {
                 <dt>All trips stop</dt><dd className="mono">{birr(o.policy.hardLimitMinor)}</dd>
                 <dt>Payment due</dt><dd>within {o.policy.dueDays} days, at least {percent(o.policy.minPaymentBp)}</dd>
                 <dt>Smallest payout</dt><dd className="mono">{birr(o.policy.minPayoutMinor)}</dd>
+                <dt>VAT</dt><dd>{percent(o.policy.vatRateBp)} of {o.policy.taxBasis === "FULL_FARE" ? "the fare" : "the commission"}</dd>
+                {o.policy.validFrom ? <><dt>Since</dt><dd className="small">{dayAndTime(o.policy.validFrom)}{o.policy.approvedBy ? ` · approved by ${name(o.policy.approvedBy)}` : ""}</dd></> : null}
               </dl>
             </div>
           </section>
@@ -80,7 +98,7 @@ export function RulesPage() {
       ) : null}
       {o?.changes.length ? (
         <section className="card">
-          <div className="card-head"><h2>Proposals</h2></div>
+          <div className="card-head"><h2>Proposals</h2><span className="xs muted">latest 30 · decide them under Money approvals</span></div>
           <div className="table-wrap">
             <table className="table">
               <thead><tr><th>When</th><th>What</th><th>Status</th></tr></thead>
@@ -89,7 +107,36 @@ export function RulesPage() {
                   <tr key={c.id}>
                     <td className="small">{dayAndTime(c.createdAt)}</td>
                     <td className="small">{describeRuleChange(c)}<div className="xs muted">“{c.reason}”{c.decisionReason ? ` · decision: ${c.decisionReason}` : ""}</div></td>
-                    <td><Pill tone={c.status === "EXECUTED" ? "green" : c.status === "PENDING" ? "amber" : "grey"}>{c.status === "EXECUTED" ? "approved" : c.status.toLowerCase()}</Pill></td>
+                    <td>
+                      <Pill tone={c.status === "EXECUTED" ? "green" : c.status === "PENDING" ? "amber" : c.status === "REJECTED" ? "red" : "grey"}>{CHANGE_LABEL[c.status] ?? c.status.toLowerCase()}</Pill>
+                      <div className="xs muted">by {name(c.makerId)}{c.checkerId ? ` · decided by ${name(c.checkerId)}` : ""}</div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
+      {o && (ended.length || pastPolicies.length) ? (
+        <section className="card">
+          <div className="card-head"><h2>Other versions</h2><span className="xs muted">ended or scheduled; trips keep the version they were settled with</span></div>
+          <div className="table-wrap">
+            <table className="table">
+              <thead><tr><th>In force</th><th>What</th><th>Approved by</th></tr></thead>
+              <tbody>
+                {ended.map((r) => (
+                  <tr key={`r-${r.id}`}>
+                    <td className="small">{dayAndTime(r.validFrom)} → {r.validTo ? dayAndTime(r.validTo) : "—"}</td>
+                    <td className="small"><strong>Commission</strong> on {r.vehicleType ?? "every vehicle type"}{r.beneficiaryId ? " (contract)" : ""}: {describeRule(r)}</td>
+                    <td className="small">{r.approvedBy ? name(r.approvedBy) : "—"}</td>
+                  </tr>
+                ))}
+                {pastPolicies.map((x, i) => (
+                  <tr key={`p-${x.validFrom ?? i}`}>
+                    <td className="small">{x.validFrom && new Date(x.validFrom).getTime() > now ? <Pill tone="amber">from {dayAndTime(x.validFrom)}</Pill> : `from ${dayAndTime(x.validFrom)}`}</td>
+                    <td className="small"><strong>Limits</strong>: {x.mode === "PREPAID" ? `prepaid, at least ${birr(x.prepaidMinimumMinor)}` : `warning ${birr(x.warningMinor)} · cash paused ${birr(x.cashLimitMinor)} · blocked ${birr(x.hardLimitMinor)}`}; due in {x.dueDays} days; VAT {percent(x.vatRateBp)}</td>
+                    <td className="small">{x.approvedBy ? name(x.approvedBy) : "—"}</td>
                   </tr>
                 ))}
               </tbody>

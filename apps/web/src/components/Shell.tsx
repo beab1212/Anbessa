@@ -1,6 +1,6 @@
 import { useEffect, useState, type ComponentType, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { Activity, Banknote, Building2, CarFront, CheckCheck, ClipboardCheck, CreditCard, Gauge, HandCoins, IdCard, KeyRound, Landmark, LayoutDashboard, LogOut, Map as MapIcon, MapPinned, Megaphone, Percent, Phone, PlugZap, ScrollText, Search, ShieldAlert, SlidersHorizontal, UserCog, Users, UsersRound, Wallet, type LucideProps } from "lucide-react";
+import { Activity, BarChart3, CalendarClock, Gavel, Hexagon, Send, Tag, Tags, BadgePercent, CircleSlash, FileText, Gift, Scale, Banknote, Building2, CarFront, CheckCheck, CircleUser, LifeBuoy, PackageSearch, Siren, TextSearch, ClipboardCheck, CreditCard, Gauge, HandCoins, IdCard, KeyRound, Landmark, LayoutDashboard, LogOut, Map as MapIcon, MapPinned, Megaphone, Percent, Phone, PlugZap, ScrollText, Search, ShieldAlert, SlidersHorizontal, UserCog, Users, UsersRound, Wallet, type LucideProps } from "lucide-react";
 import { roleInfo, type Principal } from "@ride-app/shared-authz";
 import { useClientConfig } from "../lib/platform";
 import type { Surface } from "../lib/api";
@@ -39,9 +39,28 @@ export const ICONS: Record<string, ComponentType<LucideProps>> = {
   "/staff/money/payments": CreditCard,
   "/staff/money/approvals": HandCoins,
   "/staff/money/payouts": Banknote,
+  "/staff/money/adjustments": Scale,
+  "/staff/money/write-offs": CircleSlash,
+  "/staff/money/overrides": BadgePercent,
+  "/staff/money/incentives": Gift,
+  "/staff/money/invoices": FileText,
   "/staff/money/rules": Percent,
   "/staff/money/providers": PlugZap,
   "/partner/register": Building2,
+  "/staff/account": CircleUser,
+  "/staff/search": TextSearch,
+  "/staff/reports": BarChart3,
+  "/staff/scheduled": CalendarClock,
+  "/staff/ops/pricing": Tags,
+  "/staff/ops/zones": Hexagon,
+  "/staff/marketing/promos": Tag,
+  "/staff/marketing/campaigns": Send,
+  "/staff/reports/regulatory": Gavel,
+  "/staff/safety/sos": Siren,
+  "/staff/safety/incidents": ShieldAlert,
+  "/staff/support/tickets": LifeBuoy,
+  "/staff/support/lost-items": PackageSearch,
+  "/partner/account": CircleUser,
 };
 
 function useAddisClock() {

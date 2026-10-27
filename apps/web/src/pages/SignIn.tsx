@@ -2,6 +2,7 @@ import { lazy, Suspense, useState, type FormEvent, type ReactNode } from "react"
 import { Link, useNavigate } from "react-router-dom";
 import { Building2, ShieldCheck } from "lucide-react";
 import { authCall, type Surface } from "../lib/api";
+import { normalizeBackupCode } from "../lib/account";
 import { phone as fmtPhone, toE164 } from "../lib/format";
 import { useSession } from "../lib/session";
 import { CityMap } from "../components/map/CityMap";
@@ -52,20 +53,43 @@ export function SignInChooser() {
   );
 }
 
-/** Staff: email + password, then the authenticator code (Auth.md §9.2). */
+/** Staff: email + password, then the authenticator code (Auth.md §9.2), or a one-time backup code. */
 export function StaffSignIn() {
   const navigate = useNavigate();
   const { refresh } = useSession();
-  const [stage, setStage] = useState<"password" | "totp">("password");
+  const [stage, setStage] = useState<"password" | "totp" | "backup">("password");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
+  const [backup, setBackup] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
 
-  async function done() {
+  async function done(to = "/staff") {
     await refresh("staff");
-    navigate("/staff");
+    navigate(to);
+  }
+
+  function switchTo(next: "totp" | "backup") {
+    setStage(next);
+    setError(null);
+    setCode("");
+    setBackup("");
+  }
+
+  async function submitBackup(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await authCall("staff", "/two-factor/verify-backup-code", { code: normalizeBackupCode(backup) });
+      setBackup("");
+      await done("/staff/account?backup=used");
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function submitPassword(e: FormEvent) {
@@ -109,6 +133,18 @@ export function StaffSignIn() {
           <button className="btn block lg" disabled={busy}>{busy ? "Checking…" : "Continue"}</button>
           <p className="xs muted" style={{ marginTop: "1rem" }}>Staff accounts are created by a super admin. There is no sign-up.</p>
         </form>
+      ) : stage === "backup" ? (
+        <form onSubmit={submitBackup}>
+          <h1 style={{ marginBottom: "0.25rem" }}>Backup code</h1>
+          <p className="muted small" style={{ marginBottom: "1rem" }}>One of the codes you saved when you set up your authenticator. Each code works once.</p>
+          <Problem error={error} />
+          <Field className="code" label="Backup code" autoComplete="one-time-code" autoCapitalize="off" spellCheck={false} required autoFocus maxLength={40} value={backup} onChange={(e) => setBackup(e.target.value)} />
+          <button className="btn block lg" disabled={busy || normalizeBackupCode(backup).length < 6}>{busy ? "Checking…" : "Sign in"}</button>
+          <div className="row" style={{ marginTop: "0.75rem", gap: "1rem" }}>
+            <button type="button" className="link" onClick={() => switchTo("totp")}>Use the authenticator app</button>
+          </div>
+          <p className="xs muted" style={{ marginTop: "1rem" }}>No backup codes either? Ask a super admin to reset your sign-in.</p>
+        </form>
       ) : (
         <form onSubmit={submitCode}>
           <h1 style={{ marginBottom: "0.25rem" }}>Authenticator code</h1>
@@ -116,6 +152,9 @@ export function StaffSignIn() {
           <Problem error={error} />
           <Field className="code" label="Code" inputMode="numeric" autoComplete="one-time-code" pattern="\d{6}" maxLength={6} required autoFocus value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))} />
           <button className="btn block lg" disabled={busy || code.length !== 6}>{busy ? "Checking…" : "Sign in"}</button>
+          <div className="row" style={{ marginTop: "0.75rem", gap: "1rem" }}>
+            <button type="button" className="link" onClick={() => switchTo("backup")}>Use a backup code</button>
+          </div>
         </form>
       )}
     </Frame>

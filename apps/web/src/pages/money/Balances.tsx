@@ -5,9 +5,11 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { allowed, api } from "../../lib/api";
-import { birr, CITY_NAMES, shortId } from "../../lib/format";
-import { STATE_LABEL, stateTone, type Balance, type BalanceRow, type BalanceState } from "../../lib/money";
+import { Download } from "lucide-react";
+import { allowed, api, citiesFor } from "../../lib/api";
+import { download } from "../../lib/admin";
+import { birr, CITIES, CITY_NAMES, shortId } from "../../lib/format";
+import { BALANCE_CSV, csvName, everywhere, queryString, STATE_LABEL, stateTone, toCsv, type Balance, type BalanceRow, type BalanceState } from "../../lib/money";
 import { useSession } from "../../lib/session";
 import { Empty, PageHead, Pill, Problem } from "../../components/ui";
 import { BalancePanel, RecordCashDrawer } from "./BalancePanel";
@@ -20,19 +22,36 @@ export function BalancesPage() {
   const [state, setState] = useState<BalanceState | "">("");
   const [type, setType] = useState<"" | "INDIVIDUAL" | "ORGANIZATION">("");
   const [q, setQ] = useState("");
+  const [cityId, setCityId] = useState("");
   const [offset, setOffset] = useState(0);
   const [recording, setRecording] = useState(false);
-  const params = new URLSearchParams({ limit: String(PAGE), offset: String(offset), ...(state ? { state } : {}), ...(type ? { type } : {}), ...(q.trim().length >= 3 ? { q: q.trim() } : {}) });
-  const list = useQuery({ queryKey: ["money", "balances", params.toString()], queryFn: () => api<{ total: number; balances: BalanceRow[] }>("staff", `/api/payments/balances?${params}`) });
+  // the list is limited to the cities where the person holds balance:read; asking for another city is a 403
+  const cities = citiesFor(staff.principal, "balance:read", CITIES);
+  const global = everywhere(staff.principal, "balance:read");
+  const city = cityId && cities.includes(cityId) ? cityId : "";
+  const params = queryString({ limit: PAGE, offset, state, type, cityId: city, q: q.trim().length >= 3 ? q.trim() : "" });
+  const list = useQuery({ queryKey: ["money", "balances", params], queryFn: () => api<{ total: number; balances: BalanceRow[] }>("staff", `/api/payments/balances?${params}`) });
   const reset = () => setOffset(0);
+  const rows = list.data?.balances ?? [];
 
   return (
     <div className="page stack" style={{ gap: "1rem" }}>
       <PageHead
         title="Balances"
         lede="What each driver and fleet company owes or is owed. Cash trips add commission owed; card and mobile money trips add earnings."
-        right={allowed(staff.principal, "topup:record_cash") ? <button className="btn secondary" onClick={() => setRecording(true)}>Record cash or a bank transfer</button> : null}
+        right={
+          <>
+            {rows.length ? <button className="btn secondary" onClick={() => download(csvName("balances"), toCsv(rows, BALANCE_CSV))}><Download /> Export CSV ({rows.length})</button> : null}
+            {allowed(staff.principal, "topup:record_cash") ? <button className="btn secondary" onClick={() => setRecording(true)}>Record cash or a bank transfer</button> : null}
+          </>
+        }
       />
+      {cities.length > 1 ? (
+        <div className="chips" aria-label="City">
+          <button className="chip" aria-pressed={city === ""} onClick={() => { setCityId(""); reset(); }}>{global ? "Every city" : "All my cities"}</button>
+          {cities.map((c) => <button key={c} className="chip" aria-pressed={city === c} onClick={() => { setCityId(c); reset(); }}>{CITY_NAMES[c] ?? c}</button>)}
+        </div>
+      ) : cities.length === 1 && !global ? <p className="small muted" style={{ margin: 0 }}>Balances in {CITY_NAMES[cities[0]!] ?? cities[0]}, the city you handle.</p> : null}
       <div className="row" style={{ gap: "0.5rem", flexWrap: "wrap" }}>
         <div className="chips">
           <button className="chip" aria-pressed={state === ""} onClick={() => { setState(""); reset(); }}>All</button>
@@ -47,6 +66,7 @@ export function BalancesPage() {
         <input className="input" style={{ maxWidth: "16rem" }} placeholder="Reference code or id" value={q} onChange={(e) => { setQ(e.target.value); reset(); }} aria-label="Search balances" />
       </div>
       <Problem error={list.error} />
+      {list.isPending ? <p className="small muted">Loading balances…</p> : null}
       {list.data?.balances.length === 0 ? <Empty title="No balances match." /> : null}
       {list.data?.balances.length ? (
         <div className="table-wrap">

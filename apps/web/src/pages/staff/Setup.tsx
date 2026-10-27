@@ -4,6 +4,7 @@ import QRCode from "qrcode";
 import { authCall } from "../../lib/api";
 import { useSession } from "../../lib/session";
 import { Brand, Field, Problem } from "../../components/ui";
+import { BackupCodes } from "./Account";
 
 /**
  * First sign-in of a staff account (Auth.md §17, I3): roles stay off until the temporary
@@ -101,9 +102,8 @@ export function StaffSetup() {
                 <Field className="code" label="Code from the app" inputMode="numeric" maxLength={6} required value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))} />
                 <button className="btn" disabled={busy || code.length !== 6}>Confirm</button>
               </form>
-              <div className="handover" style={{ marginTop: "1rem" }}>
-                <span className="label">Backup codes: each works once. Save them now; they aren't shown again.</span>
-                <ul className="mono small" style={{ columns: 2, listStyle: "none", padding: 0, margin: "0.5rem 0 0", lineHeight: 1.9 }}>{enrol.backup.map((b) => <li key={b}>{b}</li>)}</ul>
+              <div style={{ marginTop: "1rem" }}>
+                <BackupCodes codes={enrol.backup} />
               </div>
             </div>
           </div>

@@ -36,6 +36,7 @@ The app never builds an absolute API URL. Both axios instances in [src/lib/api.t
 | `/api/payments` | `PAYMENT_URL` | `http://localhost:3005` | payment-service |
 | `/api/maps` | `MAPPING_URL` | `http://localhost:3007` | mapping-service |
 | `/api/fleet` | `FLEET_URL` | `http://localhost:3008` | fleet-service |
+| `/api/support` | `SUPPORT_URL` | `http://localhost:3009` | support-service |
 | `/api/audit` | `AUDIT_URL` | `http://localhost:3010` | audit-service |
 | `/api/platform` | `PLATFORM_URL` | `http://localhost:3011` | platform-service |
 
@@ -43,7 +44,7 @@ Resolution per prefix: `env[NAME] ?? env.GATEWAY_URL ?? http://localhost:<port>`
 
 ### Through Kong in development
 
-`make dev-gateway` runs Kong on `:8000` in front of `make dev-services` (see [docs/development/README.md](../../../docs/development/README.md#kong-in-front-of-make-dev-services)). `scripts/kong-dev-config.sh` generates `infra/kong/kong.dev.yml` from `kong.yml` with upstreams on `host.docker.internal` and adds a `/api/dev` route. Setting `GATEWAY_URL=http://localhost:8000` sends a prefix to Kong only when its own variable (`AUTH_URL`, `TRIP_URL`, …) is not set, because the per-service variable is checked first. `.env.example` sets all nine, so with a `.env` copied from it (which `make setup-web` does) `GATEWAY_URL` alone changes nothing; remove or repoint those lines.
+`make dev-gateway` runs Kong on `:8000` in front of `make dev-services` (see [docs/development/README.md](../../../docs/development/README.md#kong-in-front-of-make-dev-services)). `scripts/kong-dev-config.sh` generates `infra/kong/kong.dev.yml` from `kong.yml` with upstreams on `host.docker.internal` and adds a `/api/dev` route. Setting `GATEWAY_URL=http://localhost:8000` sends a prefix to Kong only when its own variable (`AUTH_URL`, `TRIP_URL`, …) is not set, because the per-service variable is checked first. `.env.example` sets all ten, so with a `.env` copied from it (which `make setup-web` does) `GATEWAY_URL` alone changes nothing; remove or repoint those lines.
 
 ```mermaid
 flowchart LR
@@ -67,6 +68,7 @@ flowchart LR
 | `/api/fleet` | `fleet-service:3008` | rate-limiting 120/min |
 | `/api/platform` | `platform-service:3011` | rate-limiting 120/min |
 | `/api/audit` | `audit-service:3010` | rate-limiting 60/min |
+| `/api/support` | `support-service:3009` | rate-limiting 120/min |
 | `/api/pricing` | `pricing-service:3004` | rate-limiting 120/min |
 | `/api/payments` | `payment-service:3005` | rate-limiting 120/min, request-size-limiting |
 

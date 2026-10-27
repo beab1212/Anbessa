@@ -3,11 +3,15 @@
 // records cash paid at an office. Shared by the finance pages and the fleet's company page.
 
 import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, newIdempotencyKey, type Surface } from "../../lib/api";
-import { birr, dayAndTime } from "../../lib/format";
+import { Link } from "react-router-dom";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Download } from "lucide-react";
+import { allowed, api, newIdempotencyKey, type Surface } from "../../lib/api";
+import { useSession } from "../../lib/session";
+import { download } from "../../lib/admin";
+import { birr, dayAndTime, shortId } from "../../lib/format";
 import {
-  CHANNEL_LABEL, ENTRY_LABEL, PROVIDER_LABEL, STATE_LABEL, stateTone, toMinor,
+  CHANNEL_LABEL, csvName, ENTRY_LABEL, joinPages, nextBefore, PROVIDER_LABEL, STATE_LABEL, STATEMENT_CSV, stateTone, toCsv, toMinor, TOP_UP_LABEL, topUpTone,
   type Balance, type Provider, type StatementEntry, type TopUp,
 } from "../../lib/money";
 import { Drawer, Field, Notice, Pill, Problem, SelectField, TextArea } from "../../components/ui";
@@ -19,19 +23,28 @@ const STATE_TEXT: Record<string, string> = {
   BLOCKED: "No trips until a payment comes in.",
 };
 
-export function useProviders() {
-  return useQuery({ queryKey: ["money", "methods"], staleTime: 5 * 60_000, queryFn: () => api<{ providers: Provider[] }>("staff", "/api/payments/methods").then((r) => r.providers) });
+/** Every enabled provider (GET /api/payments/methods), for filters. */
+export function useProviders(surface: Surface = "staff") {
+  return useQuery({ queryKey: ["money", "methods", "all", surface], staleTime: 5 * 60_000, queryFn: () => api<{ providers: Provider[] }>(surface, "/api/payments/methods").then((r) => r.providers) });
 }
 
 export function BalancePanel({ surface, balance, owner = false, recordCash = false }: { surface: Surface; balance: Balance; owner?: boolean; recordCash?: boolean }) {
   const [topUp, setTopUp] = useState(false);
   const [payoutMethod, setPayoutMethod] = useState(false);
   const [cash, setCash] = useState(false);
+  const { staff } = useSession();
   const accountId = balance.accountId;
-  const statement = useQuery({
+  // staff shortcuts into the money controls, prefilled with this balance
+  const city = { cityId: balance.cityId };
+  const canAdjust = surface === "staff" && !!accountId && allowed(staff.principal, "adjustment:request", city);
+  const canOverride = surface === "staff" && !!accountId && allowed(staff.principal, "policy_override:request", city);
+  const statement = useInfiniteQuery({
     queryKey: ["money", "statement", accountId], enabled: !!accountId,
-    queryFn: () => api<{ entries: StatementEntry[] }>(surface, `/api/payments/balances/${accountId}/statement?limit=30`).then((r) => r.entries),
+    initialPageParam: "",
+    getNextPageParam: nextBefore,
+    queryFn: ({ pageParam }) => api<{ entries: StatementEntry[]; next: string | null }>(surface, `/api/payments/balances/${accountId}/statement?limit=30${pageParam ? `&before=${encodeURIComponent(pageParam)}` : ""}`),
   });
+  const entries = joinPages(statement.data?.pages.map((pg) => pg.entries) ?? []);
   const topUps = useQuery({
     queryKey: ["money", "top-ups", accountId], enabled: !!accountId, refetchInterval: (q) => (q.state.data?.some((t) => t.status === "ACTION_REQUIRED") ? 3000 : false),
     queryFn: () => api<{ topUps: TopUp[] }>(surface, `/api/payments/balances/${accountId}/top-ups`).then((r) => r.topUps),
@@ -74,10 +87,13 @@ export function BalancePanel({ surface, balance, owner = false, recordCash = fal
             {owner ? <button className="btn" onClick={() => setTopUp(true)} disabled={!accountId}>Top up</button> : null}
             {owner ? <button className="btn secondary" onClick={() => setPayoutMethod(true)} disabled={!accountId}>Payout method</button> : null}
             {recordCash && accountId ? <button className="btn secondary" onClick={() => setCash(true)}>Record cash or a bank transfer</button> : null}
+            {canAdjust ? <Link className="btn secondary" to={`/staff/money/adjustments?account=${accountId}`}>Adjust</Link> : null}
+            {canOverride ? <Link className="btn secondary" to={`/staff/money/overrides?account=${accountId}`}>Limit exception</Link> : null}
           </div>
         </div>
       </section>
 
+      <Problem error={topUps.error} />
       {topUps.data?.length ? (
         <section className="card">
           <div className="card-head"><h2>Top-ups</h2></div>
@@ -91,7 +107,8 @@ export function BalancePanel({ surface, balance, owner = false, recordCash = fal
                     <td className="small">{CHANNEL_LABEL[t.channel]}{t.provider && t.provider !== "bank" ? ` · ${PROVIDER_LABEL[t.provider] ?? t.provider}` : ""}{t.receiptNo ? <span className="xs muted"> · {t.receiptNo}</span> : null}</td>
                     <td className="num mono">{birr(t.amountMinor)}</td>
                     <td>
-                      <Pill tone={t.status === "SUCCEEDED" ? "green" : t.status === "FAILED" || t.status === "REJECTED" ? "red" : "amber"}>{t.status === "ACTION_REQUIRED" ? "waiting for approval at the provider" : t.status === "PENDING_APPROVAL" ? "waiting for a finance manager" : t.status.toLowerCase()}</Pill>
+                      <Pill tone={topUpTone(t.status)}>{t.status === "ACTION_REQUIRED" ? "waiting for approval at the provider" : TOP_UP_LABEL[t.status] ?? t.status.toLowerCase()}</Pill>
+                      {t.failure ? <div className="xs muted">{t.failure}</div> : null}
                       {t.checkoutUrl && owner ? <a className="xs" href={t.checkoutUrl} target="_blank" rel="noreferrer" style={{ marginLeft: "0.4rem" }}>open payment page</a> : null}
                     </td>
                   </tr>
@@ -103,13 +120,21 @@ export function BalancePanel({ surface, balance, owner = false, recordCash = fal
       ) : null}
 
       <section className="card">
-        <div className="card-head"><h2>Statement</h2><span className="xs muted">every movement on this balance</span></div>
-        {statement.data?.length ? (
+        <div className="card-head">
+          <h2>Statement</h2>
+          <div className="row" style={{ gap: "0.5rem" }}>
+            <span className="xs muted">every movement on this balance</span>
+            {entries.length ? <button className="btn ghost sm" onClick={() => download(csvName(`statement-${shortId(accountId ?? "")}`), toCsv(entries, STATEMENT_CSV))}><Download /> CSV ({entries.length})</button> : null}
+          </div>
+        </div>
+        {statement.error ? <div className="card-body"><Problem error={statement.error} /></div> : null}
+        {statement.isPending && accountId ? <div className="card-body"><p className="small muted" style={{ margin: 0 }}>Loading the statement…</p></div> : null}
+        {entries.length ? (
           <div className="table-wrap">
             <table className="table">
               <thead><tr><th>When</th><th>What</th><th className="num">Amount</th></tr></thead>
               <tbody>
-                {statement.data.map((e) => (
+                {entries.map((e) => (
                   <tr key={e.id}>
                     <td className="small">{dayAndTime(e.at)}</td>
                     <td className="small">{ENTRY_LABEL[e.kind] ?? e.kind}{e.memo ? <span className="xs muted"> · {e.memo}</span> : null}</td>
@@ -119,7 +144,13 @@ export function BalancePanel({ surface, balance, owner = false, recordCash = fal
               </tbody>
             </table>
           </div>
-        ) : <div className="card-body"><p className="small muted" style={{ margin: 0 }}>{accountId ? "No movements yet." : "No trips yet. The balance opens with the first trip or top-up."}</p></div>}
+        ) : statement.isSuccess || !accountId ? <div className="card-body"><p className="small muted" style={{ margin: 0 }}>{accountId ? "No movements yet." : "No trips yet. The balance opens with the first trip or top-up."}</p></div> : null}
+        {statement.hasNextPage ? (
+          <div className="card-body row" style={{ gap: "0.5rem" }}>
+            <button className="btn secondary" disabled={statement.isFetchingNextPage} onClick={() => void statement.fetchNextPage()}>{statement.isFetchingNextPage ? "Loading…" : "Load older"}</button>
+            <span className="small muted">{entries.length} shown</span>
+          </div>
+        ) : null}
       </section>
 
       {topUp && accountId ? <TopUpDrawer surface={surface} balance={balance} onClose={() => setTopUp(false)} /> : null}

@@ -1,6 +1,8 @@
 // Every account: riders, drivers, partners, guests and staff. Search, then open one person to see
 // their roles, organisations and sessions, sign them out everywhere, suspend or reinstate, reset a
 // staff member's authenticator, and read what they did (audit log).
+// City-scoped holders of user:read_masked get the masked view (auth-service hides phones and session
+// devices); personal data shows only with user:read_pii. Each action keeps its own permission.
 
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -8,9 +10,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, KeyRound, LogOut, Search, ShieldOff, ShieldCheck } from "lucide-react";
 import { allowed, api } from "../../lib/api";
 import { daysSince, type AuditEntry, type UserDetail, type UserRow } from "../../lib/admin";
-import { CITIES, CITY_NAMES, dayAndTime } from "../../lib/format";
+import { inAnyCity, SUSPEND_FOR, suspendUntil, type SuspendFor } from "../../lib/account";
+import type { BalanceRow } from "../../lib/money";
+import { birr, CITIES, CITY_NAMES, dayAndTime } from "../../lib/format";
 import { useSession } from "../../lib/session";
-import { Drawer, Empty, Notice, PageHead, Pill, Problem, SelectField, TextArea } from "../../components/ui";
+import { Drawer, Empty, Field, Notice, PageHead, Pill, Problem, SelectField, TextArea } from "../../components/ui";
 
 type Kind = "" | "staff" | "rider" | "driver" | "partner" | "guest";
 
@@ -22,6 +26,8 @@ export const roleChip = (r: { role: string; label: string; cityId?: string; scop
 
 export function UsersPage() {
   const navigate = useNavigate();
+  const { staff } = useSession();
+  const pii = allowed(staff.principal, "user:read_pii");
   const [q, setQ] = useState("");
   const [kind, setKind] = useState<Kind>("");
   const [status, setStatus] = useState<"" | "active" | "suspended">("");
@@ -35,7 +41,7 @@ export function UsersPage() {
 
   return (
     <div className="page stack" style={{ gap: "1rem" }}>
-      <PageHead title="Users" lede="Everyone with an Anbessa account. Phone numbers are masked unless your role may see personal data." />
+      <PageHead title="Users" lede={pii ? "Everyone with an Anbessa account. Your role shows full phone numbers: use them only for the case in hand." : "Everyone with an Anbessa account. Phone numbers are masked: your role doesn't include personal data."} />
       <div className="row between" style={{ flexWrap: "wrap", gap: "0.75rem" }}>
         <div className="chips">
           {([["", "Everyone"], ["rider", "Riders"], ["driver", "Drivers"], ["partner", "Partners"], ["guest", "Guests"], ["staff", "Staff"]] as const).map(([k, label]) => (
@@ -49,6 +55,7 @@ export function UsersPage() {
         </div>
       </div>
       <Problem error={list.error} />
+      {list.isLoading ? <p className="muted small" style={{ margin: 0 }}>Loading…</p> : null}
       {list.data && list.data.users.length === 0 ? <Empty title="Nobody matches." /> : null}
       {list.data?.users.length ? (
         <div className="table-wrap">
@@ -109,6 +116,14 @@ export function UserPage() {
   const qc = useQueryClient();
   const user = useQuery({ queryKey: ["admin-user", id], queryFn: () => api<UserDetail>("staff", `/api/identity/users/${id}`) });
   const [dialog, setDialog] = useState<"signout" | "suspend" | "reinstate" | "mfa" | null>(null);
+  const isDriver = !!user.data?.roles.some((r) => r.role === "DRIVER");
+  const showBalance = isDriver && inAnyCity(p, "balance:read", CITIES);
+  const balance = useQuery({
+    queryKey: ["admin-user-balance", id],
+    enabled: showBalance,
+    retry: false,
+    queryFn: () => api<{ balances: BalanceRow[] }>("staff", `/api/payments/balances?${new URLSearchParams({ q: id!, type: "INDIVIDUAL", limit: "5" })}`).then((r) => r.balances.filter((b) => b.beneficiary.id === id)),
+  });
 
   if (user.isLoading) return <div className="page"><p className="muted">Loading…</p></div>;
   if (user.error) return <div className="page"><Problem error={user.error} /></div>;
@@ -123,6 +138,9 @@ export function UserPage() {
     void qc.invalidateQueries({ queryKey: ["audit"] });
   };
   const idle = daysSince(u.sessions[0]?.createdAt ?? null);
+  const pii = allowed(p, "user:read_pii");
+  const devicesHidden = u.sessions.length > 0 && u.sessions.every((s) => s.ipAddress === null && s.userAgent === null);
+  const driverLink = isDriver && inAnyCity(p, "driver:read", CITIES);
 
   return (
     <div className="page stack" style={{ gap: "1rem" }}>
@@ -130,7 +148,19 @@ export function UserPage() {
       <div className="page-head">
         <div>
           <h1 className="row" style={{ gap: "0.6rem" }}>{u.name} {statusPill(u.status)} {staffTarget ? <Pill tone="blue">staff</Pill> : null}</h1>
-          <p>{u.email ?? u.phone ?? "—"} · joined {dayAndTime(u.createdAt)} · <span className="mono xs">{u.id}</span></p>
+          <p>
+            {u.email ?? u.phone ?? "—"}{!u.email && u.phone && !pii ? <span className="xs muted"> (masked)</span> : null} · joined {dayAndTime(u.createdAt)} · <span className="mono xs">{u.id}</span>
+          </p>
+          {driverLink || showBalance ? (
+            <p className="small row" style={{ gap: "1rem", marginTop: "0.25rem", flexWrap: "wrap" }}>
+              {driverLink ? <Link to={`/staff/fleet/drivers/${u.id}`}>Driver record</Link> : null}
+              {showBalance && balance.data?.length ? balance.data.map((b) => (
+                <Link key={b.accountId} to={`/staff/money/balances/${b.accountId}`}>Balance{balance.data!.length > 1 ? ` · ${CITY_NAMES[b.cityId] ?? b.cityId}` : ""}: {birr(b.balanceMinor)}</Link>
+              )) : null}
+              {showBalance && balance.data && balance.data.length === 0 ? <span className="muted">No balance yet</span> : null}
+              {showBalance && balance.isError ? <span className="muted">Balance unavailable</span> : null}
+            </p>
+          ) : null}
         </div>
         <div className="row" style={{ gap: "0.5rem", flexWrap: "wrap" }}>
           {allowed(p, "session:revoke") ? <button className="btn secondary" onClick={() => setDialog("signout")}><LogOut /> Sign out everywhere</button> : null}
@@ -146,7 +176,7 @@ export function UserPage() {
       <div className="two-col wide-left">
         <div className="stack" style={{ gap: "1rem" }}>
           <section className="card">
-            <div className="card-head"><h2>Sessions</h2><span className="xs muted">{u.sessions.filter((s) => s.active).length} active</span></div>
+            <div className="card-head"><h2>Sessions</h2><span className="xs muted">{u.sessions.filter((s) => s.active).length} active{devicesHidden ? " · devices hidden for your role" : ""}</span></div>
             {u.sessions.length === 0 ? <div className="card-body"><p className="small muted" style={{ margin: 0 }}>Never signed in.</p></div> : (
               <div style={{ overflowX: "auto" }}>
                 <table className="table">
@@ -155,7 +185,7 @@ export function UserPage() {
                     {u.sessions.map((s) => (
                       <tr key={s.id}>
                         <td>{s.surface === "admin" ? "staff dashboard" : "app / partner portal"}</td>
-                        <td className="xs muted" style={{ maxWidth: "18rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.userAgent ?? ""}>{s.ipAddress ?? "—"} · {s.userAgent ?? ""}</td>
+                        <td className="xs muted" style={{ maxWidth: "18rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.userAgent ?? ""}>{s.ipAddress === null && s.userAgent === null ? "hidden" : `${s.ipAddress ?? "—"} · ${s.userAgent ?? ""}`}</td>
                         <td className="small">{dayAndTime(s.createdAt)}</td>
                         <td className="small">{dayAndTime(s.lastActiveAt)}</td>
                         <td>{s.active ? <Pill tone="green">active</Pill> : <Pill tone="grey">ended</Pill>}</td>
@@ -215,10 +245,14 @@ function UserAction({ kind, user, onClose, onDone }: { kind: "signout" | "suspen
   const [reason, setReason] = useState("");
   const cities = CITIES.filter((c) => allowed(staff.principal, kind === "reinstate" ? "user:reinstate" : "user:suspend", { cityId: c }));
   const [cityId, setCityId] = useState(cities[0] ?? CITIES[0]!);
+  const [length, setLength] = useState<SuspendFor>("");
+  const [endDate, setEndDate] = useState("");
+  const until = kind === "suspend" ? suspendUntil(length, endDate) : undefined;
   const run = useMutation({
     mutationFn: () => {
       const path = { signout: "sessions/revoke", suspend: "suspend", reinstate: "reinstate", mfa: "reset-mfa" }[kind];
-      return api<{ temporaryPassword?: string; pendingApproval?: string }>("staff", `/api/identity/users/${user.id}/${path}`, { body: { reason, ...(kind === "suspend" || kind === "reinstate" ? { cityId } : {}) } });
+      const body = { reason, ...(kind === "suspend" || kind === "reinstate" ? { cityId } : {}), ...(until && until !== "invalid" ? { until } : {}) };
+      return api<{ temporaryPassword?: string; pendingApproval?: string }>("staff", `/api/identity/users/${user.id}/${path}`, { body });
     },
     onSuccess: onDone,
   });
@@ -247,8 +281,18 @@ function UserAction({ kind, user, onClose, onDone }: { kind: "signout" | "suspen
               {(cities.length ? cities : CITIES).map((c) => <option key={c} value={c}>{CITY_NAMES[c] ?? c}</option>)}
             </SelectField>
           ) : null}
+          {kind === "suspend" ? (
+            <>
+              <SelectField label="How long" value={length} onChange={(e) => setLength(e.target.value as SuspendFor)}>
+                {SUSPEND_FOR.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </SelectField>
+              {length === "date" ? (
+                <Field label="Ends on" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} hint={until === "invalid" ? "Pick a day after today." : until ? `They can sign in again from ${dayAndTime(until)}.` : undefined} />
+              ) : until && until !== "invalid" ? <p className="xs muted" style={{ margin: 0 }}>Ends {dayAndTime(until)} (Addis Ababa time). You can reinstate them earlier.</p> : null}
+            </>
+          ) : null}
           <TextArea label="Reason" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Ticket number and what happened" hint="10+ characters; it goes into the audit log" />
-          <button className={`btn ${kind === "suspend" ? "danger" : ""}`} disabled={run.isPending || reason.trim().length < 10}>{title}</button>
+          <button className={`btn ${kind === "suspend" || kind === "signout" || kind === "mfa" ? "danger" : ""}`} disabled={run.isPending || reason.trim().length < 10 || until === "invalid"}>{run.isPending ? "Working…" : title}</button>
         </form>
       )}
     </Drawer>

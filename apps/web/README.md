@@ -1,6 +1,6 @@
 # web — the Anbessa web app
 
-One React + Vite app for everyone who works in a browser: **staff** (dispatch, call center, onboarding, safety, super admins) and **partners** (fleet companies and company accounts).
+One React + Vite app for everyone who works in a browser: **staff** (dispatch, call center, support, onboarding, safety, finance, super admins) and **partners** (fleet companies and company accounts).
 
 ## Design
 
@@ -29,25 +29,31 @@ What each person sees comes from the roles in their access token, read with the 
 
 | Area | Who (permission @ scope) | Signs in with |
 |---|---|---|
-| **Live board** `/staff/board`: active trips, assign, cancel | `trip:read @ CITY` (assign: dispatchers) | email + password + TOTP (`/api/admin-auth`) |
-| **Live map** `/staff/drivers`: every online driver on the map, filters, list | `location:read_live @ CITY` | 〃 |
-| **Book by phone** `/staff/phone`: guest caller, places (search or tap the map), fare, request | `trip:create_on_behalf @ CITY` | 〃 |
-| **Find a trip** `/staff/trips/:id`: route and live driver on a map, timeline, money (the charge, commission and what the driver's balance moved by), cancel | `trip:read @ CITY` | 〃 |
+| **Live board** `/staff/board`: active trips with rider, driver and car, assign, cancel with a reason | `trip:read @ CITY` (assign: dispatchers) | email + password + TOTP or a backup code (`/api/admin-auth`) |
+| **Live map** `/staff/drivers`: every online driver on the map, state and car-type filters, list, a drawer per driver | `location:read_live @ CITY` | 〃 |
+| **Book by phone** `/staff/phone`: guest caller, places (search or tap the map) with the road route, the city's car types and fare card, fare, cash or mobile money as the city allows, request | `trip:create_on_behalf @ CITY` | 〃 |
+| **Find a trip** `/staff/trips/:id`: road route and live driver on a map, the trip's history (who changed what, when), rider, driver and car, money (the charge, commission and what the driver's balance moved by), cancel with a reason; recently opened trips | `trip:read @ CITY` | 〃 |
+| **Search trips** `/staff/search`: by city, dates, status, channel, payment, rider, driver, vehicle, company or id prefix | `trip:read @ CITY` | 〃 |
+| **SOS alerts** `/staff/safety/sos`: the city's alerts, oldest unanswered first; acknowledge, notes, resolve, open an incident | `sos:respond @ CITY` (resolve: `incident:manage`) | 〃 |
+| **Incidents** `/staff/safety/incidents` and `/:id`: open, triage, notes, actions taken, resolve | `incident:manage @ CITY` | 〃 |
+| **Tickets** `/staff/support/tickets` and `/:id`: the city queue with SLA, log a caller's ticket, conversation and internal notes, assign, resolve, link refunds | `ticket:read @ CITY` (changes: `ticket:update`, new: `ticket:create`) | 〃 |
+| **Lost items** `/staff/support/lost-items`: reported items, status, messages to rider and driver | `lost_item:manage @ CITY` | 〃 |
 | **Review queue** `/staff/review`: drivers, vehicles and company papers waiting, oldest first | `document:review @ CITY` | 〃 |
 | **Drivers** `/staff/fleet/drivers` and `/:userId`: applications and drivers; review documents, approve, request changes, suspend, reinstate | `driver:read @ CITY` (decisions: `driver:verify`, `driver:suspend`…) | 〃 |
 | **Vehicles** `/staff/fleet/vehicles` and `/:id`: cars; review documents, approve or reject | `vehicle:read @ CITY` (decisions: `vehicle:verify`) | 〃 |
-| **Companies** `/staff/onboarding`: verification queue, each company's papers in a drawer | `org:read @ CITY` (verify, suspend; documents: `document:review`) | 〃 |
-| **Suspend** `/staff/safety` | `user:suspend @ CITY` (staff targets: super admins) | 〃 |
+| **Companies** `/staff/onboarding`: verification queue, each company's papers and cars in a drawer, suspend with a reason | `org:read` or `org:suspend @ CITY` (verify: `org:verify`; documents: `document:review`) | 〃 |
+| **Suspend** `/staff/safety`: find a person by name, phone digits or id; suspend (optionally until a time) or reinstate | `user:suspend @ CITY` (staff targets: super admins) | 〃 |
 | **Staff and roles** `/staff/people`: every staff member with their roles, authenticator status and last sign-in (access review: roles unused for 30+ days are flagged); remove a role (at once); ask for one (approved under Approvals); new staff accounts | `staff:manage`, `role:request`, `role:approve` | 〃 |
-| **Money → Overview** `/staff/money`: fares, commission and VAT in the last 7 days; what drivers and fleets owe and are owed; balance states; open charges, receivables; what each provider holds; ledger integrity | `balance:read` or `report:read_finance` (everywhere) | 〃 |
-| **Balances** `/staff/money/balances` and `/:accountId`: every driver and fleet balance, most negative first, by state; one balance's limits, dues, statement and top-ups; record cash paid at an office or a bank transfer | `balance:read` (recording: `topup:record_cash`) | 〃 |
-| **Rider payments** `/staff/money/payments`: charges by mobile money and card and their state; check one with the provider; ask for a refund | `balance:read`, `refund:request` (checking: `commission:collect`) | 〃 |
-| **Money approvals** `/staff/money/approvals`: cash and bank top-ups, refunds, payout batches, commission and limit changes waiting for a second person | any of `topup:*`, `refund:*`, `payout:*`, `commission_rule:*`, `balance_policy:*` | 〃 |
-| **Payouts** `/staff/money/payouts`: the weekly settlement batches and their lines; run it now | `payout:prepare` / `payout:approve` | 〃 |
+| **Money → Overview** `/staff/money`: fares, commission and VAT in the last 7 days; what drivers and fleets owe and are owed; balance states; open charges, receivables; what each provider holds; ledger integrity. City-scoped holders get one city's balances and payments instead | `balance:read` or `report:read_finance` everywhere; `balance:read @ CITY` for the city view | 〃 |
+| **Balances** `/staff/money/balances` and `/:accountId`: every driver and fleet balance, most negative first, by state and city, CSV; one balance's limits, dues, statement (paged) and top-ups; record cash paid at an office or a bank transfer | `balance:read` (recording: `topup:record_cash`) | 〃 |
+| **Rider payments** `/staff/money/payments`: charges by mobile money and card, filtered by state, city, provider or trip, paged, CSV; check one with the provider; ask for a refund | `balance:read`, `refund:request` (checking: `commission:collect`) | 〃 |
+| **Money approvals** `/staff/money/approvals`: cash and bank top-ups, refunds, payout batches, commission and limit changes waiting for a second person; a History tab of what was decided | any of `topup:*`, `refund:*`, `payout:*`, `commission_rule:*`, `balance_policy:*` | 〃 |
+| **Payouts** `/staff/money/payouts`: the weekly settlement batches and their lines (by status, CSV); run it now | `payout:prepare` / `payout:approve` | 〃 |
 | **Commission and limits** `/staff/money/rules`: per city, what's in force and what's proposed; propose a commission rule or new limits | `commission_rule:*`, `balance_policy:*`, `commission:read` | 〃 |
 | **Payment providers** `/staff/money/providers`: telebirr, CBE Birr, Chapa (simulated or live) and their latest callbacks | `balance:read`, `report:read_finance` or `system:read` | 〃 |
-| **Administration → Overview** `/staff/admin`: trips today, people, drivers and vehicles, system status, approvals waiting, alerts | `report:read` or `system:read` | 〃 |
-| **Users** `/staff/admin/users` and `/:id`: every account (riders, drivers, partners, guests, staff), search; one person's roles, organisations and sessions; sign out everywhere, suspend or reinstate, reset a staff member's sign-in; what they did and what was done to them (audit log) | `user:read_masked` (actions: `session:revoke`, `staff:manage`, `user:suspend`…) | 〃 |
+| **Administration → Overview** `/staff/admin`: trips today, people, drivers and vehicles (every city or one), system status, approvals waiting, alerts | `report:read` (city-scoped: one of your cities) or `system:read` | 〃 |
+| **Reports** `/staff/reports`: trips per day by status, channel and car type; money per day for finance; CSV | `report:read` (finance tab: `report:read_finance`) | 〃 |
+| **Users** `/staff/admin/users` and `/:id`: every account (riders, drivers, partners, guests, staff), search; one person's roles, organisations and sessions; links to a driver's record and balance; sign out everywhere, suspend (for a set time or until reinstated) or reinstate, reset a staff member's sign-in; what they did and what was done to them (audit log). Phones and session devices are masked without `user:read_pii` | `user:read_masked` in any city (actions: `session:revoke`, `staff:manage`, `user:suspend`…) | 〃 |
 | **Roles and permissions** `/staff/admin/roles`: the live matrix, a role editor (checked against the guardrails as you edit), custom roles. Changes go to Approvals | `authz:read` (changes: `authz:propose`) | 〃 |
 | **Approvals** `/staff/admin/approvals`: everything waiting for a second person (role grants, permission changes, sensitive settings, super-admin sign-in resets); approve, reject, or withdraw your own | any of `role:*`, `authz:*`, `settings:*`, `staff:manage` | 〃 |
 | **Settings** `/staff/admin/settings`: every live setting by group, with city overrides, history and reset to default. ★ = needs approval | `settings:read` (changes: `settings:propose`) | 〃 |
@@ -55,9 +61,15 @@ What each person sees comes from the roles in their access token, read with the 
 | **Announcements** `/staff/admin/announcements`: banners for riders, drivers, partners and staff, by city and time | `announcement:manage` | 〃 |
 | **System** `/staff/admin/system`: every service's health and answer time, outboxes, Kafka lag, Redis, login-code delivery, routing engines, document storage | `system:read` | 〃 |
 | **Audit log** `/staff/admin/audit`: search and export the write-once log | `audit_log:read` | 〃 |
-| **Company** `/partner/org/:id`: people and invitations by phone (fleets: each driver's onboarding status and cars); **Vehicles** tab (fleets); **Balance** tab (fleets: the fleet's one balance, statement, top up by mobile money, payout method); **Documents** tab (company papers) | the org's owner or admin | phone + 6-digit code (`/api/auth`) |
+| **My account** `/staff/account`: name, password, new backup codes, where you're signed in | every staff member | 〃 |
+| **Company** `/partner/org/:id`: edit name and logo; people, roles (employee ↔ travel desk) and invitations by phone (fleets: each driver's onboarding status and cars); **Vehicles** tab (fleets, with retired cars on request); **Balance** tab (fleets: the fleet's one balance, statement, top up by mobile money, payout method); **Documents** tab (company papers); links to Trips, Earnings, Charges | the org's owner or admin (edit: `org:update`) | phone + 6-digit code (`/api/auth`) |
 | **Fleet car** `/partner/org/:id/vehicles/:vehicleId`: documents, submit for review, who may drive it, remove | `vehicle:read` / `vehicle:authorize_driver @ ORG` | 〃 |
-| **Book a ride** `/partner/org/:id/book` (company accounts) | `trip:create_on_behalf @ ORG` | 〃 |
+| **Fleet driver** `/partner/org/:id/drivers/:userId`: onboarding status, documents, allowed cars, driving now | `driver:read @ ORG` | 〃 |
+| **Book a ride** `/partner/org/:id/book` (company accounts): rider, places with the road route, the city's car types and fares | `trip:create_on_behalf` + `trip:bill_corporate @ ORG` | 〃 |
+| **Trips** `/partner/org/:id/trips` and `/:tripId`: billed to the company or driven in its cars; one trip with its people, PIN, live car and cancel | `trip:read @ ORG` (cancel: `trip:cancel`) | 〃 |
+| **Earnings** `/partner/org/:id/earnings` (fleets): per period, day and driver | `earnings:read @ ORG` | 〃 |
+| **Charges** `/partner/org/:id/charges` (company accounts): what's owed and each charge | `payment:read @ ORG` | 〃 |
+| **My account** `/partner/account`: name, invitations to you, where you're signed in | any signed-in partner | 〃 |
 | **Register a company** `/partner/register` | any signed-in partner | 〃 |
 
 The first staff sign-in goes through **setup**: replace the temporary password, then enrol an authenticator app (QR code and one-time backup codes). Until both are done the token carries no roles.
@@ -80,6 +92,7 @@ The browser only calls `/api/*` **on its own origin**. In development Vite forwa
 | `/api/locations` | location-service (3003) |
 | `/api/maps` | mapping-service (3007) |
 | `/api/fleet` | fleet-service (3008) |
+| `/api/support` | support-service (3009): tickets, lost items, SOS, incidents |
 | `/api/platform` | platform-service (3011): settings, cities, announcements, system; `client-config` is public |
 | `/api/audit` | audit-service (3010) |
 
@@ -93,11 +106,17 @@ Without Nominatim, place search falls back to a list of common Addis Ababa place
 
 ```
 src/
-├── lib/          api (axios clients: Better Auth calls, service calls with the surface token, ApiError), session, hooks, formatting
-├── components/   Shell (sidebar + top bar), ui (pills, fields, notices, drawer), CityPicker, PlacePicker
-│   └── map/      CityMap (MapLibre + context), markers (driver, pickup, drop-off, trip line)
+├── lib/          api (axios clients: Better Auth calls, service calls with the surface token, ApiError), session, hooks, formatting,
+│                 fleet, money, admin, trips, account, partner, reports, support (per-area types, helpers and API calls)
+├── components/   Shell (sidebar + top bar), ui (pills, fields, notices, drawer), CityPicker, PlacePicker, Documents, BarChart
+│   └── map/      CityMap (MapLibre + context), markers (driver, pickup, drop-off, trip line, route line)
 ├── dev/          development-only sign-in panel (left out of production builds)
-├── pages/        SignIn · staff/{Setup, Board, Drivers, PhoneBooking, TripDetail, Onboarding, Safety, People} · partner/Partner
+├── pages/        SignIn · public/SharedTrip
+│                 staff/{Setup, Board, Drivers, PhoneBooking, TripDetail, TripSearch, Onboarding, Safety, People, Fleet, Account}
+│                 support/{Tickets, LostItems} · safety/{SosQueue, Incidents} · reports/Reports
+│                 money/{Overview, Balances, BalancePanel, Payments, Approvals, Payouts, Rules, Providers}
+│                 admin/{Overview, Users, Roles, Approvals, Settings, Cities, Announcements, System, Audit}
+│                 partner/{Partner, Fleet, Trip, Driver, CompanyTrips, FleetEarnings, Account}
 ├── styles/       tokens · base · components · layout
 └── App.tsx       routes and the role-based index
 ```
@@ -108,7 +127,7 @@ src/
 |---|---|
 | `pnpm dev` | Vite dev server |
 | `pnpm build` | Type-check, then build to `dist/` |
-| `pnpm test` | Logic tests: phone parsing, money, placeholder emails, role → navigation, the API client (token, retry, errors) |
+| `pnpm test` | Logic tests (10 files, 68 tests): phone parsing, money and CSV, placeholder emails, role → navigation, the API client (token, retry, errors), trips, account, admin, onboarding, partner and safety helpers |
 | `pnpm lint` / `pnpm typecheck` | |
 
 ## Documentation

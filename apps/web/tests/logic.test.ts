@@ -34,29 +34,37 @@ describe("format", () => {
 describe("claims → navigation (UI only; services check again)", () => {
   const token = (claims: object) => `x.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.y`;
   const staff = (roles: object[]): Principal => principalOf("staff", decodeClaims(token({ sub: "u", exp: 0, pv: 0, amr: [], roles })));
-  const pages = (p: Principal) => staffSections(p).flatMap((s) => s.items.map((i) => i.label));
+  // "My account" is on every staff menu; these tests are about the work pages
+  const pages = (p: Principal) => staffSections(p).flatMap((s) => s.items.map((i) => i.label)).filter((l) => l !== "My account");
 
-  it("a dispatcher sees the board, the live map and trips, nothing about accounts", () => {
-    expect(pages(staff([{ r: "DISPATCHER", city: "addis-ababa" }]))).toEqual(["Live board", "Live map", "Find a trip"]);
+  it("a dispatcher sees the board, the live map and trips, plus their city's overview and user lookup", () => {
+    // report:read and user:read_masked are city grants: the menu used to drop them (can() without a city)
+    expect(pages(staff([{ r: "DISPATCHER", city: "addis-ababa" }]))).toEqual(["Live board", "Live map", "Find a trip", "Search trips", "Scheduled rides", "SOS alerts", "Tickets", "Overview", "Reports", "Users"]);
   });
 
   it("an onboarding officer reviews drivers, vehicles and companies", () => {
-    expect(pages(staff([{ r: "ONBOARDING_OFFICER", city: "addis-ababa" }]))).toEqual(["Review queue", "Drivers", "Vehicles", "Companies"]);
+    expect(pages(staff([{ r: "ONBOARDING_OFFICER", city: "addis-ababa" }]))).toEqual(["Tickets", "Review queue", "Drivers", "Vehicles", "Companies", "Money approvals", "Limit exceptions", "Overview", "Reports", "Users"]);
   });
 
   it("a super admin runs the platform (people, permissions, settings, health, audit), not trips", () => {
     expect(pages(staff([{ r: "SUPER_ADMIN", g: true }]))).toEqual([
       "Payment providers",
-      "Overview", "Users", "Staff and roles", "Roles and permissions", "Approvals", "Settings", "Cities and vehicles", "Announcements", "System", "Audit log",
+      "Overview", "Reports", "Users", "Staff and roles", "Roles and permissions", "Approvals", "Settings", "Cities and vehicles", "Announcements", "System", "Audit log",
     ]);
   });
 
+  it("marketing runs promo codes and campaigns in their city; operations sets fares and zones", () => {
+    expect(pages(staff([{ r: "MARKETING", city: "addis-ababa" }]))).toEqual(expect.arrayContaining(["Promo codes", "Campaigns"]));
+    expect(pages(staff([{ r: "MARKETING", city: "addis-ababa" }]))).not.toContain("Fares");
+    expect(pages(staff([{ r: "OPERATIONS_MANAGER", city: "addis-ababa" }]))).toEqual(expect.arrayContaining(["Fares", "Zones"]));
+  });
+
   it("an auditor reads the matrix, settings, system and audit log, nothing else", () => {
-    expect(pages(staff([{ r: "AUDITOR", g: true }]))).toEqual(["Overview", "Payment providers", "Overview", "Roles and permissions", "Settings", "Cities and vehicles", "System", "Audit log"]);
+    expect(pages(staff([{ r: "AUDITOR", g: true }]))).toEqual(["Overview", "Incentives", "Invoices", "Payment providers", "Overview", "Reports", "Regulatory report", "Roles and permissions", "Settings", "Cities and vehicles", "System", "Audit log"]);
   });
 
   it("finance: officers record and prepare, managers approve; both see every money page", () => {
-    const money = ["Overview", "Balances", "Rider payments", "Money approvals", "Payouts", "Commission and limits", "Payment providers"];
+    const money = ["Overview", "Balances", "Rider payments", "Money approvals", "Payouts", "Adjustments", "Write-offs", "Limit exceptions", "Incentives", "Invoices", "Commission and limits", "Payment providers"];
     const moneyOf = (p: Principal) => staffSections(p).find((s) => s.title === "Money")!.items.map((i) => i.label);
     expect(moneyOf(staff([{ r: "FINANCE_OFFICER" }]))).toEqual(money);
     expect(moneyOf(staff([{ r: "FINANCE_MANAGER" }]))).toEqual(money);

@@ -8,11 +8,14 @@ Endpoints are summarised across pages in [api-usage.md](api-usage.md).
 
 - [Sign-in and setup](#sign-in-and-setup): `/sign-in`, `/sign-in/staff`, `/sign-in/partner`, staff setup, dev sign-in
 - [Public](#public): `/t/:token`
-- [Staff: Today](#staff-today): board, live map, book by phone, find a trip
+- [Staff: Today](#staff-today): board, live map, book by phone, find a trip, search trips, scheduled rides, GPS trace and reassign
+- [Staff: Support and safety](#staff-support-and-safety): SOS alerts, incidents, tickets, lost items
 - [Staff: Onboarding](#staff-onboarding): review queue, drivers, vehicles, companies
 - [Staff: Accounts](#staff-accounts): suspend, staff and roles
-- [Staff: Money](#staff-money)
-- [Staff: Administration](#staff-administration)
+- [Staff: Money](#staff-money): overview, balances, payments, approvals, payouts, adjustments, write-offs, limit exceptions, incentives, invoices, rules, providers
+- [Staff: Pricing and marketing](#staff-pricing-and-marketing): fares, zones, promo codes, campaigns
+- [Staff: Administration](#staff-administration): overview, reports, regulatory report, users, roles, approvals, settings, cities, announcements, system, audit
+- [Staff: You](#staff-you): my account
 - [Partner portal](#partner-portal)
 - [Shared components with their own API calls](#shared-components-with-their-own-api-calls)
 
@@ -28,9 +31,9 @@ Endpoints are summarised across pages in [api-usage.md](api-usage.md).
 
 | | |
 |---|---|
-| Shows | Work email + password, then a 6-digit authenticator code |
-| Calls | `POST /api/admin-auth/sign-in/email` `{ email, password }`; if the answer has `twoFactorRedirect`, `POST /api/admin-auth/two-factor/verify-totp` `{ code }` |
-| After | `refresh("staff")`, navigate to `/staff`. With no 2FA yet the token has a `setup` claim and the setup page takes over |
+| Shows | Work email + password, then a 6-digit authenticator code. "Use a backup code" switches to a backup-code field (and back with "Use the authenticator app") |
+| Calls | `POST /api/admin-auth/sign-in/email` `{ email, password }`; if the answer has `twoFactorRedirect`, `POST /api/admin-auth/two-factor/verify-totp` `{ code }`, or `POST /api/admin-auth/two-factor/verify-backup-code` `{ code }` (spaces removed by `normalizeBackupCode`, 6+ characters) |
+| After | `refresh("staff")`, navigate to `/staff`; after a backup code, to `/staff/account?backup=used`, which says that code is spent and offers new ones. With no 2FA yet the token has a `setup` claim and the setup page takes over |
 
 ### `/sign-in/partner`: PartnerSignIn
 
@@ -93,8 +96,9 @@ Note: it is inside `SessionProvider` like every page, but the session queries ar
 |---|---|
 | Shows | Floating counts: finding a driver (red when any waited over 60 s), driver on the way, on a trip, free drivers. Map: free, non-stale drivers and a pickup pin per active trip (red when requested over a minute ago, else the status tone). Side panel: a card per active trip with status, waiting time, pickup address, vehicle type, payment method, channel, estimated fare |
 | Calls | `GET /api/trips/board?cityId=` every 8 s; `GET /api/locations/cities/:cityId/drivers` every 5 s, only with `location:read_live` in the city |
-| Actions | Select a trip. **Assign driver** (`trip:assign` in the city, trip `requested`): a drawer lists the 5 closest free drivers of the same vehicle type by straight-line distance, or takes a pasted driver id → `POST /api/trips/:id/assign` `{ driverId }` with an `Idempotency-Key`. **Cancel** (`trip:cancel`, status `requested`/`matched`/`en_route`, browser `confirm`) → `POST /api/trips/:id/cancel` `{ reason: "STAFF_DECISION" }` with an `Idempotency-Key`. **Details** → `/staff/trips/:id` |
-| After an action | Invalidates `board` and `drivers`; the changed trip card flashes once |
+| Selected card | Rider and driver names and the car (colour, make, model, plate) from `GET /api/trips/:id/parties` (`useTripParties`, only for the selected card; ids when a name is missing) |
+| Actions | Select a trip. **Assign driver** (`trip:assign` in the city, trip `requested` only; there is no reassign of a matched trip): a drawer lists the 5 closest free drivers of the same vehicle type by straight-line distance, or takes a pasted driver id → `POST /api/trips/:id/assign` `{ driverId }` with an `Idempotency-Key`. **Cancel** (`trip:cancel`, status `requested`/`matched`/`en_route`) opens `CancelTripDrawer` (from TripDetail.tsx): pick a reason from `STAFF_CANCEL_REASONS` (staff decision, safety, rider changed plans, wrong pickup, driver too far, driver asked to cancel, other) → `POST /api/trips/:id/cancel` `{ reason }` with an `Idempotency-Key`. **Details** → `/staff/trips/:id` |
+| After an action | Invalidates `board` and `drivers`; the changed trip card flashes once; a cancel shows the reason and the fee (staff cancellations are free) |
 
 City: `CityPicker` over the cities where the user has `trip:read`.
 
@@ -104,9 +108,9 @@ City: `CityPicker` over the cities where the user has `trip:read`.
 
 | | |
 |---|---|
-| Shows | Counts of free, on a trip and silent drivers (silent is highlighted when non-zero). Map of drivers with a position, rotated by heading. Table: short driver id, vehicle type and id, state, time of last ping. Filter chips All / Free / On a trip / Silent |
-| Calls | `GET /api/locations/cities/:cityId/drivers` every 5 s |
-| Actions | Select a driver (map zooms to it). No writes |
+| Shows | Counts of free, on a trip and silent drivers for the chosen car type (silent is highlighted when non-zero). Map of drivers with a position, rotated by heading. Table: short driver id, vehicle type and short vehicle id, state, time of last ping. Filter chips All / Free / On a trip / Silent, and a car-type select ("All cars" plus the types online, shown when there are two or more). Filters run in the browser (`filterDrivers` in [src/lib/trips.ts](../src/lib/trips.ts)) |
+| Calls | `GET /api/locations/cities/:cityId/drivers` every 5 s. In the drawer, for a driver on a trip and with `trip:read` in the city: `GET /api/trips/:tripId/parties` (car and rider name) |
+| Actions | Select a driver (map zooms to it; keyboard Enter/Space works on rows) and open a drawer: state, last ping, position and heading, car, driver id, current trip. Links: **Driver record** (`driver:read` in the city) and **Open trip** (`trip:read`). No writes |
 
 "Silent" is the `stale` flag from location-service; the footer says it means no ping for 20 s.
 
@@ -117,10 +121,13 @@ City: `CityPicker` over the cities where the user has `trip:read`.
 | Step | What happens | Calls |
 |---|---|---|
 | Caller | Type the caller's mobile, "Find caller" | `POST /api/identity/guests` `{ phoneNumber, cityId }` → `{ userId, created }` ("new caller, guest account created" or "known caller") |
-| Route | Pickup and destination from `PlacePicker` or a tap on the map (fills pickup first, then destination); car type economy / comfort / minivan | `GET /api/maps/search` (PlacePicker); on a map tap `GET /api/maps/reverse?lat=&lng=` for a label, kept as coordinates if it fails |
+| Route | Pickup and destination from `PlacePicker` or a tap on the map (fills pickup first, then destination). Once both are set the map draws the road route and the panel says "By road: 3.2 km · 12 min" (or a straight-line estimate when mapping-service answers `approximate`) | `GET /api/maps/search` (PlacePicker); on a map tap `GET /api/maps/reverse?lat=&lng=` for a label, kept as coordinates if it fails; `GET /api/maps/route?from=lat,lng&to=lat,lng` (`useRoutePreview`, cached 5 min) |
+| Car | The city's enabled vehicle types from client config (`vehicleOptions()`: types whose `cities` is empty or includes the city; the built-in economy / comfort / minivan when the config has none), with seats. The fare card for the chosen type (base, per km, per minute, minimum, waiting per minute) | `GET /api/pricing/fares?cityId=` (`useFares`) |
 | Fare | "Get the fare" | `POST /api/pricing/estimates` `{ pickup, dropoff, vehicleTypes: [type], pickupAddress, dropoffAddress }`; the first quote is shown with distance and time; a notice when `approximate` |
-| Request | Payment cash or mobile money, "Request the ride" | `POST /api/trips` `{ quoteId, paymentMethod, riderUserId }` with one `Idempotency-Key` per booking |
-| Done | A script to read to the caller, "Follow this trip" → `/staff/trips/:id`, "Next caller" resets the form and the key | |
+| Request | Payment: cash and mobile money only (card checkout needs the rider app), and only those the city has switched on; mobile money lists the providers that take it. An error notice when neither is on | `GET /api/payments/methods?cityId=` (`usePaymentMethods`); `POST /api/trips` `{ quoteId, paymentMethod, riderUserId }` with one `Idempotency-Key` per booking |
+| Done | A script to read to the caller (fare and how it's paid), "Follow this trip" → `/staff/trips/:id`, "Next caller" resets the form and the key | |
+
+Changing the city clears the quote; the car and payment choices fall back to the first option the city offers.
 
 ### `/staff/trips` and `/staff/trips/:tripId`: TripDetail (Find a trip)
 
@@ -128,9 +135,77 @@ City: `CityPicker` over the cities where the user has `trip:read`.
 
 | | |
 |---|---|
-| Shows | A trip-id box (36 characters). With an id: short id, status, flags, city and time; a boxed map with pickup, drop-off, the dashed `TripLine` and the driver's live position while the trip is on the road; a timeline (requested, assigned, arrived, picked up, dropped off, cancelled); from/to/rider; a Money card (quoted fare, waiting fee, charged, cancellation fee and driver compensation, payment method, corporate billing) |
-| Calls | `GET /api/trips/:id` every 8 s, no retry. While `matched`/`en_route`/`in_progress` and with `location:read_live`: `GET /api/locations/cities/:cityId/drivers` every 5 s, filtered to the trip's driver. For completed trips or trips with a cancellation fee: `GET /api/payments/trips/:tripId` every 10 s, no retry (payments and settlements: commission, VAT, driver's balance movement) |
-| Actions | **Cancel trip** (`trip:cancel` in the trip's city, status `requested`/`matched`/`en_route`) → `POST /api/trips/:id/cancel` `{ reason: "STAFF_DECISION" }` with an `Idempotency-Key`. A payment line opens the `PaymentDrawer` from the Rider payments page |
+| Shows | A trip-id box ("Open" enabled for a full 36-character id). "Recently opened" chips: the last 8 trips opened in this browser (`localStorage` key `anbessa.staff.recentTrips`, ids only, with a "clear" link). With an id: short id, status, flags, city and time; a boxed map with pickup, drop-off, the road route (`RouteLine` from `trip.route.polyline`, or the dashed `TripLine` when the trip has no polyline) and the driver's live position while the trip is on the road; under it "planned 3.2 km · 12 min" and, once driven, the actual distance and time; a timeline; from/to with coordinates; the people: rider, driver (name, photo or initial, rating and count) and car (colour, make, model, plate), with ids kept visible and a **Driver record** link; a Money card (quoted fare, waiting fee, charged, cancellation fee and driver compensation, payment method, corporate billing) |
+| Timeline | From `GET /api/trips/:id/events` (trip-service's history, staff only): one row per status change with its time and who made it ("by the driver", "by <short id>" or "by the system"); arriving at the pickup is the `en_route → en_route` row. Until it loads, or if it fails, the timeline is built from the trip's own timestamps |
+| Calls | `GET /api/trips/:id` every 8 s, no retry; `GET /api/trips/:id/events` every 15 s; `GET /api/trips/:id/parties` once the trip loads (cached 30 s). While `matched`/`en_route`/`in_progress` and with `location:read_live` in the trip's city: `GET /api/locations/cities/:cityId/drivers` every 5 s, filtered to the trip's driver. For completed trips or trips with a cancellation fee: `GET /api/payments/trips/:tripId` every 10 s, no retry (payments and settlements: commission, VAT, driver's balance movement) |
+| Actions | **Cancel trip** (`trip:cancel` in the trip's city, status `requested`/`matched`/`en_route`) opens `CancelTripDrawer`: a reason from `STAFF_CANCEL_REASONS` and a note that staff cancellations are free → `POST /api/trips/:id/cancel` `{ reason }` with an `Idempotency-Key`; the result shows the recorded reason and fee. A payment line opens the `PaymentDrawer` from the Rider payments page |
+
+`PartiesView` and `CancelTripDrawer` are exported and reused by the Board.
+
+### `/staff/search`: TripSearchPage (Search trips)
+
+[src/pages/staff/TripSearch.tsx](../src/pages/staff/TripSearch.tsx). Guard: `trip:read` in any city.
+
+| | |
+|---|---|
+| Shows | A filter form: city ("All cities" only for a global `trip:read`; city-scoped staff pick one of theirs), trip id prefix, status, from/to dates, channel (app, phone, company portal), payment (cash, mobile money, card, company), rider user id, driver user id, vehicle id, company (org id). Results table: short id (links to `/staff/trips/:id`), requested, status, city, from → to, channel, payment, fare. "Older trips" loads the next page |
+| Calls | `GET /api/trips/search?cityId=&status=&from=&to=&channel=&paymentMethod=&riderUserId=&driverUserId=&vehicleId=&billingOrgId=&q=&limit=50` (empty filters left out), then `&before=<next>` per page |
+| Checks in the page | Dates must form a 1–92 day range (`rangeProblem`); the id prefix may only hold hex digits and dashes. "Clear" resets the form |
+
+---
+
+### `/staff/scheduled`: StaffScheduledPage (Scheduled rides)
+
+[src/pages/staff/Scheduled.tsx](../src/pages/staff/Scheduled.tsx). Guard: `trip:read` in any city. City chips, then rides booked ahead with pickup time ("in 2 h 10"), rider or company, vehicle type and status. Calls `GET /api/trips/scheduled?cityId=&status=`; **Cancel** (with a reason) → `POST /api/trips/scheduled/:id/cancel`.
+
+### `/staff/trips/:tripId/trace`: TripTracePage
+
+[src/pages/staff/Trace.tsx](../src/pages/staff/Trace.tsx). Guard: `trip:read_gps_trace` in any city. The GPS trace is personal data: the page asks for a reason (5+ characters) before it loads `GET /api/trips/:id/trace?reason=` and draws the points on the map; **Download CSV** → `GET /api/trips/:id/trace.csv?reason=`. Every read is audited by trip-service. TripDetail embeds the same `TripTrace` card, and Board and TripDetail show `ReassignButton` (`trip:reassign` in the trip's city) → `POST /api/trips/:id/reassign` `{ driverId?, reason? }`: either hands the trip to a nearby online driver picked from the live map list, or (no `driverId`) sends it back to matching without the current driver.
+
+## Staff: Support and safety
+
+These pages call support-service through `supportApi` in [src/lib/support.ts](../src/lib/support.ts) (prefix `/api/support`, port 3009; see [services/support-service/docs/api.md](../../../services/support-service/docs/api.md)). The staff console polls: realtime-gateway only admits `ride-app` tokens, so there are no socket pushes to staff.
+
+### `/staff/safety/sos`: SosQueuePage (SOS alerts)
+
+[src/pages/safety/SosQueue.tsx](../src/pages/safety/SosQueue.tsx). Guard: `sos:respond` in any city.
+
+| | |
+|---|---|
+| Shows | `CityPicker` over the cities with `sos:respond`; tabs Active / Resolved; a card per alert (open alerts outlined red) with who pressed it (rider or driver), how long it has waited (a 1 s clock), the trip. The selected alert: trip link (with a warning when the trip couldn't be verified), position, status, outcome, linked incident, notes |
+| Calls | `GET /api/support/sos?cityId=&status=active|resolved` every 5 s; `GET /api/support/sos/:id` every 5 s |
+| Actions | With `sos:respond` in the alert's city: **Acknowledge** → `POST /api/support/sos/:id/acknowledge`; **Add a note** → `POST /api/support/sos/:id/notes` `{ body }`. With `incident:manage`: **Resolve** with an outcome (false alarm, assisted, escalated), a note and, when escalated, an emergency services reference → `POST /api/support/sos/:id/resolve`; **Open an incident** → `POST /api/support/incidents` `{ sosAlertId, category: "OTHER", severity: HIGH (CRITICAL when escalated), summary }` with an `Idempotency-Key`, then the incident page |
+
+### `/staff/safety/incidents` and `/staff/safety/incidents/:id`: IncidentsPage, IncidentPage
+
+[src/pages/safety/Incidents.tsx](../src/pages/safety/Incidents.tsx). Guard: `incident:manage` in any city.
+
+| | |
+|---|---|
+| List | `CityPicker`; status chips (all, open, investigating, resolved), severity and category selects; table of incidents (ref, summary, severity, category, status, opened). `GET /api/support/incidents?cityId=&status=&severity=&category=&limit=50&cursor=` every 30 s, "Load older" by cursor. **Open incident** drawer (city, category, severity, summary, optional trip id, people involved as user ids, optional safety ticket id whose trip and people are copied) → `POST /api/support/incidents` with an `Idempotency-Key` |
+| One incident | `GET /api/support/incidents/:id` every 20 s: summary (trip link, subjects, owner, source), investigation notes, linked SOS alerts and tickets, actions taken |
+| Actions (`incident:manage` in its city) | Triage: severity, category, start investigating, take ownership or assign an owner by user id → `PATCH /api/support/incidents/:id`. **Note** → `POST /api/support/incidents/:id/notes` `{ body }`. **Record an action** (warning, suspended, banned, reinstated, pair block; user id, optional until, reference, note) → `POST /api/support/incidents/:id/actions`; the page says suspensions themselves are done on the Suspend page (auth-service). **Resolve** with an outcome (cleared, warning, suspended for a time, removed permanently) and a note → `POST /api/support/incidents/:id/resolve` |
+
+### `/staff/support/tickets` and `/staff/support/tickets/:id`: TicketsPage, TicketPage
+
+[src/pages/support/Tickets.tsx](../src/pages/support/Tickets.tsx). Guard: `ticket:read` in any city.
+
+| | |
+|---|---|
+| List | Status chips and an "Overdue" chip; city (cities with `ticket:read`), category, priority, assigned (anyone, to me, nobody) selects; search (words or ticket number). Table: number, subject (with city and assignee), category, from, opened, first response ("due in 12 min" / "overdue by 1 h 05" / answered), status. `GET /api/support/tickets?cityId=&status=&category=&priority=&assignee=&overdue=true&q=&limit=50&cursor=` every 30 s, "Load older" by cursor |
+| Log a ticket | With `ticket:create` in any city: a drawer for a caller (requester user id, category, subject, description, city, optional trip id, priority) → `POST /api/support/tickets` `{ …, source: "PHONE" }` with an `Idempotency-Key`, then the ticket page |
+| One ticket | `GET /api/support/tickets/:id` every 15 s: the conversation (requester messages, staff replies, internal notes marked), details (requester, trip link, city, category, priority, SLA, linked incident, lost item), linked refunds |
+| Actions | Reply or internal note → `POST /api/support/tickets/:id/messages` `{ body, internal }`. With `ticket:update` in its city: **Take it** `POST …/claim`; **Unassign** / assign by user id `POST …/assign` `{ assigneeUserId }`; **Working on it**, **Waiting for requester**, **Close without decision** `POST …/status` `{ status }`; priority and category `PATCH /api/support/tickets/:id`; **Resolve** with a resolution and a note `POST …/resolve`; **Reopen** with a reason `POST …/reopen`; **Link a refund** (refund id from Rider payments, optional amount) `POST …/refunds` |
+
+### `/staff/support/lost-items`: LostItemsPage
+
+[src/pages/support/LostItems.tsx](../src/pages/support/LostItems.tsx). Guard: `lost_item:manage` in any city.
+
+| | |
+|---|---|
+| Shows | City (`useStaffCity("lost_item:manage")`), status chips (default Reported); table of items with trip links. A drawer per item: description, status, trip and city, rider and driver (short ids; the fleet when the car is a company's), what the driver said, the ticket link, reported/returned/closed times, and the message thread. No phone numbers are shown: the thread (seen by rider and driver) is the only channel |
+| Calls | `GET /api/support/lost-items?cityId=&status=&limit=50&cursor=` every 30 s; `GET /api/support/lost-items/:id` every 15 s |
+| Actions | With `lost_item:manage` in the item's city: move the status to the next allowed ones (`LOST_NEXT`: found, not found, returned, closed) with an optional note → `POST /api/support/lost-items/:id/status`; send a message → `POST /api/support/lost-items/:id/messages` `{ body }` |
 
 ---
 
@@ -142,13 +217,13 @@ City: `CityPicker` over the cities where the user has `trip:read`.
 
 | | |
 |---|---|
-| Shows | Counts: drivers waiting, vehicles waiting, company documents, approved documents expiring within 30 days. Tabs Drivers / Vehicles / Companies with tables; rows waiting over 24 h are marked urgent |
-| Calls | `GET /api/fleet/review/queue?cityId=` every 30 s; `GET /api/identity/organizations?cityId=` for company names when the user has `org:read` in the city |
-| Actions | Click a row → driver record, vehicle record, or `/staff/onboarding?org=<id>` |
+| Shows | Counts: drivers waiting, vehicles waiting, company documents, approved documents expiring within 30 days. Tabs Drivers / Vehicles / Companies with tables; rows waiting over 24 h are marked urgent. With `vehicle:transfer` in the city, a fourth tab **Ownership transfers**: open transfers (`REQUESTED` and `PENDING`) with plate, from → to, reason, dates |
+| Calls | `GET /api/fleet/review/queue?cityId=` every 30 s; `GET /api/identity/organizations?cityId=` for company names when the user has `org:read` in the city; `GET /api/fleet/transfers?cityId=&limit=200` every 60 s (open ones kept) |
+| Actions | Click a row → driver record, vehicle record, or `/staff/onboarding?org=<id>`. On a transfer (`transferActions()` in [src/lib/fleet2.ts](../src/lib/fleet2.ts)): **Propose it** (owner's request) → `POST /api/fleet/transfers/:id/endorse`; **Approve transfer** (not the maker, `confirm`) → `/approve`; **Reject** (reason ≥ 10, not the maker) → `/reject`; **Withdraw** (whoever opened it) → `/cancel` |
 
 ### `/staff/fleet/drivers`: DriverDirectory
 
-Guard: `driver:read` in any city. Status chips (All, Applying, Waiting for review, Active, Suspended) and a search box (name or last 4 of the licence, sent from 2 characters). Calls `GET /api/fleet/drivers?cityId=&status=&q=`. Rows open `/staff/fleet/drivers/:userId`.
+Guard: `driver:read` in any city. Status chips (All, Applying, Waiting for review, Active, Suspended) and a search box (name or last 4 of the licence, sent from 2 characters). Calls `GET /api/fleet/drivers?cityId=&limit=&status=&q=`: 50 rows first, "Show more" asks for 200 (fleet-service's maximum; it has no cursor), after which the page says to narrow the filters. Rows open `/staff/fleet/drivers/:userId`.
 
 ### `/staff/fleet/drivers/:userId`: DriverRecord
 
@@ -158,11 +233,12 @@ Guard: `driver:read` in any city.
 |---|---|
 | Shows | Name, status, licence, city, dates, the last review note; the document checklist; own and fleet vehicles; "Right now" (online session or offline) |
 | Calls | `GET /api/fleet/drivers/:userId`; the checklist's document calls (see [shared components](#shared-components-with-their-own-api-calls)) |
-| Actions (all `POST /api/fleet/drivers/:userId/<action>`) | `request-changes` `{ reason }` (`driver:verify`, status `PENDING_REVIEW`); `approve` (`driver:verify` to see it, `driver:activate` to enable it, and no missing documents); `suspend` `{ reason }` (`driver:suspend`, 10+ characters); `reinstate` `{ reason }` (`driver:reinstate`, 10+ characters). Document review needs `document:review` in the driver's city |
+| Actions (all `POST /api/fleet/drivers/:userId/<action>`) | `request-changes` `{ reason }` (`driver:verify`, status `PENDING_REVIEW`); `approve` (`driver:verify` to see it, `driver:activate` to enable it, and no missing documents; without `driver:activate` the page says someone else must approve); `suspend` `{ reason }` (`driver:suspend`, 10+ characters); `reinstate` `{ reason }` (`driver:reinstate`, 10+ characters; lists missing documents first). Document review needs `document:review` in the driver's city |
+| Notes | A notice when suspended for an expired document. With `user:suspend` in any city: suspending here stops driving only; a link to `/staff/safety?user=<id>` locks the whole account |
 
 ### `/staff/fleet/vehicles`: VehicleDirectory
 
-Guard: `vehicle:read` in any city. Status chips (All, Waiting for review, Verified, Suspended, Rejected, Draft, Retired). Calls `GET /api/fleet/vehicles?cityId=&status=` and the organisation names query. Rows open `/staff/fleet/vehicles/:id`.
+Guard: `vehicle:read` in any city. Status chips (All, Waiting for review, Verified, Suspended, Rejected, Draft, Retired), owner chips (Any owner, Owner-drivers, Fleet cars) and a plate filter; owner and plate filter the loaded rows in the browser. Calls `GET /api/fleet/vehicles?cityId=&limit=&status=` (50, then 200 with "Show more") and the organisation names query. Rows open `/staff/fleet/vehicles/:id`.
 
 ### `/staff/fleet/vehicles/:id`: VehicleRecord
 
@@ -170,19 +246,19 @@ Guard: `vehicle:read` in any city.
 
 | | |
 |---|---|
-| Shows | Plate, status, car, type, seats, city; review note; a notice when suspended for an expired document; documents with the rule that the registration must name the owner; owner card; for company cars the drivers allowed; "Right now" |
-| Calls | `GET /api/fleet/vehicles/:id`; organisation names; document calls |
-| Actions | With `vehicle:verify` and status `PENDING_REVIEW`: `POST /api/fleet/vehicles/:id/reject` `{ reason }`, `POST /api/fleet/vehicles/:id/approve` (disabled while documents are missing) |
+| Shows | Plate, status, car, type, seats, city; review note; notices when suspended for an expired document, suspended by staff, or just transferred (new registration needed); documents with the rule that the registration must name the owner; owner card (company status pill, and "open the company" → `/staff/onboarding?org=<id>` with `org:read` or `org:suspend` in the car's city); for company cars the drivers allowed; "Right now"; **Ownership transfers** card (history, with the same actions as the review queue tab) |
+| Calls | `GET /api/fleet/vehicles/:id`; organisation names; document calls; `GET /api/fleet/vehicles/:id/transfers`; in the start drawer `GET /api/fleet/drivers?cityId=&q=&limit=20` (driver search) or `GET /api/identity/organizations?cityId=&status=VERIFIED` (fleets) |
+| Actions | With `vehicle:verify` and status `PENDING_REVIEW`: `POST /api/fleet/vehicles/:id/reject` `{ reason }`, `POST /api/fleet/vehicles/:id/approve` (disabled while documents are missing). **Suspend vehicle** (`driver:suspend` in the city, status `VERIFIED`; reason ≥ 10; category `ONBOARDING` for holders of `vehicle:verify`, else `SAFETY`) → `POST /api/fleet/vehicles/:id/suspend`. **Reinstate vehicle** (`driver:reinstate`, status `SUSPENDED`) → `/reinstate` `{ reason }`. **Start a transfer** (`vehicle:transfer` in the city, no open transfer, not retired): new owner a driver (search) or a verified fleet of the city, reason ≥ 10 → `POST /api/fleet/vehicles/:id/transfers` (the officer is the maker); transfer actions as above |
 
 ### `/staff/onboarding`: Onboarding (Companies)
 
-[src/pages/staff/Onboarding.tsx](../src/pages/staff/Onboarding.tsx). Guard: `org:read` in any city.
+[src/pages/staff/Onboarding.tsx](../src/pages/staff/Onboarding.tsx). Guard: `org:read` or `org:suspend` in any city (`companyCities()`), so safety and finance officers who may only suspend can find a company.
 
 | | |
 |---|---|
-| Shows | Tabs Waiting / Verified / Suspended; table of companies (name, legal name, kind fleet or company account, TIN, people, registered); waiting over 2 days is urgent. `?org=<id>` opens a drawer with the company's documents |
-| Calls | `GET /api/identity/organizations?cityId=&status=`; when a drawer is open, `GET /api/identity/organizations?cityId=` to find it; documents for `ORGANIZATION` |
-| Actions | **Verify** (`org:verify`, status `PENDING`, disabled until the required documents are approved) → `POST /api/identity/organizations/:id/verify`. **Suspend** (`org:suspend`, reason via browser `prompt`, 10+ characters) → `POST /api/identity/organizations/:id/suspend` `{ reason }`. Document review with `document:review` |
+| Shows | City select over the cities with either permission; tabs Waiting / Verified / Suspended; table of companies (name, legal name, kind fleet or company account, TIN, people, registered); waiting over 2 days is urgent. `?org=<id>` opens a drawer: details, papers, cars, **documents expiring** (fleets, with `document:read`: chips 7 / 30 / 90 days, expired rows urgent, plate links to the vehicle record) and **people** (with `org:read` or `org:suspend`: name, masked phone, organisation role, since, account suspended; pending invitations; suspension history with reasons) |
+| Calls | `GET /api/identity/organizations?cityId=&status=`; when a drawer is open, `GET /api/identity/organizations?cityId=` to find it; with `document:read` in the city, the `ORGANIZATION` documents and `GET /api/fleet/organizations/:id/expiring-documents?days=`; with `vehicle:read` in the city, the company's cars: `GET /api/fleet/vehicles?ownerOrgId=&cityId=&limit=200` (links to each vehicle record); `GET /api/identity/organizations/:id/members` |
+| Actions | What shows is `companyPowers()` × `orgActions()`. **Verify** (`org:verify`, status `PENDING`, disabled until the required documents are approved; says so when the papers can't be opened) → `POST /api/identity/organizations/:id/verify`. **Suspend company** (`org:suspend`, any status but `SUSPENDED`) opens a drawer: reason 10–500 characters, a confirm step → `POST /api/identity/organizations/:id/suspend` `{ reason }` with an `Idempotency-Key`. **Lift suspension** (`canReinstateOrg()`: `org:suspend` in the company's city, status `SUSPENDED`; table link and drawer notice) opens a drawer: reason 10–500 → `POST /api/identity/organizations/:id/reinstate` `{ reason }`; says whether it went back to verified or to waiting. Document review with `document:review` |
 
 ---
 
@@ -192,7 +268,11 @@ Guard: `vehicle:read` in any city.
 
 [src/pages/staff/Safety.tsx](../src/pages/staff/Safety.tsx). Guard: `user:suspend` in any city.
 
-Form: user id (UUID format), city handling the case (select only if more than one), reason (10+ characters). **Suspend** (with `confirm`) → `POST /api/identity/users/:userId/suspend` `{ reason, cityId }`. **Reinstate** → `POST /api/identity/users/:userId/reinstate` `{ reason, cityId }`.
+| | |
+|---|---|
+| Find | One search box: a name, the last 4+ digits of a phone, or a pasted user id; "Suspended only" narrows the list. `GET /api/identity/users?q=&limit=25&status=suspended` from 2 characters (not for a pasted id, which opens directly). Rows open a person drawer, kept in the URL as `?user=<id>` (other pages link here that way) |
+| Person drawer | `GET /api/identity/users/:id`: name, phone (masked unless `user:read_pii`), roles, status and, when suspended, until when and why; a driver-record link with `driver:read`; with `audit_log:read`, what was done to them (`AuditTrail`). If the details can't load, the id can still be acted on |
+| Actions | **Suspend** (cities with `user:suspend`; staff targets need `staff:manage`) and **Reinstate** (`user:reinstate`). Form: city handling the case (select when more than one), reason 10–500 characters, and for a suspension an optional "until" (`datetime-local` read as Addis Ababa time; must be in the future). A confirm step, then `POST /api/identity/users/:userId/suspend` or `/reinstate` `{ reason, cityId, until? }` with an `Idempotency-Key`. Not on your own account |
 
 ### `/staff/people`: People (Staff and roles)
 
@@ -210,15 +290,20 @@ Form: user id (UUID format), city handling the case (select only if more than on
 
 ### `/staff/money`: MoneyOverviewPage
 
-[src/pages/money/Overview.tsx](../src/pages/money/Overview.tsx). Guard: `balance:read` or `report:read_finance`.
+[src/pages/money/Overview.tsx](../src/pages/money/Overview.tsx). Guard: `balance:read` in any city, or `report:read_finance`.
 
-Shows last 7 days (fares settled, commission, VAT, trips by method), drivers and fleets (we owe them, they owe us, balance states), riders and companies (waiting for the payer, will be asked again, riders owe, companies owe), money at each provider, ledger integrity, open payout batches and a link to Money approvals when decisions wait. Calls `GET /api/payments/overview` every 30 s and, with `report:read_finance` or `system:read`, `GET /api/payments/ledger/integrity` every 5 min. Read-only.
+Two views. `GET /api/payments/overview` is platform-wide, so payment-service answers it only for `balance:read` or `report:read_finance` held everywhere:
+
+- **Platform-wide** (those holders): last 7 days (fares settled, commission, VAT, trips by method), drivers and fleets (we owe them, they owe us, balance states), riders and companies (waiting for the payer, will be asked again, riders owe, companies owe), rider payments by status, money at each provider, ledger integrity, open payout batches and a link to Money approvals when decisions wait. Calls `GET /api/payments/overview` every 30 s and, with `report:read_finance` or `system:read`, `GET /api/payments/ledger/integrity` every 5 min.
+- **One city** (for example a city support agent with `balance:read` there): city chips over the cities with `balance:read`; the five most negative balances and a count per state (`GET /api/payments/balances?cityId=&limit=5` and `?cityId=&state=&limit=1`, every 30 s); with a payment-reading role, refunds waiting (`GET /api/payments/refunds?status=PENDING_APPROVAL`) and payments waiting for the payer or failed (`GET /api/payments/payments?status=ACTION_REQUIRED|FAILED&limit=100`, every 30 s).
+
+Read-only.
 
 ### `/staff/money/balances`: BalancesPage
 
 [src/pages/money/Balances.tsx](../src/pages/money/Balances.tsx). Guard: `balance:read` in any city.
 
-Chips by state (OK, Warning, Cash paused, Blocked) and by type (Owner-drivers, Fleets), search from 3 characters, pages of 50. Calls `GET /api/payments/balances?limit=50&offset=&state=&type=&q=`. Rows open `/staff/money/balances/:accountId`. **Record cash or a bank transfer** (`topup:record_cash`) opens `RecordCashDrawer` with a reference code field.
+City chips when the person has `balance:read` in more than one city ("Every city" for global holders, "All my cities" otherwise; a city outside their reach would be a 403), chips by state (Warning, Cash paused, Blocked) and by type (Owner-drivers, Fleets), search from 3 characters, pages of 50. Calls `GET /api/payments/balances?limit=50&offset=&state=&type=&cityId=&q=`. **Export CSV** of the shown rows. Rows open `/staff/money/balances/:accountId`. **Record cash or a bank transfer** (`topup:record_cash`) opens `RecordCashDrawer` with a reference code field.
 
 ### `/staff/money/balances/:accountId`: BalancePage
 
@@ -229,7 +314,7 @@ Guard: `balance:read` in any city. Calls `GET /api/payments/balances/:accountId`
 | Part | Calls |
 |---|---|
 | Balance, state, limits, dues (overdue dues as errors) | from the balance object |
-| Statement (30 entries) | `GET /api/payments/balances/:accountId/statement?limit=30` |
+| Statement (30 entries a page, "Load older") | `GET /api/payments/balances/:accountId/statement?limit=30&before=` |
 | Top-ups | `GET /api/payments/balances/:accountId/top-ups`, every 3 s while one is `ACTION_REQUIRED` |
 | **Top up** (owner only) | `GET /api/payments/methods` (mobile-money providers), then `POST /api/payments/balances/:accountId/top-ups` `{ amountMinor, provider }` with an `Idempotency-Key` |
 | **Payout method** (owner only) | `PUT /api/payments/balances/:accountId/payout-method` `{ provider, destination }` |
@@ -243,71 +328,132 @@ On the staff page `owner` is never set, so staff do not see Top up or Payout met
 
 | | |
 |---|---|
-| Shows | Chips All / Waiting for the payer / Will ask again / Failed / Paid / Refunded; table of payments. A row opens `PaymentDrawer` |
-| Calls | `GET /api/payments/payments?limit=100&status=` every 15 s; in the drawer `GET /api/payments/payments/:id` every 5 s |
+| Shows | Status chips All / Waiting for the payer / Will ask again / Failed / Paid / Partly refunded / Refunded; city chips ("All your cities" plus each city where the person holds a `PAYMENT_READERS` permission, shown when more than one); provider select (every enabled provider from `useProviders()`, plus "None"); trip id field (the full id). Table: when, trip, for, provider, amount, status. **Export CSV** of the loaded rows. A row opens `PaymentDrawer` |
+| Calls | `GET /api/payments/payments?status=&provider=&tripId=&cityId=&limit=50` every 15 s, "Load older" with `&before=<next>`; `GET /api/payments/methods` (providers, cached 5 min); in the drawer `GET /api/payments/payments/:id` every 5 s |
 | Actions | **Check with the provider** (`commission:collect`, status `ACTION_REQUIRED` or `PENDING`) → `POST /api/payments/payments/:id/reconcile`. **Ask for a refund** (`refund:request` in the payment's city, status `SUCCEEDED` or `PARTIALLY_REFUNDED`) → `POST /api/payments/payments/:id/refunds` `{ amountMinor, reason, driverAtFault }` with an `Idempotency-Key` |
 
 ### `/staff/money/approvals`: MoneyApprovalsPage
 
-[src/pages/money/Approvals.tsx](../src/pages/money/Approvals.tsx). Guard: any `MONEY_APPROVERS` permission in any city.
+[src/pages/money/Approvals.tsx](../src/pages/money/Approvals.tsx). Guard: any `MONEY_APPROVERS` permission in any city. Tabs **Pending** and **History** (`?tab=history`). Each list is only asked for when the person's roles let payment-service answer it, so nobody sees a 403 for a list they can't have.
+
+**Pending**:
 
 | Card type | Loaded by | Decided by | Decision call |
 |---|---|---|---|
-| Payout batch | `GET /api/payments/payouts` (filtered to `PENDING_APPROVAL`), with `payout:prepare` or `payout:approve` | `payout:approve` | `POST /api/payments/payouts/:id/{approve\|reject}` |
-| Cash / bank top-up | `GET /api/payments/top-ups?status=PENDING_APPROVAL`, with `topup:record_cash` or `topup:approve_cash` | `topup:approve_cash` | `POST /api/payments/top-ups/:id/{approve\|reject}` |
-| Refund | `GET /api/payments/refunds?status=PENDING_APPROVAL` (always fetched) | `refund:approve` in the payment's city | `POST /api/payments/refunds/:id/{approve\|reject}` |
-| Commission rule / balance limits | `GET /api/payments/rules/pending` (always fetched) | `commission_rule:approve` / `balance_policy:approve` in the city | `POST /api/payments/rules/changes/:id/{approve\|reject\|cancel}` |
+| Payout batch | `GET /api/payments/payouts` (filtered to `PENDING_APPROVAL`), with `payout:approve`, `payout:prepare` or `report:read_finance` everywhere (`canReadPayouts`) | `payout:approve` | `POST /api/payments/payouts/:id/{approve\|reject}` |
+| Cash / bank top-up | `GET /api/payments/top-ups?status=PENDING_APPROVAL`, with `topup:record_cash`, `topup:approve_cash` or `balance:read` everywhere (`canListTopUps`) | `topup:approve_cash` | `POST /api/payments/top-ups/:id/{approve\|reject}` |
+| Refund | `GET /api/payments/refunds?status=PENDING_APPROVAL`, with a `PAYMENT_READERS` permission in any city | `refund:approve` in the payment's city | `POST /api/payments/refunds/:id/{approve\|reject}` |
+| Commission rule / balance limits | `GET /api/payments/rules/pending`, with a rule propose/approve permission in any city (`RULE_DECIDERS`) | `commission_rule:approve` / `balance_policy:approve` in the city | `POST /api/payments/rules/changes/:id/{approve\|reject\|cancel}` |
 
-Reject needs a reason (3+ characters) sent as `{ reason }`. The maker sees "waiting for someone else" and, for rule changes only, **Withdraw** (`cancel`). Success invalidates every `["money", …]` query. Staff ids are shown as names through `useStaffNames()` (`GET /api/identity/users?kind=staff&limit=100`, with `user:read_masked`).
+Approve has a confirm step; reject needs a reason (3+ characters) sent as `{ reason }`. The maker sees "waiting for someone else" and, for rule changes only, **Withdraw** (`cancel`). Success invalidates every `["money", …]` query. Staff ids are shown as names through `useStaffNames()` (`GET /api/identity/users?kind=staff&limit=100`, with `user:read_masked`).
+
+**History**: chips for the lists the person may read; decided items only (`decided()` drops what still waits).
+
+| List | Calls | Extras |
+|---|---|---|
+| Refunds | `GET /api/payments/refunds?status=` (all decided, sending, refunded, failed, rejected); newest 100 in the person's cities | CSV; a row opens the payment drawer |
+| Top-ups | `GET /api/payments/top-ups?status=&channel=` (channel defaults to cash at an office; payment-service limits the list to the person's cities) | CSV; a row opens a drawer with `GET /api/payments/top-ups/:id` |
+| Payouts | `GET /api/payments/payouts` | a row opens `BatchDetail` (from Payouts) in a drawer |
+| Rule changes | `GET /api/payments/rules?cityId=` per city (cities with a `RULE_VIEWERS` permission) | proposals decided, withdrawn or expired |
 
 ### `/staff/money/payouts`: PayoutsPage
 
 [src/pages/money/Payouts.tsx](../src/pages/money/Payouts.tsx). Guard: `payout:prepare` or `payout:approve`.
 
-Chips for each batch; the selected batch shows its status, totals, reject reason and lines. Calls `GET /api/payments/payouts` every 15 s and `GET /api/payments/payouts/:id` every 3 s while `SENDING`, else 20 s. **Run settlement now** (`payout:prepare`) → `POST /api/payments/settlements/run`; if `created` is false the page says today's settlement already ran.
+Chips for each batch; the selected batch (`BatchDetail`) shows its status, who prepared and decided it, totals, reject reason, line-status chips with count and amount per status, the lines, and a CSV of the lines. Calls `GET /api/payments/payouts` every 15 s and `GET /api/payments/payouts/:id` every 3 s while `SENDING`, else 20 s. **Run settlement now** (`payout:prepare`) asks for confirmation, then `POST /api/payments/settlements/run`; if `created` is false the page says today's settlement already ran.
+
+### Money controls: adjustments, write-offs, limit exceptions, incentives, invoices
+
+[src/pages/money/Adjustments.tsx](../src/pages/money/Adjustments.tsx), [WriteOffs.tsx](../src/pages/money/WriteOffs.tsx), [Incentives.tsx](../src/pages/money/Incentives.tsx), [Invoices.tsx](../src/pages/money/Invoices.tsx); guards in `lib/money2.ts` (`canSeeAdjustments`, `canSeeWriteOffs`, `canSeeOverrides`, `canSeeIncentives`, `canSeeInvoices`). All follow maker–checker: the person who proposes cannot approve, and pending items also appear on Money approvals (`MoreMoneyApprovals`, from `GET /api/payments/approvals/pending`).
+
+| Page | Route | Calls |
+|---|---|---|
+| Adjustments | `/staff/money/adjustments` | `GET/POST /api/payments/adjustments`, `POST /api/payments/adjustments/:id` (approve / reject / cancel) |
+| Write-offs | `/staff/money/write-offs` | `GET /api/payments/write-offs/candidates`, `GET/POST /api/payments/write-offs`, `POST /api/payments/write-offs/:id` |
+| Limit exceptions | `/staff/money/overrides` | `GET/POST /api/payments/policy-overrides`, `POST /api/payments/policy-overrides/:id` |
+| Incentives | `/staff/money/incentives` | `GET/POST /api/payments/incentives`, `GET/POST /api/payments/incentives/:id` |
+| Invoices | `/staff/money/invoices` | `GET /api/payments/invoices/uninvoiced?period=`, `GET/POST /api/payments/invoices`, `GET /api/payments/invoices/:id`, `GET /api/payments/invoices/:id/csv`, `POST /api/payments/invoices/:id/payments` |
+
+BalancePanel links **Adjust** and **Limit exception** to the first two pages with the account prefilled.
 
 ### `/staff/money/rules`: RulesPage (Commission and limits)
 
 [src/pages/money/Rules.tsx](../src/pages/money/Rules.tsx). Guard: any `RULE_READERS` permission in any city.
 
-City chips (`?city=`, default the first city). Shows commission rules in force and scheduled, the balance policy, defaults and pending changes. Calls `GET /api/payments/rules?cityId=`. **Propose a commission** (`commission_rule:propose` in the city) and **Propose limits** (`balance_policy:propose`) → `POST /api/payments/rules/changes` `{ kind: COMMISSION_RULE | BALANCE_POLICY, cityId, payload, reason }` (reason 5+ characters); approval happens under Money approvals.
+City chips (`?city=`) over the cities where the person holds a `RULE_VIEWERS` permission (default the first; none → "No city to show"). Shows commission rules in force and scheduled, the balance policy, defaults, the latest 30 proposals and other versions (ended or scheduled). Calls `GET /api/payments/rules?cityId=`. **Propose a commission** (`commission_rule:propose` in the city) and **Propose limits** (`balance_policy:propose`) → `POST /api/payments/rules/changes` `{ kind: COMMISSION_RULE | BALANCE_POLICY, cityId, payload, reason }` (reason 5+ characters); approval happens under Money approvals.
 
 ### `/staff/money/providers`: ProvidersPage
 
-[src/pages/money/Providers.tsx](../src/pages/money/Providers.tsx). Guard: `balance:read` or `report:read_finance` or `system:read`. Calls `GET /api/payments/gateways` every 15 s: providers and their mode, simulator settings when simulated, callbacks in the last 24 h by signature result, unprocessed callbacks, recent callbacks. Read-only.
+[src/pages/money/Providers.tsx](../src/pages/money/Providers.tsx). Guard: `balance:read` or `report:read_finance` or `system:read`. Calls `GET /api/payments/gateways` every 15 s: providers and their mode, simulator settings when simulated, callbacks in the last 24 h by signature result, unprocessed callbacks, latest callbacks with provider chips, "Signature refused" / "Not processed" chips and a CSV. With `balance:read` or `report:read_finance` everywhere, also `GET /api/payments/overview` (every 30 s) for what each provider holds. Read-only.
 
 ---
+
+## Staff: Pricing and marketing
+
+Helpers and guards live in [src/lib/marketing.ts](../src/lib/marketing.ts). Every page has city chips over the cities where the person holds the permission.
+
+### `/staff/ops/pricing`: PricingPage (Fares)
+
+Guard: `pricing:propose` or `pricing:approve` in any city. Current fare rules per vehicle type (`GET /api/pricing/fare-rules?cityId=`) and fare changes (`GET /api/pricing/fare-changes?cityId=&status=`). **Propose** → `POST /api/pricing/fare-changes/preview` (shows sample trips before/after) then `POST /api/pricing/fare-changes`; a different person approves or rejects (`POST /api/pricing/fare-changes/:id/approve|reject`); the proposer can cancel.
+
+### `/staff/ops/zones`: ZonesPage
+
+Guard: `zone:manage` in any city. Zones of kind `SERVICE_AREA`, `NO_PICKUP`, `AIRPORT` and `SURGE`, drawn as polygons on the map. `GET /api/pricing/zones?cityId=&includeArchived=`, `POST /api/pricing/zones`, `PUT /api/pricing/zones/:id`, archive → `DELETE /api/pricing/zones/:id`; the polygon is validated with `POST /api/pricing/zones/check` `{ cityId, polygon }` before saving.
+
+### `/staff/marketing/promos`: PromosPage (Promo codes)
+
+Guard: `promo:manage` or `incentive:approve` in any city. `GET /api/pricing/promos?cityId=`, create → `POST /api/pricing/promos`, edit → `PUT /api/pricing/promos/:id`; activate / pause / resume / archive → `POST /api/pricing/promos/:id/:action`; redemptions → `GET /api/pricing/promos/:id/redemptions`. Riders enter codes on the quote screen of the phone app; the discount is booked as a promo expense by payment-service.
+
+### `/staff/marketing/campaigns`: CampaignsPage
+
+Guard: `campaign:send` in any city. Needs the `/api/notifications` proxy (vite `NOTIFICATION_URL`, default port 3006). Audience size preview → `GET /api/notifications/campaigns/audience?cityId=&audience=&channel=&lastActiveDays=`; draft → `POST /api/notifications/campaigns`; edit `PUT /api/notifications/campaigns/:id`; schedule → `POST /api/notifications/campaigns/:id/schedule`; cancel → `POST /api/notifications/campaigns/:id/cancel`. People who opted out of marketing are excluded by notification-service.
 
 ## Staff: Administration
 
 ### `/staff/admin`: OverviewPage
 
-[src/pages/admin/Overview.tsx](../src/pages/admin/Overview.tsx). Guard: `report:read` or `system:read`.
+[src/pages/admin/Overview.tsx](../src/pages/admin/Overview.tsx). Guard: `report:read` in any city, or `system:read`.
+
+Whose numbers: `reportScope()` ([src/lib/account.ts](../src/lib/account.ts)). A global `report:read` holder sees every city or picks one; a city-scoped holder (dispatchers, support, onboarding, operations, marketing, analysts) sees one of their cities at a time, with a city select when they have more than one. The stats calls take `?cityId=` (`statsPath()`), or none for every city.
 
 | Block | Call | Condition | Interval |
 |---|---|---|---|
-| Trips today | `GET /api/trips/stats` | `report:read` | 30 s |
-| People | `GET /api/identity/stats` | `report:read` | 60 s |
-| Drivers and vehicles | `GET /api/fleet/stats` | `report:read` | 60 s |
+| Trips today | `GET /api/trips/stats[?cityId=]` | `report:read` in a city or everywhere | 30 s |
+| People | `GET /api/identity/stats[?cityId=]` (with a city, staff and company counts are that city's; account counts stay platform-wide) | 〃 | 60 s |
+| Drivers and vehicles | `GET /api/fleet/stats[?cityId=]` | 〃 | 60 s |
 | System alerts | `GET /api/platform/system` | `system:read` | 15 s |
 | Waiting approvals | `GET /api/identity/approvals?status=PENDING` | `role:approve` or `authz:approve` | none |
 | Waiting setting changes | `GET /api/platform/settings/changes?status=PENDING` | `settings:read` | none |
 
 Alerts come from `systemAlerts()` in System.tsx. Read-only.
 
-### `/staff/admin/users`: UsersPage
+### `/staff/reports`: ReportsPage
 
-[src/pages/admin/Users.tsx](../src/pages/admin/Users.tsx). Guard: `user:read_masked`. Kind chips (all, staff, rider, driver, partner, guest), status filter, search from 2 characters, cursor paging. Calls `GET /api/identity/users?q=&kind=&status=&cursor=`. Rows open the user page.
-
-### `/staff/admin/users/:id`: UserPage
-
-Guard: `user:read_masked`.
+[src/pages/reports/Reports.tsx](../src/pages/reports/Reports.tsx). Guard: `report:read` in any city, or `report:read_finance`.
 
 | | |
 |---|---|
-| Shows | Status, ban reason and expiry, setup state for staff, access-review notice after 30 idle days, roles, organisation memberships, sessions (surface, IP, user agent, times), and with `audit_log:read` two audit trails: what they did (`actorId`) and what was done to them (`resourceId`) |
-| Calls | `GET /api/identity/users/:id`; `GET /api/audit/entries?actorId=…&limit=20` and `?resourceId=…&limit=20` |
-| Actions (`POST /api/identity/users/:id/<path>` `{ reason, cityId? }`, reason 10+ characters) | **Sign out everywhere** `sessions/revoke` (`session:revoke`); **Reset sign-in** `reset-mfa` (staff target, `staff:manage`, not yourself; may answer `pendingApproval` or a `temporaryPassword` shown once); **Suspend** `suspend` and **Reinstate** `reinstate` (staff targets need `staff:manage`; others `user:suspend` / `user:reinstate` in a city, and a city is sent) |
+| Shows | City select ("All cities" only for a global `report:read`), from/to dates (default the last 7 days in Addis Ababa; 1–92 days). Tab **Trips**: totals (requested, completed, cancelled, completion rate, time to match, fares), trips per day as a `BarChart`, a per-day table with channels and vehicle types, cancellations by side and reason. Tab **Finance** (only with `report:read_finance` held everywhere): fares, commission, VAT, earnings, payment methods, cancellation fees, collections, refunds, payouts and top-ups per day, with a chart |
+| Calls | `GET /api/trips/reports/daily?cityId=&from=&to=`; `GET /api/payments/reports/daily?cityId=&from=&to=` (Finance tab) |
+| Actions | **Download CSV** → `GET /api/trips/reports/daily.csv?…` or `GET /api/payments/reports/daily.csv?…` as text with the staff token (`downloadCsv()`), saved as `trips|finance-<city|all>-<from>-<to>.csv` |
+
+### `/staff/reports/regulatory`: RegulatoryReportPage (Regulatory report)
+
+[src/pages/reports/Regulatory.tsx](../src/pages/reports/Regulatory.tsx). Guard: `report:read_regulatory` in any city. City and date range, a summary from `GET /api/trips/reports/regulatory?cityId=&from=&to=`, and **Download CSV** → `GET /api/trips/reports/regulatory.csv?…`.
+
+### `/staff/admin/users`: UsersPage
+
+[src/pages/admin/Users.tsx](../src/pages/admin/Users.tsx). Guard: `user:read_masked` in any city. City-scoped holders get the masked directory: auth-service masks phones without a global `user:read_pii` and hides session devices; the page says which view you have. Kind chips (all, staff, rider, driver, partner, guest), status filter, search from 2 characters, cursor paging. Calls `GET /api/identity/users?q=&kind=&status=&cursor=`. Rows open the user page.
+
+### `/staff/admin/users/:id`: UserPage
+
+Guard: `user:read_masked` in any city.
+
+| | |
+|---|---|
+| Shows | Status, ban reason and expiry, setup state for staff, access-review notice after 30 idle days, roles, organisation memberships, sessions (surface, IP and user agent, or "devices hidden for your role" when auth-service sends them as `null`, times), and with `audit_log:read` two audit trails: what they did (`actorId`) and what was done to them (`resourceId`). For drivers: a **Driver record** link (`driver:read` in any city) and, with `balance:read` in any city, a link to their balance with the amount |
+| Calls | `GET /api/identity/users/:id`; `GET /api/audit/entries?actorId=…&limit=20` and `?resourceId=…&limit=20`; for drivers `GET /api/payments/balances?q=<id>&type=INDIVIDUAL&limit=5` |
+| Actions (`POST /api/identity/users/:id/<path>` `{ reason, cityId?, until? }`, reason 10+ characters) | **Sign out everywhere** `sessions/revoke` (`session:revoke`); **Reset sign-in** `reset-mfa` (staff target, `staff:manage`, not yourself; may answer `pendingApproval` or a `temporaryPassword` shown once); **Suspend** `suspend` with "How long" (until reinstated, 24 hours, 7 days, 30 days, or until a date, which ends at the start of that day in Addis Ababa; `suspendUntil()`) and **Reinstate** `reinstate` (staff targets need `staff:manage`; others `user:suspend` / `user:reinstate` in a city, and a city is sent) |
 
 ### `/staff/admin/roles`: RolesPage
 
@@ -354,9 +500,27 @@ The maker sees Withdraw instead of Approve/Reject. Approving `maintenance.newTri
 
 ---
 
+## Staff: You
+
+### `/staff/account`: StaffAccountPage (My account)
+
+[src/pages/staff/Account.tsx](../src/pages/staff/Account.tsx). No guard: every staff member has it (sidebar group "You"). Admin-surface cookie calls only (`authCall("staff", …)`).
+
+| Part | Calls |
+|---|---|
+| Who you are (email), your roles with their city or "everywhere" | `GET /api/admin-auth/get-session`; roles from the token |
+| **Your name** (2–120 characters, `nameProblem()`) | `POST /api/admin-auth/update-user` `{ name }` |
+| **Password** (current, new 12–128 characters, different, typed twice; optional "sign out my other sessions") | `POST /api/admin-auth/change-password` `{ currentPassword, newPassword, revokeOtherSessions }` |
+| **Two-step sign-in**: authenticator status; **new backup codes** (needs the password; old codes stop working). Codes are shown once, with Copy (`backupCodesText()`), and kept only in component state | `POST /api/admin-auth/two-factor/generate-backup-codes` `{ password }` |
+| **Where you're signed in**: this browser first, then by last activity, with a device label from the user agent; sign out one, or all others | `GET /api/admin-auth/list-sessions`; `POST /api/admin-auth/revoke-session` `{ token }`; `POST /api/admin-auth/revoke-other-sessions` |
+
+After a backup-code sign-in (`?backup=used`) a notice says the code is spent and suggests new ones.
+
+---
+
 ## Partner portal
 
-The partner `Shell` lists the user's companies (`GET /api/auth/organization/list`) and "Register a company".
+The partner `Shell` lists the user's companies (`GET /api/auth/organization/list`), "Register a company" and, under "You", My account.
 
 ### `/partner`: PartnerHome
 
@@ -370,30 +534,92 @@ Kind (fleet company or company account), name, legal name, 10-digit TIN, city. `
 
 | | |
 |---|---|
-| Shows | Name, kind, city, legal name, TIN, status pill; notices while `PENDING` or `SUSPENDED`. Tabs: **People** (fleets: "Drivers and people"), **Vehicles** (fleets with `vehicle:read @ ORG`), **Balance** (verified fleets with `balance:read @ ORG`), **Documents** (with `document:upload @ ORG`); selected with `?tab=` |
-| Calls | `GET /api/auth/organization/get-full-organization?organizationId=`; for fleets with `vehicle:read`, `GET /api/fleet/organizations/:orgId/overview?members=<driver ids>` every 30 s (each driver's onboarding status, cars and online state) |
-| People actions | With `org:manage_members @ ORG` and status `VERIFIED`: **Invite by phone** → `POST /api/auth/organization/invite-member` `{ email: <placeholder email>, role, organizationId }` (fleets invite `fleet_driver`; company accounts `employee` or `corporate_coordinator`); **withdraw** → `POST /api/auth/organization/cancel-invitation` `{ invitationId }`; **remove** (not yourself, not owners or admins) → `POST /api/auth/organization/remove-member` `{ memberIdOrEmail, organizationId }` |
+| Shows | Logo and name, kind, city, legal name, TIN, status pill; notices while `PENDING` or `SUSPENDED`. Header links: **Trips** (`trip:read @ ORG`), **Earnings** (fleets, `earnings:read @ ORG`), **Charges** (company accounts, `payment:read @ ORG`), **Edit name and logo** (`org:update @ ORG`). Tabs: **People** (fleets: "Drivers"), **Vehicles** (fleets with `vehicle:read @ ORG`), **Balance** (verified fleets with `balance:read @ ORG`), **Documents** (with `document:upload @ ORG`); selected with `?tab=` |
+| Calls | `GET /api/auth/organization/get-full-organization?organizationId=`; `GET /api/auth/organization/list-invitations?organizationId=`; for fleets with `vehicle:read`, `GET /api/fleet/organizations/:orgId/overview?members=<driver ids>` every 30 s (each driver's onboarding status, cars and online state) |
+| People actions | With `org:manage_members @ ORG` and status `VERIFIED`: **Invite by phone** → `POST /api/auth/organization/invite-member` `{ email: <placeholder email>, role, organizationId }` (fleets invite `fleet_driver`; company accounts `employee` or `corporate_coordinator`); invitations listed with status, **withdraw** (or clear an expired one) → `POST /api/auth/organization/cancel-invitation` `{ invitationId }`; on company accounts, switch a member between employee and travel desk (`switchedRole()`) → `POST /api/auth/organization/update-member-role` `{ memberId, role, organizationId }`; **remove** (not yourself, not owners or admins) → `POST /api/auth/organization/remove-member` `{ memberIdOrEmail, organizationId }`. Fleet drivers' names link to the driver page with `driver:read @ ORG` |
+| Edit company | Drawer: name and logo (JPEG/PNG/WebP under 5 MB, downscaled to a 160 px JPEG data URL by `imageToDataUrl()`, or removed) → `POST /api/auth/organization/update` `{ organizationId, data: { name, logo } }`. Kind, city, TIN and legal name change only through Anbessa |
+| Trips card | Company accounts with `trip:read @ ORG`: rides booked from this browser tab (`sessionStorage` `anbessa.partner.booked`, forgotten when the tab closes), and a box to open any trip by its full id |
 | Booking | Company accounts with `trip:create_on_behalf @ ORG` and `VERIFIED`: link to `/partner/org/:orgId/book` |
 | Balance tab | `GET /api/payments/balances/org/:orgId?cityId=&open=true` every 15 s (`open=true` only with `topup:create @ ORG`), then `BalancePanel` with `owner` set to `topup:create` (see [BalancePanel](#staffmoneybalancesaccountid-balancepage)) |
+
+### Company pages: trips, earnings, charges, invoices, ride policy, booked ahead
+
+Linked from the OrgPage header. Each checks the org role (`orgRoleOf`) and shows "Not available" otherwise; the service checks again.
+
+| Route | Page | Calls |
+|---|---|---|
+| `/partner/org/:orgId/trips` (`/:tripId`) | CompanyTripsPage ([CompanyTrips.tsx](../src/pages/partner/CompanyTrips.tsx)) | `GET /api/trips/org/:orgId?status=&from=&to=&before=` (paged) |
+| `/partner/org/:orgId/earnings` | FleetEarningsPage (fleets) | `GET /api/payments/earnings/org/:orgId?period=` |
+| `/partner/org/:orgId/charges` | CompanyChargesPage (company accounts) | `GET /api/payments/org/:orgId/payments?limit=50&before=` |
+| `/partner/org/:orgId/invoices` | CompanyInvoicesPage ([Invoices.tsx](../src/pages/partner/Invoices.tsx)) | `GET /api/payments/org/:orgId/invoices`, `/:id`, `/:id/csv` |
+| `/partner/org/:orgId/policy` | CompanyPoliciesPage ([Policies.tsx](../src/pages/partner/Policies.tsx)) | `GET/PUT /api/trips/corporate/:orgId/policy` (allowed vehicle types, hours, max fare, purpose required) |
+| `/partner/org/:orgId/scheduled` | CompanyScheduledPage ([Scheduled.tsx](../src/pages/partner/Scheduled.tsx)) | `POST /api/pricing/estimates`, `GET/POST /api/trips/scheduled`, `POST /api/trips/scheduled/:id/cancel` |
+
+Corporate booking sends `purpose` when the policy asks for it; a `policy_violation` answer is shown with the rule that failed. "Book for later instead" links to the scheduled page.
 
 ### Vehicles tab (FleetVehicles) and documents tab (CompanyDocuments)
 
 [src/pages/partner/Fleet.tsx](../src/pages/partner/Fleet.tsx).
 
-- **Vehicles**: table of non-retired company cars (plate, car, status with missing-document count, allowed drivers, who is driving). **Add vehicle** (verified, `vehicle:register @ ORG`) → `POST /api/fleet/vehicles` `{ ownerType: "ORGANIZATION", ownerOrgId, plateNumber, vehicleType, make, model, year, color, seats }`, then opens the vehicle page. Vehicle types and seat ranges are hard-coded in `VEHICLE_TYPES` ([src/lib/fleet.ts](../src/lib/fleet.ts)).
+- **Vehicles**: table of non-retired company cars (plate, car, status with missing-document count, allowed drivers, who is driving). "Show cars removed from the fleet" loads `GET /api/fleet/vehicles?ownerOrgId=&status=RETIRED`. **Add vehicle** (verified, `vehicle:register @ ORG`) → `POST /api/fleet/vehicles` `{ ownerType: "ORGANIZATION", ownerOrgId, plateNumber, vehicleType, make, model, year, color, seats }`, then opens the vehicle page. Vehicle types and seat ranges are hard-coded in `VEHICLE_TYPES` ([src/lib/fleet.ts](../src/lib/fleet.ts)).
 - **Documents**: the company's `ORGANIZATION` checklist in owner mode, locked without `document:upload`.
+- **Ownership changes in progress** (on the Vehicles tab, only when there are some): open transfers out of or into the fleet, from `GET /api/fleet/transfers?ownerOrgId=&limit=100` (`vehicle:read @ ORG`); outgoing rows open the vehicle page.
 
 ### `/partner/org/:orgId/vehicles/:vehicleId`: FleetVehiclePage
 
 | | |
 |---|---|
-| Shows | Plate, status, car; notices for draft, waiting, rejected, expired document; documents (locked while `PENDING_REVIEW`, retired, or without `document:upload`); "Who may drive it"; "Right now" |
-| Calls | `GET /api/auth/organization/get-full-organization?organizationId=`; `GET /api/fleet/vehicles/:vehicleId`; document calls |
-| Actions | **Submit for review** (status `DRAFT`/`REJECTED`, or suspended for an expired document; no missing documents) → `POST /api/fleet/vehicles/:id/submit`. **Remove from fleet** (`vehicle:retire @ ORG`, `confirm`) → `POST /api/fleet/vehicles/:id/retire`. **Allow** a fleet driver, optional end date (`vehicle:authorize_driver @ ORG`) → `POST /api/fleet/vehicles/:id/authorizations` `{ driverUserId, validUntil? }` (`validUntil` is the date at 23:59:59+03:00). **Take away** → `DELETE /api/fleet/vehicles/:id/authorizations/:driverUserId` |
+| Shows | Plate, status, car; notices for draft, waiting, rejected, expired document, suspended by staff, just transferred to the company; documents (locked while `PENDING_REVIEW`, retired, or without `document:upload`); "Who may drive it"; "Right now"; **Change of owner** (transfer history with status) |
+| Calls | `GET /api/auth/organization/get-full-organization?organizationId=`; `GET /api/fleet/vehicles/:vehicleId`; document calls; `GET /api/fleet/vehicles/:vehicleId/transfers` |
+| Actions | **Submit for review** (status `DRAFT`/`REJECTED`, or suspended for an expired document; no missing documents) → `POST /api/fleet/vehicles/:id/submit`. **Remove from fleet** (`vehicle:retire @ ORG`, `confirm`) → `POST /api/fleet/vehicles/:id/retire`. **Allow** a fleet driver, optional end date (`vehicle:authorize_driver @ ORG`) → `POST /api/fleet/vehicles/:id/authorizations` `{ driverUserId, validUntil? }` (`validUntil` is the date at 23:59:59+03:00). **Take away** → `DELETE /api/fleet/vehicles/:id/authorizations/:driverUserId`. **Hand this car to a new owner** (`fleetMayAskTransfer()`: `vehicle:retire @ ORG`, the fleet still owns it, no open transfer) opens a drawer: one of the fleet's drivers, or another fleet by its Anbessa company id (from its portal address), reason ≥ 10 → `POST /api/fleet/vehicles/:id/transfers` (status `REQUESTED`; an onboarding officer proposes it and a second approves). **Withdraw** an open request the person made → `POST /api/fleet/transfers/:id/cancel` |
 
 ### `/partner/org/:orgId/book`: CorporateBooking
 
-Pick a rider from members with `employee`, `corporate_coordinator` or `corporate_admin`; pickup and destination with `PlacePicker` (partner token). **Get the fare** → `POST /api/pricing/estimates` with `vehicleTypes: ["economy"]` (fixed). **Request the ride** → `POST /api/trips` `{ quoteId, paymentMethod: "CORPORATE", billingOrgId, riderUserId }` with an `Idempotency-Key`. A boxed map shows the two pins and the dashed line. The route has no guard; the page does not check `trip:create_on_behalf` itself.
+The page refuses (with an explanation) unless the person has `trip:create_on_behalf` and `trip:bill_corporate @ ORG`, and when client config has `features.corporateBooking` off; during maintenance (`newTripsPaused`) it shows the maintenance message.
+
+| Step | Calls |
+|---|---|
+| Rider: members with `employee`, `corporate_coordinator` or `corporate_admin` | from `get-full-organization` |
+| Pickup and destination with `PlacePicker` (partner token); the map draws the road route | `GET /api/maps/route?from=&to=` (partner) |
+| Car: the city's vehicle types from client config (`vehicleChoices()`; the built-in three before the config loads), each with its fare card; types without a fare card are left out | `GET /api/pricing/fares?cityId=` (sent through `http.get` without a token) |
+| **Get the fare**: price, distance, time, cars nearby, minutes to the pickup, "price held until" | `POST /api/pricing/estimates` `{ pickup, dropoff, vehicleTypes: [type], pickupAddress, dropoffAddress }` |
+| **Request the ride** (only while the quote is usable, `quoteUsable()`; an expired quote asks for a new fare) | `POST /api/trips` `{ quoteId, paymentMethod: "CORPORATE", billingOrgId, riderUserId }` with an `Idempotency-Key`; the trip is remembered in this tab and the browser goes to the trip page |
+
+### `/partner/org/:orgId/trips`: CompanyTripsPage
+
+[src/pages/partner/CompanyTrips.tsx](../src/pages/partner/CompanyTrips.tsx). The page needs `trip:read @ ORG`. Tabs **Billed to us** and **In our cars** (`?role=billing|fleet`, default from the person's org role), status and from/to date filters. Calls `GET /api/trips/org/:orgId?role=&status=&from=&to=&limit=50`, then `&before=` for older trips. Rows link to the trip page.
+
+### `/partner/org/:orgId/charges`: CompanyChargesPage
+
+Same file. The page needs `payment:read @ ORG`. "Owed now" and the charges (when, what: trip fare or cancellation fee, trip, car type, amount), invoiced monthly. Calls `GET /api/payments/org/:orgId/payments?limit=50`, then `&before=`.
+
+### `/partner/org/:orgId/earnings`: FleetEarningsPage
+
+[src/pages/partner/FleetEarnings.tsx](../src/pages/partner/FleetEarnings.tsx). The page needs `earnings:read @ ORG` (fleet owner). Period tabs today / week / month / custom (1–92 days). Totals (trips and cancellation fees, gross fares, commission, VAT, net with the balance change, cash collected and kept by drivers), a per-day `BarChart` and a per-driver table. Calls `GET /api/payments/earnings/org/:orgId?period=&from=&to=`.
+
+### `/partner/org/:orgId/trips/:tripId`: PartnerTripPage
+
+[src/pages/partner/Trip.tsx](../src/pages/partner/Trip.tsx). The page needs `trip:read @ ORG`; trip-service answers 404 for a trip that isn't the company's ("No such trip for this company").
+
+| | |
+|---|---|
+| Shows | Status, a map with pickup, drop-off and the car while on the road; the trip PIN while active (to pass to a rider without the app); "What happened" timeline from the trip's timestamps; people and car (`/parties`: billed companies see rider, driver and car; fleets see their driver and car); for fleets, the car record. A notice when the trip isn't billed to this company |
+| Calls | `GET /api/trips/:tripId` every 8 s until it ends; `GET /api/trips/:tripId/parties`; while `matched`/`en_route`/`in_progress`, `GET /api/locations/trips/:tripId/driver` every 5 s (15 s after an error). location-service lets the booker and the billed company's `trip:read` holders see it, as well as the fleet owner. For fleets with `vehicle:read @ ORG`, `GET /api/fleet/vehicles/:vehicleId` |
+| Actions | **Cancel trip** (trip billed to this company, status `requested`/`matched`/`en_route`, `trip:cancel @ ORG`): a drawer with booker reasons (`BOOKER_CANCEL_REASONS`) and a note on whether a fee applies (`cancelFeeNote()`) → `POST /api/trips/:tripId/cancel` `{ reason }` with an `Idempotency-Key` |
+
+### `/partner/org/:orgId/drivers/:userId`: PartnerDriverPage
+
+[src/pages/partner/Driver.tsx](../src/pages/partner/Driver.tsx). Fleets only; the page needs `driver:read @ ORG`. Onboarding status, documents, which company cars the driver may use, and whether they're driving now. Calls `GET /api/fleet/drivers/:userId?orgId=` every 30 s.
+
+### `/partner/account`: PartnerAccountPage
+
+[src/pages/partner/Account.tsx](../src/pages/partner/Account.tsx). App-surface cookie calls only; the phone number is the sign-in and can't be changed here.
+
+| Part | Calls |
+|---|---|
+| Phone number, **Your name** | `GET /api/auth/get-session`; `POST /api/auth/update-user` `{ name }` |
+| **Invitations to you**: accept (then the company list is refetched) or decline | `GET /api/auth/organization/list-user-invitations`; `POST /api/auth/organization/accept-invitation` `{ invitationId }`; `POST /api/auth/organization/reject-invitation` `{ invitationId }` |
+| **Where you're signed in** (opens only within a day of signing in, else a notice offers to sign in again) | `GET /api/auth/list-sessions`; `POST /api/auth/revoke-session` `{ token }`; `POST /api/auth/revoke-other-sessions` |
 
 ---
 
@@ -404,5 +630,6 @@ Pick a rider from members with `employee`, `corporate_coordinator` or `corporate
 | `PlacePicker` ([src/components/PlacePicker.tsx](../src/components/PlacePicker.tsx)) | `GET /api/maps/search?q=&cityId=` 300 ms after typing (2+ characters). Results are merged after the built-in `COMMON_PLACES` for the city (10 Addis Ababa places; none for other cities); up to 8 shown |
 | `DocumentChecklist` ([src/components/Documents.tsx](../src/components/Documents.tsx)) | `GET /api/fleet/documents?subjectType=&subjectId=`; upload via `uploadDocument()` ([src/lib/fleet.ts](../src/lib/fleet.ts)): `POST /api/fleet/documents/upload-url` `{ subjectType, subjectId, kind, contentType, sizeBytes, sha256 }`, `PUT <uploadUrl>` with the returned headers and no credentials, `POST /api/fleet/documents` `{ ticket, expiresAt? }`. JPEG, PNG or PDF, under 10 MB; licence, insurance and inspection need a "valid until" date |
 | `DocumentViewer` | `GET /api/fleet/documents/:id/url` (cached 60 s) and shows the image or PDF; reviewers `POST /api/fleet/documents/:id/review` `{ decision: APPROVE \| REJECT, expiresAt?, reason? }`. The page says staff views are recorded in the audit log |
-| `AuditTrail` (admin/Users.tsx) | `GET /api/audit/entries?actorId=\|resourceId=&limit=20` |
-| `useStaffNames` (admin/Approvals.tsx) | `GET /api/identity/users?kind=staff&limit=100`, cached 5 min, with `user:read_masked` |
+| `AuditTrail` (admin/Users.tsx, also on Suspend) | `GET /api/audit/entries?actorId=\|resourceId=&limit=20` |
+| `useStaffNames` (admin/Approvals.tsx; used by admin and money approvals, Audit, Settings, Payouts, Rules) | `GET /api/identity/users?kind=staff&limit=100`, cached 5 min, with `user:read_masked` |
+| `useTripParties` ([src/lib/trips.ts](../src/lib/trips.ts); Board, Live map, Trip detail) | `GET /api/trips/:id/parties` (staff), cached 30 s |

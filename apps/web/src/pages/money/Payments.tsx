@@ -4,36 +4,77 @@
 
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Download } from "lucide-react";
 import { allowed, api, newIdempotencyKey } from "../../lib/api";
+import { download } from "../../lib/admin";
 import { birr, CITY_NAMES, dayAndTime, shortId } from "../../lib/format";
-import { PAYMENT_LABEL, paymentTone, PROVIDER_LABEL, toMinor, type Payment } from "../../lib/money";
+import {
+  citiesWithAny, csvName, isUuid, joinPages, nextBefore, PAYMENT_CSV, PAYMENT_READERS, PAYMENT_LABEL, paymentTone, PROVIDER_LABEL, queryString, REFUND_LABEL, refundTone, toCsv, toMinor,
+  type Payment,
+} from "../../lib/money";
 import { useSession } from "../../lib/session";
-import { Drawer, Empty, Field, Notice, PageHead, Pill, Problem, TextArea } from "../../components/ui";
+import { useProviders } from "./BalancePanel";
+import { Drawer, Empty, Field, Notice, PageHead, Pill, Problem, SelectField, TextArea } from "../../components/ui";
 
-const FILTERS: [string, string][] = [["", "All"], ["ACTION_REQUIRED", "Waiting for the payer"], ["RETRY_SCHEDULED", "Will ask again"], ["FAILED", "Failed"], ["SUCCEEDED", "Paid"], ["PARTIALLY_REFUNDED", "Refunded"]];
+const FILTERS: [string, string][] = [["", "All"], ["ACTION_REQUIRED", "Waiting for the payer"], ["RETRY_SCHEDULED", "Will ask again"], ["FAILED", "Failed"], ["SUCCEEDED", "Paid"], ["PARTIALLY_REFUNDED", "Partly refunded"], ["REFUNDED", "Refunded"]];
+const PAGE = 50;
+
 
 export function PaymentsPage() {
+  const { staff } = useSession();
+  const cities = citiesWithAny(staff.principal, PAYMENT_READERS);
+  const [city, setCity] = useState("");
   const [status, setStatus] = useState("");
+  const [provider, setProvider] = useState("");
+  const [trip, setTrip] = useState("");
   const [open, setOpen] = useState<string | null>(null);
-  const list = useQuery({
-    queryKey: ["money", "payments", status], refetchInterval: 15_000,
-    queryFn: () => api<{ payments: Payment[] }>("staff", `/api/payments/payments?limit=100${status ? `&status=${status}` : ""}`).then((r) => r.payments),
+  const providers = useProviders();
+  const tripId = isUuid(trip) ? trip.trim().toLowerCase() : "";
+  const filters = queryString({ status, provider, tripId, cityId: city, limit: PAGE });
+  const list = useInfiniteQuery({
+    queryKey: ["money", "payments", filters], refetchInterval: 15_000,
+    initialPageParam: "",
+    getNextPageParam: nextBefore,
+    queryFn: ({ pageParam }) => api<{ payments: Payment[]; next: string | null }>("staff", `/api/payments/payments?${filters}${pageParam ? `&before=${encodeURIComponent(pageParam)}` : ""}`),
   });
+  const rows = joinPages(list.data?.pages.map((p) => p.payments) ?? []);
+  const tripTyped = trip.trim() !== "" && !tripId;
+
   return (
     <div className="page stack" style={{ gap: "1rem" }}>
-      <PageHead title="Rider payments" lede="Trip fares and cancellation fees paid by mobile money or card. Cash trips settle without a payment." />
+      <PageHead
+        title="Rider payments"
+        lede="Trip fares and cancellation fees paid by mobile money or card. Cash trips settle without a payment. You see the cities you handle money in."
+        right={rows.length ? <button className="btn secondary" onClick={() => download(csvName("payments"), toCsv(rows, PAYMENT_CSV))}><Download /> Export CSV ({rows.length})</button> : null}
+      />
       <div className="chips">
         {FILTERS.map(([s, label]) => <button key={s} className="chip" aria-pressed={status === s} onClick={() => setStatus(s)}>{label}</button>)}
       </div>
+      {cities.length > 1 ? (
+        <div className="chips" aria-label="City">
+          <button className="chip" aria-pressed={city === ""} onClick={() => setCity("")}>All your cities</button>
+          {cities.map((c) => <button key={c} className="chip" aria-pressed={city === c} onClick={() => setCity(c)}>{CITY_NAMES[c] ?? c}</button>)}
+        </div>
+      ) : null}
+      <div className="row" style={{ gap: "0.75rem", flexWrap: "wrap", alignItems: "flex-end" }}>
+        <SelectField label="Provider" value={provider} onChange={(e) => setProvider(e.target.value)}>
+          <option value="">Every provider</option>
+          {(providers.data ?? []).map((x) => <option key={x.provider} value={x.provider}>{x.label}</option>)}
+          <option value="none">None (no provider was enabled)</option>
+        </SelectField>
+        <Field label="Trip id" value={trip} onChange={(e) => setTrip(e.target.value)} placeholder="the trip's full id" hint={tripTyped ? "Paste the whole id (36 characters)." : undefined} />
+        {status || provider || trip || city ? <button className="btn ghost" onClick={() => { setStatus(""); setProvider(""); setTrip(""); setCity(""); }}>Clear filters</button> : null}
+      </div>
       <Problem error={list.error} />
-      {list.data?.length === 0 ? <Empty title="No payments." /> : null}
-      {list.data?.length ? (
+      {list.isPending ? <p className="small muted">Loading payments…</p> : null}
+      {list.isSuccess && rows.length === 0 ? <Empty title="No payments match." /> : null}
+      {rows.length ? (
         <div className="table-wrap">
           <table className="table">
             <thead><tr><th>When</th><th>Trip</th><th>For</th><th>Provider</th><th className="num">Amount</th><th>Status</th></tr></thead>
             <tbody>
-              {list.data.map((p) => (
+              {rows.map((p) => (
                 <tr key={p.id} className="clickable" onClick={() => setOpen(p.id)}>
                   <td className="small">{dayAndTime(p.createdAt)}</td>
                   <td><Link to={`/staff/trips/${p.tripId}`} onClick={(e) => e.stopPropagation()} className="mono">{shortId(p.tripId)}</Link><div className="xs muted">{CITY_NAMES[p.cityId] ?? p.cityId}</div></td>
@@ -47,6 +88,12 @@ export function PaymentsPage() {
           </table>
         </div>
       ) : null}
+      {list.hasNextPage ? (
+        <div className="row" style={{ gap: "0.5rem" }}>
+          <button className="btn secondary" disabled={list.isFetchingNextPage} onClick={() => void list.fetchNextPage()}>{list.isFetchingNextPage ? "Loading…" : "Load older"}</button>
+          <span className="small muted">{rows.length} shown</span>
+        </div>
+      ) : rows.length > PAGE ? <p className="small muted">That's all of them ({rows.length}).</p> : null}
       {open ? <PaymentDrawer id={open} onClose={() => setOpen(null)} /> : null}
     </div>
   );
@@ -84,7 +131,8 @@ export function PaymentDrawer({ id, onClose }: { id: string; onClose: () => void
               <h3 className="section-title">Refunds</h3>
               {pay.refunds.map((r) => (
                 <p key={r.id} className="small" style={{ margin: "0.25rem 0" }}>
-                  {birr(r.amountMinor)} · <Pill tone={r.status === "SUCCEEDED" ? "green" : r.status === "REJECTED" || r.status === "FAILED" ? "red" : "amber"}>{r.status.toLowerCase().replace("_", " ")}</Pill> · {r.reason}{r.driverAtFault ? " · from the driver's balance" : ""}
+                  {birr(r.amountMinor)} · <Pill tone={refundTone(r.status)}>{REFUND_LABEL[r.status] ?? r.status}</Pill> · {r.reason}{r.driverAtFault ? " · from the driver's balance" : ""}
+                  {r.decisionReason ? <span className="xs muted"> · decision: {r.decisionReason}</span> : null}{r.failure ? <span className="xs muted"> · {r.failure}</span> : null}
                 </p>
               ))}
             </section>
@@ -107,6 +155,8 @@ function RefundForm({ payment, onDone }: { payment: Payment; onDone: () => void 
   const [reason, setReason] = useState("");
   const [atFault, setAtFault] = useState(false);
   const [key] = useState(newIdempotencyKey);
+  const minor = toMinor(amount);
+  const tooMuch = !!minor && minor > left;
   const ask = useMutation({
     mutationFn: () => api("staff", `/api/payments/payments/${payment.id}/refunds`, { body: { amountMinor: toMinor(amount), reason: reason.trim(), driverAtFault: atFault }, idempotencyKey: key }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["money"] }),
@@ -120,7 +170,8 @@ function RefundForm({ payment, onDone }: { payment: Payment; onDone: () => void 
       <label className="row small" style={{ gap: "0.4rem", margin: "0.25rem 0 0.75rem" }}>
         <input type="checkbox" checked={atFault} onChange={(e) => setAtFault(e.target.checked)} /> The driver was at fault (it comes out of their balance; otherwise the platform pays)
       </label>
-      <button className="btn" disabled={ask.isPending || !toMinor(amount) || reason.trim().length < 5}>Ask for approval</button>
+      {tooMuch ? <p className="small" style={{ color: "var(--danger)" }}>At most {birr(left)} can still be refunded.</p> : null}
+      <button className="btn" disabled={ask.isPending || !minor || tooMuch || reason.trim().length < 5}>Ask to refund {minor && !tooMuch ? birr(minor) : ""}</button>
     </form>
   );
 }

@@ -13,7 +13,8 @@ import {
 } from "../../lib/fleet";
 import { useSession } from "../../lib/session";
 import { DocumentChecklist, useDocuments } from "../../components/Documents";
-import { Drawer, Empty, Field, Notice, PageHead, Pill, Problem, SelectField } from "../../components/ui";
+import { Drawer, Empty, Field, Notice, PageHead, Pill, Problem, SelectField, TextArea } from "../../components/ui";
+import { fleetMayAskTransfer, isOpenTransfer, REASON_MIN, TRANSFER_WORD, transferBody, transferTone, type VehicleTransfer } from "../../lib/fleet2";
 
 export interface Member {
   id: string;
@@ -65,6 +66,12 @@ export function FleetVehicles({ orgId, verified, members }: { orgId: string; ver
   const canAdd = verified && allowed(partner.principal, "vehicle:register", { orgId });
   const vehicles = overview.data?.vehicles ?? [];
   const live = vehicles.filter((v) => v.status !== "RETIRED");
+  const [showRetired, setShowRetired] = useState(false);
+  const retired = useQuery({
+    queryKey: ["fleet-retired", orgId],
+    enabled: showRetired,
+    queryFn: () => api<{ vehicles: Vehicle[] }>("partner", `/api/fleet/vehicles?ownerOrgId=${orgId}&status=RETIRED`).then((r) => r.vehicles),
+  });
 
   return (
     <div className="stack" style={{ gap: "1rem" }}>
@@ -103,8 +110,70 @@ export function FleetVehicles({ orgId, verified, members }: { orgId: string; ver
           </table>
         </div>
       ) : null}
+      <div className="row between">
+        <label className="row small" style={{ gap: "0.4rem", cursor: "pointer" }}>
+          <input type="checkbox" checked={showRetired} onChange={(e) => setShowRetired(e.target.checked)} /> Show cars removed from the fleet
+        </label>
+      </div>
+      {showRetired ? (
+        <section className="card">
+          <div className="card-head"><h2>Removed from the fleet {retired.data ? <span className="muted mono small">{retired.data.length}</span> : null}</h2></div>
+          <Problem error={retired.error} />
+          {retired.isLoading ? <p className="muted small" style={{ padding: "0 0.9rem" }}>Loading…</p> : null}
+          {retired.data && retired.data.length === 0 ? <div className="card-body"><p className="small muted" style={{ margin: 0 }}>No removed cars.</p></div> : null}
+          {retired.data?.length ? (
+            <div className="table-wrap">
+              <table className="table">
+                <thead><tr><th>Plate</th><th>Vehicle</th><th>Added</th><th /></tr></thead>
+                <tbody>
+                  {retired.data.map((v) => (
+                    <tr key={v.id} style={{ cursor: "pointer" }} onClick={() => navigate(`/partner/org/${orgId}/vehicles/${v.id}`)}>
+                      <td className="mono">{v.plateNumber}</td>
+                      <td>{vehicleName(v)}<div className="xs muted">{v.vehicleType} · {v.seats} seats · {v.year}</div></td>
+                      <td className="small muted">{dayAndTime(v.createdAt)}</td>
+                      <td className="num"><ChevronRight size={16} className="muted" /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+      <OpenTransfers orgId={orgId} />
       {adding ? <AddVehicle orgId={orgId} onClose={() => setAdding(false)} onAdded={(v) => navigate(`/partner/org/${orgId}/vehicles/${v.id}`)} /> : null}
     </div>
+  );
+}
+
+/** Cars on their way out of, or into, the company (ownership transfers waiting for our onboarding team). */
+function OpenTransfers({ orgId }: { orgId: string }) {
+  const { partner } = useSession();
+  const navigate = useNavigate();
+  const q = useQuery({
+    queryKey: ["fleet-transfers", "org", orgId],
+    enabled: allowed(partner.principal, "vehicle:read", { orgId }),
+    queryFn: () => api<{ transfers: VehicleTransfer[] }>("partner", `/api/fleet/transfers?ownerOrgId=${orgId}&limit=100`).then((r) => r.transfers),
+  });
+  const open = (q.data ?? []).filter(isOpenTransfer);
+  if (!open.length && !q.error) return null;
+  return (
+    <section className="card">
+      <div className="card-head"><h2>Ownership changes in progress</h2></div>
+      <div className="card-body stack" style={{ gap: "0.4rem" }}>
+        <Problem error={q.error} />
+        {open.map((t) => {
+          const outgoing = t.from.type === "ORGANIZATION" && t.from.id === orgId;
+          return (
+            <div key={t.id} className="row between small" style={{ cursor: outgoing ? "pointer" : undefined }} onClick={() => outgoing && navigate(`/partner/org/${orgId}/vehicles/${t.vehicleId}`)}>
+              <span><span className="mono">{t.vehicle?.plateNumber}</span> · {outgoing ? `leaving the fleet → ${t.to.type === "INDIVIDUAL" ? t.to.name ?? "a driver" : "another company"}` : "coming to the fleet"}</span>
+              <Pill tone={transferTone(t.status)}>{TRANSFER_WORD[t.status]}</Pill>
+            </div>
+          );
+        })}
+        <p className="xs muted" style={{ margin: 0 }}>Our onboarding team checks each change (two people). A car that arrives needs a registration naming the company before it takes trips.</p>
+      </div>
+    </section>
   );
 }
 
@@ -160,6 +229,7 @@ export function FleetVehiclePage() {
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ["fleet-vehicle", vehicleId] });
     void qc.invalidateQueries({ queryKey: ["fleet-overview", orgId] });
+    void qc.invalidateQueries({ queryKey: ["fleet-retired", orgId] });
   };
   const submit = useMutation({ mutationFn: () => api("partner", `/api/fleet/vehicles/${vehicleId}/submit`, { body: {} }), onSuccess: refresh });
   const retire = useMutation({ mutationFn: () => api("partner", `/api/fleet/vehicles/${vehicleId}/retire`, { body: {} }), onSuccess: refresh });
@@ -170,6 +240,15 @@ export function FleetVehiclePage() {
     onSuccess: () => { setDriverId(""); setUntil(""); refresh(); },
   });
   const revoke = useMutation({ mutationFn: (id: string) => api("partner", `/api/fleet/vehicles/${vehicleId}/authorizations/${id}`, { method: "DELETE" }), onSuccess: refresh });
+  const transfers = useQuery({
+    queryKey: ["fleet-transfers", "vehicle", vehicleId],
+    queryFn: () => api<{ transfers: VehicleTransfer[] }>("partner", `/api/fleet/vehicles/${vehicleId}/transfers`).then((r) => r.transfers),
+  });
+  const withdraw = useMutation({
+    mutationFn: (id: string) => api("partner", `/api/fleet/transfers/${id}/cancel`, { body: {} }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["fleet-transfers"] }),
+  });
+  const [transferring, setTransferring] = useState(false);
 
   if (vehicle.isLoading || org.isLoading) return <div className="page"><p className="muted">Loading…</p></div>;
   if (vehicle.error || org.error) return <div className="page"><Problem error={vehicle.error ?? org.error} /></div>;
@@ -208,6 +287,8 @@ export function FleetVehiclePage() {
       {v.status === "PENDING_REVIEW" ? <Notice>Waiting for our onboarding team. You'll see the result here.</Notice> : null}
       {v.status === "REJECTED" ? <Notice tone="error">Not approved: {v.reviewNote}. Replace the documents marked rejected, then submit again.</Notice> : null}
       {v.statusReason === "DOCUMENT_EXPIRED" ? <Notice tone="error">Suspended: a document expired. Upload the renewed one and submit again; the car can't take trips until then.</Notice> : null}
+      {v.status === "SUSPENDED" && (v.statusReason === "SAFETY" || v.statusReason === "ONBOARDING") ? <Notice tone="error">Suspended by our team{v.reviewNote ? `: ${v.reviewNote}` : ""}. Contact support; the car can't take trips until it's reinstated.</Notice> : null}
+      {v.statusReason === "TRANSFERRED" ? <Notice>This car just changed owner. Upload a registration naming <strong>{o.legalName ?? o.name}</strong>, then submit; the other documents are checked again.</Notice> : null}
       {submittable && v.missingForSubmit.length ? <p className="small muted" style={{ margin: 0 }}>Still needed: {v.missingForSubmit.map((k) => KIND_LABEL[k]?.toLowerCase() ?? k).join(", ")}.</p> : null}
 
       <div className="two-col wide-left">
@@ -227,9 +308,9 @@ export function FleetVehiclePage() {
                 <ul className="stack" style={{ listStyle: "none", padding: 0, margin: 0, gap: "0.4rem" }}>
                   {active.map((a) => (
                     <li key={a.driverUserId} className="row between small">
-                      <span className="mono">{nameOf(a.driverUserId)}</span>
+                      {allowed(p, "driver:read", { orgId }) ? <Link className="mono" to={`/partner/org/${orgId}/drivers/${a.driverUserId}`}>{nameOf(a.driverUserId)}</Link> : <span className="mono">{nameOf(a.driverUserId)}</span>}
                       <span className="muted">{a.validUntil ? `until ${dayAndTime(a.validUntil)}` : ""}</span>
-                      {canAuthorize ? <button className="link danger" onClick={() => revoke.mutate(a.driverUserId)}>take away</button> : null}
+                      {canAuthorize ? <button className="link danger" disabled={revoke.isPending} onClick={() => confirm(`Take ${v.plateNumber} away from ${nameOf(a.driverUserId)}? They can't drive it until you allow them again.`) && revoke.mutate(a.driverUserId)}>take away</button> : null}
                     </li>
                   ))}
                 </ul>
@@ -254,9 +335,68 @@ export function FleetVehiclePage() {
               {v.session ? <><Pill tone="green" pulse>online</Pill> {nameOf(v.session.driverUserId)} since {dayAndTime(v.session.startedAt)}</> : <span className="muted">Parked</span>}
             </div>
           </div>
+          <div className="card">
+            <div className="card-head"><h2>Change of owner</h2></div>
+            <div className="card-body stack" style={{ gap: "0.5rem" }}>
+              <Problem error={transfers.error ?? withdraw.error} />
+              {(transfers.data ?? []).map((t) => (
+                <div key={t.id} className="small stack" style={{ gap: "0.15rem" }}>
+                  <div className="row between">
+                    <span>{t.to.type === "ORGANIZATION" ? (t.to.id === orgId ? "to this company" : "to another company") : `to ${t.to.name ?? "a driver"}`}</span>
+                    <Pill tone={transferTone(t.status)}>{TRANSFER_WORD[t.status]}</Pill>
+                  </div>
+                  <span className="xs muted">{dayAndTime(t.createdAt)} · {t.reason}{t.decisionNote && t.status === "REJECTED" ? ` · ${t.decisionNote}` : ""}</span>
+                  {isOpenTransfer(t) && t.requestedBy === p?.userId ? <div><button className="link danger" disabled={withdraw.isPending} onClick={() => withdraw.mutate(t.id)}>withdraw</button></div> : null}
+                </div>
+              ))}
+              {fleetMayAskTransfer(p, orgId!, v) && !(transfers.data ?? []).some(isOpenTransfer) && v.ownerOrgId === orgId ? (
+                <div><button className="btn ghost sm" onClick={() => setTransferring(true)}>Hand this car to a new owner</button></div>
+              ) : null}
+              {transfers.data && transfers.data.length === 0 && !fleetMayAskTransfer(p, orgId!, v) ? <p className="small muted" style={{ margin: 0 }}>No changes.</p> : null}
+            </div>
+          </div>
         </div>
       </div>
+      {transferring ? <AskTransfer vehicleId={v.id} plate={v.plateNumber} drivers={drivers} onClose={() => setTransferring(false)} /> : null}
     </div>
+  );
+}
+
+/** The fleet asks to hand a car over (sold to one of its drivers, or to another company); our team decides. */
+function AskTransfer({ vehicleId, plate, drivers, onClose }: { vehicleId: string; plate: string; drivers: Member[]; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [form, setForm] = useState({ target: "driver" as "driver" | "company", driverId: "", orgId: "", reason: "" });
+  const body = transferBody(form);
+  const run = useMutation({
+    mutationFn: () => api("partner", `/api/fleet/vehicles/${vehicleId}/transfers`, { body }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["fleet-transfers"] });
+      onClose();
+    },
+  });
+  return (
+    <Drawer title={`Hand ${plate} to a new owner`} onClose={onClose}>
+      <form className="stack" style={{ gap: "0.5rem" }} onSubmit={(e) => { e.preventDefault(); if (body) run.mutate(); }}>
+        <p className="small muted" style={{ margin: 0 }}>Our onboarding team checks the sale (two people). When it goes through, the car leaves the fleet: its drivers lose access and the new owner registers it in their name.</p>
+        <Problem error={run.error} />
+        <SelectField label="New owner" value={form.target} onChange={(e) => setForm((f) => ({ ...f, target: e.target.value as "driver" | "company" }))}>
+          <option value="driver">One of our drivers (they'll own and drive it)</option>
+          <option value="company">Another fleet company</option>
+        </SelectField>
+        {form.target === "driver" ? (
+          <SelectField label="Driver" value={form.driverId} onChange={(e) => setForm((f) => ({ ...f, driverId: e.target.value }))}>
+            <option value="">Choose a driver…</option>
+            {drivers.map((m) => <option key={m.userId} value={m.userId}>{memberName(m)}</option>)}
+          </SelectField>
+        ) : (
+          <Field label="The other company's Anbessa ID" className="mono" value={form.orgId} onChange={(e) => setForm((f) => ({ ...f, orgId: e.target.value }))}
+            placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" hint="They find it in the address of their fleet portal (/partner/org/…)." />
+        )}
+        <TextArea label="Reason" value={form.reason} onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value }))} maxLength={500}
+          placeholder="The sale, e.g. contract number and date" hint={form.reason.trim().length < REASON_MIN ? `at least ${REASON_MIN} characters` : "Our team sees this."} />
+        <div><button className="btn" disabled={!body || run.isPending}>Ask for the transfer</button></div>
+      </form>
+    </Drawer>
   );
 }
 

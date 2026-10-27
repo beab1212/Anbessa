@@ -23,6 +23,8 @@ export default defineConfig(({ mode }) => {
         "/api/fleet": target("FLEET_URL", 3008),
         "/api/platform": target("PLATFORM_URL", 3011),
         "/api/audit": target("AUDIT_URL", 3010),
+        "/api/support": target("SUPPORT_URL", 3009),
+        "/api/notifications": target("NOTIFICATION_URL", 3006),
         "/api/locations": target("LOCATION_URL", 3003),
         "/api/maps": target("MAPPING_URL", 3007),
       },

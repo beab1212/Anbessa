@@ -10,8 +10,8 @@ The app serves three audiences. Each has its own sign-in (or none) and its own p
 
 | Audience | Routes | Signs in with | Token audience | What they do |
 |---|---|---|---|---|
-| **Staff**: dispatchers, call center, onboarding, safety, support, finance, operations, super admins, auditors | `/staff/*` | email + password + authenticator code on the admin surface (`/api/admin-auth`) | `ride-admin` | Live board and map, book by phone, trip lookup, driver/vehicle/company review, suspensions, money (balances, payments, payouts, rules, approvals), administration (users, roles, settings, cities, announcements, system, audit) |
-| **Partners**: fleet owners, company-account admins and coordinators | `/partner/*` | phone number + 6-digit code on the app surface (`/api/auth`) | `ride-app` | Register a company, invite people by phone, fleet cars and their documents, which driver may use which car, the fleet balance, booking rides on a company account |
+| **Staff**: dispatchers, call center, onboarding, safety, support, finance, operations, super admins, auditors | `/staff/*` | email + password + authenticator code on the admin surface (`/api/admin-auth`) | `ride-admin` | Live board and map, book by phone, trip lookup and search, SOS alerts, incidents, support tickets and lost items, driver/vehicle/company review, suspensions, money (balances, payments, payouts, rules, approvals), reports, administration (users, roles, settings, cities, announcements, system, audit), their own account |
+| **Partners**: fleet owners, company-account admins and coordinators | `/partner/*` | phone number + 6-digit code on the app surface (`/api/auth`) | `ride-app` | Register a company, edit its name and logo, invite people by phone and manage their roles, fleet cars and their documents, which driver may use which car, the fleet balance and earnings, booking and following rides on a company account, the company's trips and charges, their own account and invitations |
 | **Public**: anyone with a shared-trip link | `/t/:token` | nothing; the token in the link is the key | none | Follow a trip someone shared: car position, driver, route |
 
 Riders and drivers use the phone app (`apps/phone-app`), not this one. The dev sign-in panel even filters out accounts marked `app: "phone"` ([src/dev/DevSignIn.tsx](../src/dev/DevSignIn.tsx)).
@@ -38,6 +38,7 @@ flowchart LR
   Proxy -->|/api/payments| Pay["payment-service :3005"]
   Proxy -->|/api/maps| Map["mapping-service :3007"]
   Proxy -->|/api/fleet| Fleet["fleet-service :3008"]
+  Proxy -->|/api/support| Support["support-service :3009"]
   Proxy -->|/api/audit| Audit["audit-service :3010"]
   Proxy -->|/api/platform| Platform["platform-service :3011"]
   Browser -.->|signed PUT, no credentials| Store[("Document storage<br/>S3, or fleet-service locally")]
