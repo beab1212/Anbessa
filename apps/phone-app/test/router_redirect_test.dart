@@ -93,7 +93,7 @@ void main() {
     expect(await redirect(Routes.driverAccount, signedIn: s, mode: AppMode.driver, driverHome: home('APPLIED')), isNull);
   });
 
-  test('an active trip takes over, except SOS and account screens', () async {
+  test('an active trip takes over, except SOS, help and account screens', () async {
     final trip = Trip.fromJson(fixture('trip.json'));
     expect(trip.isActive, isTrue);
     expect(await redirect(Routes.riderHome, signedIn: session(), trip: trip), Routes.riderTrip(trip.id));
@@ -101,5 +101,9 @@ void main() {
     expect(await redirect('${Routes.riderTrip(trip.id)}/pay', signedIn: session(), trip: trip), isNull);
     expect(await redirect(Routes.sos, signedIn: session(), trip: trip), isNull);
     expect(await redirect(Routes.language, signedIn: session(), trip: trip), isNull);
+    // help stays reachable mid-trip: a request, a ticket, a lost-item report
+    expect(await redirect(Routes.supportNewAbout(trip.id), signedIn: session(), trip: trip), isNull);
+    expect(await redirect(Routes.supportTicket('t1'), signedIn: session(), trip: trip), isNull);
+    expect(await redirect(Routes.lostItem('l1'), signedIn: session(), trip: trip), isNull);
   });
 }

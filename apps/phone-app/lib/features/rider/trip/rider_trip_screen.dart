@@ -6,7 +6,6 @@ import 'dart:async';
 
 import 'package:confetti/confetti.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
@@ -105,6 +104,18 @@ class _RiderTripScreenState extends ConsumerState<RiderTripScreen> with SingleTi
   Widget build(BuildContext context) {
     final l = context.l10n;
     final c = context.colors;
+    // dispatch gave the trip to another driver
+    ref.listen(activeTripProvider, (prev, next) {
+      final before = prev?.value;
+      final now = next.value;
+      if (before == null || now == null || before.id != widget.tripId || now.id != widget.tripId) return;
+      final was = before.driver?.userId;
+      final isNow = now.driver?.userId;
+      if (was != null && isNow != null && was != isNow) {
+        Haptics.offer();
+        showToast(context, l.driverChanged, tone: NoticeTone.info);
+      }
+    });
     final tripAsync = ref.watch(tripProvider(widget.tripId));
     final t = tripAsync.value;
     if (t == null) {
@@ -163,8 +174,8 @@ class _RiderTripScreenState extends ConsumerState<RiderTripScreen> with SingleTi
               if (carPt != null && etaSeconds != null && (stage == RiderStage.driverAssigned || stage == RiderStage.inTrip))
                 MapCallout(point: carPt, label: l.etaMinutes((etaSeconds / 60).ceil().clamp(1, 99)), tone: Tone.amber, icon: Icons.schedule),
             ],
-            children: [
-              if (stage == RiderStage.finding) MarkerLayer(markers: [Marker(point: pickup, width: 160, height: 160, child: RadarPulse(color: c.accent, size: 160))]),
+            overlays: [
+              if (stage == RiderStage.finding) MapOverlay(point: pickup, size: const Size(160, 160), child: RadarPulse(color: c.accent, size: 160)),
             ],
           ),
           Positioned(
@@ -182,12 +193,13 @@ class _RiderTripScreenState extends ConsumerState<RiderTripScreen> with SingleTi
                     runSpacing: 8,
                     children: [
                       if (t.isActive && t.status != TripStatus.requested) _ShareButton(tripId: t.id),
-                      if (sosOn && t.isActive)
-                        FilledButton.icon(
-                          style: FilledButton.styleFrom(backgroundColor: c.danger, foregroundColor: Colors.white),
+                      // SOS on a trip with a driver, and for 30 min after drop-off (support-service's window)
+                      if (sosOn && sosAvailable(t, DateTime.now()))
+                        // the word is the signal (Material's sos icon is the same letters again)
+                        FilledButton(
+                          style: FilledButton.styleFrom(backgroundColor: c.danger, foregroundColor: Colors.white, minimumSize: const Size(64, 48), padding: const EdgeInsets.symmetric(horizontal: 18)),
                           onPressed: () => context.push('${Routes.sos}?trip=${t.id}'),
-                          icon: const Icon(Icons.sos),
-                          label: Text(l.sos),
+                          child: Text(l.sos),
                         ),
                     ],
                   ),
@@ -284,8 +296,6 @@ class _Finding extends StatelessWidget {
         const SizedBox(height: 14),
         Row(
           children: [
-            VehicleGlyph(trip.vehicleType, size: 40),
-            const SizedBox(width: 10),
             Expanded(child: Text(trip.dropoff.address ?? l.dropoffLabel, maxLines: 1, overflow: TextOverflow.ellipsis, style: AnbessaType.body.copyWith(fontWeight: FontWeight.w500))),
             MoneyText(trip.fare.estimateMinor, locale: context.localeTag, style: AnbessaType.title),
           ],
@@ -375,7 +385,7 @@ class _DriverCard extends StatelessWidget {
         const SizedBox(height: 14),
         Row(
           children: [
-            Expanded(child: _Fact(label: l.fareLabel, value: birr(trip.fare.estimateMinor, locale: context.localeTag))),
+            Expanded(child: _Fact(label: l.fareLabel, value: birr(trip.fare.payableMinor, locale: context.localeTag))),
             Expanded(child: _Fact(label: l.paymentMethod, value: paymentMethodLabel(l, trip.paymentMethod))),
           ],
         ),
@@ -435,7 +445,7 @@ class _InTrip extends StatelessWidget {
         const SizedBox(height: 14),
         Row(
           children: [
-            Expanded(child: _Fact(label: l.fareLabel, value: birr(trip.fare.estimateMinor, locale: context.localeTag))),
+            Expanded(child: _Fact(label: l.fareLabel, value: birr(trip.fare.payableMinor, locale: context.localeTag))),
             Expanded(child: _Fact(label: l.paymentMethod, value: paymentMethodLabel(l, trip.paymentMethod))),
           ],
         ),
@@ -459,8 +469,6 @@ class _Ended extends ConsumerWidget {
       children: [
         Row(
           children: [
-            Container(width: 44, height: 44, decoration: BoxDecoration(color: completed ? c.successSoft : c.dangerSoft, shape: BoxShape.circle), child: Icon(completed ? Icons.check_rounded : Icons.close_rounded, color: completed ? c.success : c.danger)),
-            const SizedBox(width: 12),
             Expanded(child: Text(completed ? l.tripCompleted : l.tripCancelled, style: AnbessaType.h2.copyWith(color: c.text))),
           ],
         ),
@@ -477,10 +485,15 @@ class _Ended extends ConsumerWidget {
             child: Row(
               children: [
                 Expanded(child: Text(l.totalLabel, style: AnbessaType.body.copyWith(color: c.text2))),
-                AnimatedMoney(trip.fare.chargedMinor, locale: context.localeTag, style: AnbessaType.h1.copyWith(color: c.text)),
+                AnimatedMoney(trip.fare.payableMinor, locale: context.localeTag, style: AnbessaType.h1.copyWith(color: c.text)),
               ],
             ),
           ),
+          if (trip.fare.promoDiscountMinor > 0)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text('${promoLabel(l, trip.fare)} · −${birr(trip.fare.promoDiscountMinor, locale: context.localeTag)}', style: AnbessaType.caption.copyWith(color: c.success)),
+            ),
           const SizedBox(height: 6),
           Text(l.paidBy(paymentMethodLabel(l, trip.paymentMethod)), style: AnbessaType.caption.copyWith(color: c.muted)),
         ],
@@ -568,24 +581,23 @@ class _ShareButtonState extends ConsumerState<_ShareButton> {
     return Semantics(
       button: true,
       label: on ? l.sharingOn : l.shareTrip,
-      child: Material(
-        color: on ? c.primaryFill : c.surface,
-        shape: const StadiumBorder(),
-        elevation: 2,
-        child: InkWell(
-          customBorder: const StadiumBorder(),
-          onTap: _busy ? null : (on ? _menu : _start),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _busy
-                    ? SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: on ? c.onAccent : c.accentStrong))
-                    : Icon(on ? Icons.sensors : Icons.ios_share, size: 18, color: on ? c.onAccent : c.text),
-                const SizedBox(width: 6),
-                Text(on ? l.sharingOn : l.shareTrip, style: AnbessaType.label.copyWith(color: on ? c.onAccent : c.text)),
-              ],
+      child: DecoratedBox(
+        decoration: ShapeDecoration(shape: const StadiumBorder(), shadows: AnbessaElevation.floating(c.brightness)),
+        child: Material(
+          color: on ? c.primaryFill : c.surface,
+          shape: StadiumBorder(side: BorderSide(color: on ? c.primaryFill : c.border)),
+          child: InkWell(
+            customBorder: const StadiumBorder(),
+            onTap: _busy ? null : (on ? _menu : _start),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (_busy) ...[SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: on ? c.onAccent : c.text)), const SizedBox(width: 6)],
+                  Text(on ? l.sharingOn : l.shareTrip, style: AnbessaType.label.copyWith(color: on ? c.onAccent : c.text)),
+                ],
+              ),
             ),
           ),
         ),

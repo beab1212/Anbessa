@@ -20,7 +20,7 @@
 - drive to the pickup and the drop-off with an in-app route, next-turn banner and turn list, or hand off to Google Maps, Waze or the system maps app; confirm each step with a swipe (on my way, arrived, start with the rider's PIN, complete), collect cash, mark a no-show after 5 minutes of waiting, rate the rider;
 - see earnings for today / this week / this month, where the fare went (commission, VAT), the balance and its limits and dues, top up by mobile money, set the payout method, read the statement and past top-ups.
 
-**Both**: phone OTP sign-in, a mode switch for people with both roles, English and Amharic, light / dark / system theme, haptics, settings (language, appearance, notifications, emergency contact, navigation, saved places, organisations and invitations, signed-in devices, payment preference), push notifications when Firebase is configured, and screens for features whose backend is not built yet (scheduled rides, support, promos, account deletion), hidden behind flags.
+**Both**: phone OTP sign-in, a mode switch for people with both roles, English and Amharic, light / dark / system theme, haptics, settings (language, appearance, notifications, emergency contact, navigation, saved places, organisations and invitations, signed-in devices, payment preference), push notifications when Firebase is configured, scheduled rides, promo codes on the quote, company-ride purposes and policy refusals, driver incentives, marketing opt-outs, and a screen for account deletion, whose backend is not built yet, hidden behind its flag.
 
 ## The services it talks to
 
@@ -29,7 +29,7 @@ flowchart LR
   subgraph Phone["phone-app"]
     API[ApiClient<br/>Dio]
     HUB[RealtimeHub<br/>socket_io_client]
-    MAP[flutter_map<br/>TileLayer]
+    MAP[AnbessaMap<br/>MapLibre on phones<br/>flutter_map on desktop]
     PUSH[PushService<br/>firebase_messaging]
   end
 

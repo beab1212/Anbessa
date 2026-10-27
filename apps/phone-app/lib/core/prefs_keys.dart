@@ -12,7 +12,6 @@ abstract final class PrefsKeys {
   static const dismissedAnnouncements = 'dismissed_announcements';
   static const emergencyContact = 'emergency_contact';
   static const notifTrip = 'notif_trip';
-  static const notifPromo = 'notif_promo';
   static const notifSound = 'notif_sound';
   static const notifVibrateOffer = 'notif_vibrate_offer';
   static const haptics = 'haptics';
@@ -21,4 +20,5 @@ abstract final class PrefsKeys {
   static const keepAwake = 'keep_awake';
   static const lastVehicleId = 'last_vehicle_id';
   static const clientConfig = 'client_config';
+  static const mapMode = 'map_mode';
 }

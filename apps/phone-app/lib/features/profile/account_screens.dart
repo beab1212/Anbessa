@@ -78,7 +78,6 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
               Padding(padding: const EdgeInsets.fromLTRB(16, 12, 16, 4), child: Text(l.sessionsLede, style: TextStyle(color: c.text2))),
               for (final s in list)
                 ListTile(
-                  leading: const Icon(Icons.smartphone),
                   title: Text(s.userAgent ?? l.thisDevice, maxLines: 1, overflow: TextOverflow.ellipsis),
                   subtitle: Text('${dayAndTime(s.createdAt, locale: context.localeTag)}${s.ipAddress != null ? ' · ${s.ipAddress}' : ''}'),
                   trailing: TextButton(

@@ -54,10 +54,14 @@ abstract final class Routes {
   static const deleteAccount = '/account/delete';
 
   static const scheduled = '/scheduled';
-  static const scheduledNew = '/scheduled/new';
   static const sos = '/sos';
   static const support = '/support';
   static const supportNew = '/support/new';
-  static const promos = '/promos';
-  static const promosRedeem = '/promos/redeem';
+  /// "Contact support", about [tripId] when given
+  static String supportNewAbout(String tripId) => '$supportNew?trip=$tripId';
+  static String supportTicket(String id) => '/support/tickets/$id';
+  /// the driver's (and fleet's) lost-item reports
+  static const lostItems = '/support/lost-items';
+  static String lostItemReport(String tripId) => '/support/lost-items/report?trip=$tripId';
+  static String lostItem(String id) => '/support/lost-items/$id';
 }

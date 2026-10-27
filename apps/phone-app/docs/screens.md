@@ -72,7 +72,7 @@ The client does not filter announcements by `cities`, `startsAt` or `endsAt`.
   - "Where to?" (with a "Now" pill) → `/rider/book/route?focus=dropoff`.
   - Tiles: Home and Work (dashed "Set home/work" when empty, which opens the route editor in saved-place mode), other saved places, and "Add place" → `/account/places`. Tapping a set tile sets it as the drop-off and opens the route editor focused on the pickup. Long-press any tile → `/account/places`. Skeleton tiles while saved places load.
   - Up to 5 recent places; swipe left to forget one; tap to book.
-  - Chips "Schedule a ride" (flag `scheduledRides`) and "Promos" (flag `promos`).
+  - A "Schedule a ride" chip (flag `scheduledRides`): `startScheduling` resets the booking, sets a suggested pickup time (`ScheduleWindow.suggested`: the next quarter hour at least 45 min away) and opens the route editor focused on the drop-off.
 - Providers: `lastPositionProvider`, `locationSourceProvider`, `nearbyCarsProvider`, `savedPlacesProvider`, `homePlaceProvider`, `workPlaceProvider`, `recentPlacesProvider`, `bookingProvider`, `featureProvider`, `bannerHeightProvider`, `currentSessionProvider`.
 - API: `GET /api/locations/nearby` every 10 s (stopped while the app is paused), `GET /api/trips/places`.
 
@@ -91,12 +91,18 @@ Two modes: **book** (pickup and drop-off fields, a swap button) and **savedPlace
 ### QuoteScreen (`rider/booking/quote_screen.dart`)
 
 - Map: pickup and drop-off pins with name callouts, the road line from the estimate (`route.polyline6`), or a straight line.
-- Sheet (snaps 48 %, 92 %): a header with both places, "distance · time" and "Edit" (back to the route editor); one card per quote (vehicle glyph, name, max seats, pickup ETA badge, distance and time, animated fixed fare); the fare breakdown (base, distance, time, "minimum fare applied") for the selected quote, collapsible; payment method row; a promo-code row (flag `promos`, "Coming soon", → `/promos/redeem`); "Quote expires in m:ss".
-- Footer: a maintenance notice when new trips are paused (the request button is disabled); "Request <type>" with the price; "Get a new price" when the quote expired.
+- Sheet (snaps 48 %, 92 %): a header with both places, "distance · time" and "Edit" (back to the route editor); one card per quote (name, max seats, pickup ETA badge (hidden when booking for later), distance and time, the price as a `PriceTag`: the payable amount, with the undiscounted fare struck through above it when a promo lowered it); the fare breakdown (base, distance, time, the promo discount, "minimum fare applied") for the selected quote, collapsible; then a group of rows:
+  - "Pickup time" (flag `scheduledRides`): "Now" or the chosen time. Tapping offers Now / "Pick a time"; the latter opens the date picker (from the earliest to the latest bookable day) and the time picker, reads the result as Addis time, and checks it against `ScheduleWindow.tripService` (30 min to 7 days ahead, mirroring trip-service's `DEFAULT_SCHEDULE`, since client-config doesn't publish the window). Out of the window: a toast with `errorTooSoon` / `errorTooFarAhead`.
+  - Payment method.
+  - "Promo code" (flag `promos`): "Add", or the code in use. Tapping opens a sheet with a code field, "Apply" and, when a code is in use, "Remove code". `BookingController.applyPromo` upper-cases and checks the format (`isValidPromoCode`: 3–32 letters, digits, `_`, `-`; a malformed code would make pricing-service refuse the whole estimate, so it is never sent and `promoInvalidFormat` is shown), then fetches a new estimate with `promoCode`. Under the row: "CODE applied · You save X" (green) when the selected quote is discounted, "CODE doesn't discount this vehicle type" when only others are, or the refusal (`promoRejectionText`: unknown, not active, not started, expired, used up, not in this city, not for these vehicle types, already used). A refused code is dropped from the following estimates; the refusal stays until the rider acts.
+- Company rides (method "Company account"): a "Trip purpose or cost centre" field (max 200), with "Your company asks for this" when `GET /api/trips/corporate/:orgId/policy` says `requirePurpose` (the request button is disabled while it's empty), else "Optional". The purpose is sent only for company rides and only when not empty. A policy that can't be read counts as no requirement (the server still checks).
+- When booking for later: "We check the price again shortly before pickup. You pay the lower one." Then "Quote expires in m:ss".
+- Footer: a maintenance notice when new trips are paused (the button is disabled); "Request <type>" or, with a pickup time, "Schedule <type>", with the payable price; "Get a new price" when the quote expired. A `policy_violation` (422) shows the server's sentence naming the rule (in English; `errorPolicyViolation` in Amharic) and "Pay personally instead", which switches to the first non-company method.
 - States: three skeleton cards while quoting; an error with Retry; an info notice when the estimate is `approximate`.
 - Payment methods offered: `GET /api/payments/methods` for the current city (fallback cash only), minus corporate, plus "Company account" when the flag `corporateBooking` is on and the JWT carries an org id. If the remembered method is not offered, the first offered one is selected. Choosing corporate sets `billingOrgId` to the **first org id in the JWT** (not the "default company" preference).
-- Request: `POST /api/trips` with the quote id, the method, the org id and the booking's idempotency key (one key per quote; reused if the request fails), then `/rider/trip/<id>`. `active_trip_exists` refreshes the active trip and goes to it; `quote_expired` / `invalid_quote` fetch a new quote.
-- Quoting: `POST /api/pricing/estimates` with the vehicle types offered in the city that contains the pickup.
+- Request: `POST /api/trips` with the quote id, the method, the org id, the purpose and the booking's idempotency key (one key per quote; reused if the request fails), then `/rider/trip/<id>`. The quote's promo discount is booked by trip-service when it reads the quote. `active_trip_exists` refreshes the active trip and goes to it; `quote_expired` / `invalid_quote` / `quote_used` fetch a new quote.
+- Schedule: `POST /api/trips/scheduled` with the same fields plus `scheduledFor` (UTC ISO), same key rule; the booking is added to `scheduledRidesProvider`, a toast "Ride booked for <time>", then `/rider/activity`. `too_soon`, `too_far_ahead`, `too_many_scheduled`, `schedule_conflict` are shown in words.
+- Quoting: `POST /api/pricing/estimates` with the vehicle types offered in the city that contains the pickup, and the promo code when one is in use. The first estimate on opening runs after the first frame.
 
 ### RiderTripScreen (`rider/trip/rider_trip_screen.dart`)
 
@@ -111,8 +117,9 @@ One map and a sheet (snaps 42 %, 80 %) that changes with `riderStageOf(trip)`.
 | completed | both pins | total, "paid by <method>", "Pay" (digital) or "Receipt" (cash or corporate) → `/rider/trip/<id>/pay`, Done |
 | cancelled | both pins | "No driver found" (reason `NO_DRIVER_FOUND`) or "cancelled by <side>", the fee if any, Done |
 
-- Top: back (only when the trip ended), Share (active and not `requested`), SOS (flag `sos`, active) → `/sos?trip=<id>`.
-- Stage changes play haptics; arrival shows a toast; completion plays confetti.
+- Top: back (only when the trip ended), Share (active and not `requested`), SOS (flag `sos`, while `sosAvailable`: matched, en route, in progress, or completed ≤ 30 min ago) → `/sos?trip=<id>`.
+- Stage changes play haptics; arrival shows a toast; completion plays confetti. When dispatch gives the trip to another driver (a `trip:status` with another `driver.userId`), `ActiveTripController` invalidates `tripPartiesProvider` (new name, photo, car) and the screen shows "Your driver changed" once.
+- Money shown is what the rider pays (`fare.payableMinor`: the fare minus a promo discount). Completed with a promo: under the total, "Promo code CODE · −X".
 - Cancel opens `showCancelSheet` with the reasons changedPlans, driverTooFar, driverAskedToCancel, wrongPickup, other, and a "no fee" or "a fee of 30 ETB may apply" pill (`riderCancelIsFree`, 2 min after the match; the fee is the constant `_cancelFeeMinor = 3000` in the screen). Calls `POST /api/trips/:id/cancel` with a new key.
 - Share: `POST /api/trips/:id/share`, then the share sheet with the link; when sharing, the button offers "share again" or "stop sharing" (`DELETE /api/trips/:id/share`).
 - Done: `activeTripProvider.clearIfEnded()` and `/rider/home`.
@@ -136,7 +143,7 @@ One map and a sheet (snaps 42 %, 80 %) that changes with `riderStageOf(trip)`.
 
 - "Pay now": `POST /api/payments/payments/:id/pay` with a new key, then opens the returned `checkoutUrl`.
 - "Check status" (while open) refreshes.
-- A receipt card: fare, waiting fee, total, method, pickup, drop-off, short trip id.
+- Amounts are `fare.payableMinor` (cash instruction, the big number). A receipt card (`ReceiptCard`, also on the receipt screen): fare, waiting fee, the promo discount ("Promo code CODE", green, negative) when there is one, total (= payable), method, pickup, drop-off, short trip id.
 - "Rate" (once settled: not digital, paid or owed) → `/rider/trip/<id>/rate`; Done clears the ended trip and goes home.
 - When the fare stops being open or owed, `paymentDueProvider` is invalidated (clears the Activity dot).
 
@@ -150,14 +157,16 @@ One map and a sheet (snaps 42 %, 80 %) that changes with `riderStageOf(trip)`.
 
 - `tripHistoryProvider(as)` = `GET /api/trips?as=rider|driver` (20 per page), next page when scrolled within 400 px of the end, pull to refresh.
 - People who can drive see a Rider / Driver switch. A period filter: all, this week (7 days), this month (one calendar month back from today), applied on the loaded trips.
-- Trips grouped by day ("Today", "Yesterday", or the date). Tap → the receipt route.
+- Riders (flag `scheduledRides`): "Upcoming" above the past trips (`UpcomingRidesSection`, nothing when empty), one `ScheduledRideTile` per booking: pickup time (Addis), status pill (Booked, Finding a driver, Driver search started, Cancelled, Couldn't book), drop-off, pickup, "vehicle · booked price · method", "Driver search starts at hh:mm" while booked, and "Cancel booking" while `cancellable` (status SCHEDULED): a confirmation dialog ("free until we start looking for a driver"), then `POST /api/trips/scheduled/:id/cancel` and "Booking cancelled"; a failure shows the error and refreshes the list. Pull to refresh reloads both lists.
+- Trips grouped by day ("Today", "Yesterday", or the date). Tap → the receipt route. Rows show what the rider paid (`payableMinor`) on the rider side and the fare on the driver side.
 - States: skeleton list, error with Retry, illustrated empty state.
 
 ### ReceiptScreen (`rider/history/history_screens.dart`, both sides)
 
 - A small non-interactive map with both pins and the trip line (straight if none), status pill and date, the driver (photo, name, car, plate) when known, a timeline (requested, started, completed, cancelled, distance), the money.
 - Drivers also see the settlement from `GET /api/payments/trips/:tripId`: commission, VAT and "your balance change" (green or red).
-- A share button sends a text receipt through the share sheet.
+- A share button sends a text receipt through the share sheet (the payable amount for riders, the fare for drivers).
+- "Help with this trip" (flag `support`): for the rider, the existing lost-item report about this trip (status pill → the report), else "I left something" while `lostItemReportable` (completed ≤ 7 days ago) → `/support/lost-items/report?trip=<id>`; for both sides "Report a problem with this trip" → `/support/new?trip=<id>`. The rider's reports come from `myLostItemsProvider` (`GET /api/support/me/lost-items`).
 
 ## Driver
 
@@ -186,7 +195,7 @@ A bottom sheet listing the cars; ineligible ones are dimmed with the denial mess
 
 - Keeps the screen on while open when the "Keep screen on" preference is on.
 - Map: in-app navigation to the target (pickup, then drop-off) with the travelled part greyed; follow `driverBearing` (or `driver` when "Turn the map the way I'm driving" is off) at zoom 17; a gesture switches to overview; an ETA callout at the target. Without a route: a straight line. The trip line is drawn as a secondary leg on the way to the pickup.
-- Top: `TurnBanner` (tap → turn list) while navigating; back (ended trips); SOS (flag `sos`); chips "Follow / Overview" and "Directions" (external app, asking which one when the preference is "ask").
+- Top: `TurnBanner` (tap → turn list) while navigating; back (ended trips); SOS (flag `sos`, while `sosAvailable`, so also for 30 min after drop-off); chips "Follow / Overview" and "Directions" (external app, asking which one when the preference is "ask").
 - Sheet: the rider's photo and name, the target address, the payment method pill; a call button only if `kMaskedCallsEnabled` (false).
 
 | Stage | Actions |
@@ -195,16 +204,18 @@ A bottom sheet listing the cars; ineligible ones are dimmed with the denial mess
 | toPickup | distance to the pickup (green within 150 m), "Slide: arrived" (green within 300 m) → `POST /api/trips/:id/arrive` (the server checks the position); "Cancel trip" |
 | waitingAtPickup | waiting timer, "free until 3:00" then "rider is waiting"; "Slide to start" → PIN sheet when `tripPin` is on (4 `PinBoxes`), then `POST /api/trips/:id/start {pin}`; "No-show" enabled after 5 min (counts down before) → cancel with `NO_SHOW` |
 | inTrip | "Slide to complete" → `POST /api/trips/:id/complete` with a key kept across retries |
-| completed | "Collect X cash" (cash), "Company pays", or "Rider pays digitally"; "Rate rider" → `/driver/trip/<id>/rate`; "Back to driving" |
+| completed | "Collect X cash" (cash; X is `fare.payableMinor`, the fare minus the rider's promo discount, which the platform covers), "Company pays", or "Rider pays digitally"; "Rate rider" → `/driver/trip/<id>/rate`; "Back to driving" |
 | cancelled | "cancelled by <side>", the compensation earned if any, "Back to driving" |
 
 - Driver cancel reasons: noShow, wrongPickup, safety, other (no fee shown). The cancel key is kept for the screen's lifetime.
 - Each action replaces the active trip with the response; errors are shown in the sheet.
+- `trip:reassigned` for this trip (dispatch moved it to another driver): `ActiveTripController` drops the active trip and sets `tripReassignedProvider`; the screen shows "This trip was moved to another driver.", clears it and goes to `/driver/home`.
 - APIs: the transitions above, `GET /api/trips/:id/parties`, `GET /api/maps/route?steps=1` (navigation).
 
 ### EarningsScreen (`driver/earnings/earnings_screens.dart`)
 
 - Period pills: today, week, month (`GET /api/payments/earnings/me?period=`). Net earnings hero, trips, gross fares, cash collected; a bar chart (`EarningsChart`) when the period has more than one day; "where the fare went" (gross, −commission, −VAT, net).
+- Incentives (when there are any; `incentivesProvider` = `GET /api/payments/incentives/me?cityId=<current city>`): per program the name, "Earn X", "<vehicle> trips only" when limited, a `ProgressMeter` (green once reached), "N of M trips", and "Ends <time>" / "Starts <time>" / "Ended. Counting your trips." / "Earned X" / "Ended. Target not reached."; a note that trips count once settled and rewards land when the program ends. A failed load hides the section. Pull to refresh reloads it.
 - Balance card (`GET /api/payments/balances/me?cityId=`): "balance zero", "you owe X" (red) or "we owe you X", the state text, prepaid minimum or the warning / cash / hard limits, open dues ("overdue" in red), "Top up", "Statement" (needs an account), the suggested top-up.
 - Payout method (needs an account), the bank reference code, "Top-ups" list, "payouts weekly above X".
 - Pull to refresh reloads the balance and the summary. Loading skeletons; errors with Retry.
@@ -259,9 +270,9 @@ The cars from `driverHomeProvider` (own and fleet), add button → `/driver/onbo
 
 - Profile card (avatar, name, phone, rating from `GET /api/trips/me/rating`, trips count from the loaded history) → `/account/profile`.
 - Mode: "Switch to driver", "Become a driver", or "Switch to rider".
-- Rider: saved places, payment preferences, scheduled rides and promos (flags, "Coming soon").
-- Driver: vehicles, navigation, earnings.
-- Preferences: language, appearance, notifications. Safety: emergency contact. Account: organisations (names, invitation count badge), signed-in devices. Support (flag). About: sign out (confirmation dialog), delete account (flag), the app version.
+- Rider: saved places, payment preferences, scheduled rides (flag `scheduledRides`) → `/scheduled`.
+- Driver: vehicles, navigation, earnings, and "Lost items" (flag `support`) → `/support/lost-items`.
+- Preferences: language, appearance, notifications. Safety: emergency contact. Account: organisations (names, invitation count badge), signed-in devices. Help (flag `support`) → `/support`. About: sign out (confirmation dialog), delete account (flag), the app version.
 
 ### ProfileScreen (`profile/profile_screen.dart`)
 
@@ -288,18 +299,74 @@ Home, Work and other places (`GET /api/trips/places`). Set or change opens the r
 | Screen | Contents |
 |---|---|
 | Appearance | System, Light, Dark |
-| Notifications | trip updates, promotions, sound (stored only); vibrate on new offer, haptic feedback (applied); a note that the settings are local |
+| Notifications | "Offers and news from Anbessa": "By notification" and "By SMS" (`marketingPrefsProvider`: `GET` / `PUT /api/notifications/me/marketing`; a switch flips at once and goes back with a toast if the server refuses; skeleton while loading, error with retry), and "trip, payment and safety messages always come"; then trip updates, sound (stored only); vibrate on new offer, haptic feedback (applied); a note that the first group is kept with the account and the rest on this phone |
 | Safety | emergency contact name and phone (validated with `toE164`), save, remove (the remove button uses the "remove place" label) |
 | Navigation | "Turn the map the way I'm driving", "Keep the screen on while driving", navigation app: ask every time, Google Maps, Waze, system maps |
 | Organisations | pending invitations with Accept / Decline (Better Auth accept/reject; accept refreshes the JWT), the person's organisations with status, and, with more than one company, a choice of the default company (prefs `billing_org_id`) |
+
+## Help and safety (`support/`, support-service)
+
+All of them talk to `SupportRepository` / `SafetyRepository` (`support/support_repository.dart`), whose defaults call `SupportApi` through `apiClientProvider`; tests override the two providers. The routes live under `/sos` and `/support`, which the router lets through in either mode and during an active trip.
+
+### SosScreen (`support/sos_screen.dart`, `/sos?trip=<id>`)
+
+- Entry: the SOS button on both trip screens (flag `sos`). The trip is `?trip`, else the active trip.
+- "Call 991" (`tel:991`) is always the first button, before and after an alert.
+- "Alert Anbessa safety" is a `HoldToConfirm` button: it fires after a **2 s hold** (the fill drains if the finger lifts early); screen readers trigger it with a long press. Enabled while `sosAvailable(trip)` (a trip that could not be loaded counts as available: the server decides). Otherwise a caption says it works during a trip and 30 min after.
+- Sending: the position is the last one seen if under 2 min old, else one fix (permission asked, 8 s at most), else any last position, else the trip's pickup (drop-off once in progress or completed) with a 2 km accuracy and a notice that the area was sent. `POST /api/support/sos` with the trip id, the position, the trip's `cityId` (so the alert is accepted unverified when trip-service is down) and one `Idempotency-Key` per screen, reused by "Send the alert again".
+- After sending: a status pill (Alert sent / Safety team on it / Closed), "Help is coming" or "The safety team has your alert", the sent and seen times, a notice for a duplicate alert. `GET /api/support/sos/:id` every 5 s (`sosPollEvery`) until RESOLVED, then the outcome (false alarm, assisted, passed to emergency services). A failed poll shows "Can't refresh the status right now" and keeps polling. While live, a newer `lastPositionProvider` (> 30 m from the last one sent) goes to `POST /api/support/sos/:id/location`.
+- Failure: "We couldn't send the alert. If you're in danger, call 991 now.", the error, and "Send the alert again".
+- The alert is remembered per trip for the app run (`sosAlertsProvider`), so reopening the screen shows its state and resumes polling.
+- The emergency contact (Account → Safety), when set, is offered as a call.
+
+### SupportScreen "Help" (`support/support_screens.dart`, `/support`)
+
+The lede, "Contact support", then "Your requests" (`GET /api/support/me/tickets`, first 50): subject, "#ref · category · updated <time>", a status pill (Received, In progress, Waiting for you, Answered, Closed). Then the rider's lost-item reports (`GET /api/support/me/lost-items`, `viewerRole` RIDER). Pull to refresh; skeleton; error with retry; an empty state; a note to call 991 in danger.
+
+### NewTicketScreen (`/support/new[?trip=<id>]`)
+
+- Category (`ticketCategoriesForApp`: a trip, payment, safety, your account, feedback; LOST_ITEM is not offered and a caption points to the receipt). Safety shows "call 991 first".
+- "About a trip": "Not about a trip" or one of the 10 latest trips of the current mode (a bottom sheet over `tripHistoryProvider`); preselected and category "A trip" when opened from a receipt.
+- Message (5–5000 characters). The subject is the message's first line, cut to 80 characters.
+- Send → `POST /api/support/tickets` with `cityId` = the current city when there is no trip, `as` = `DRIVER` in driver mode for an account with the `DRIVER` role (else `RIDER`) when there is no trip; one key per distinct content (an unchanged retry reuses it). Then the ticket's thread replaces the form.
+
+### TicketScreen (`/support/tickets/:id`)
+
+`GET /api/support/tickets/:id`. Subject, status pill, category and date; "We asked you something" when waiting for the requester; "Our answer" with the resolution note once answered; the thread (the description first, then public messages: yours on the right, "Anbessa support" on the left, system lines centred). While open: a reply box (`POST .../messages`). Answered ≤ 7 days ago: "Reopen" asks for a reason (`POST .../reopen`). Later or closed: "This request is closed" and "Contact support". Pull to refresh.
+
+### ReportLostItemScreen (`support/lost_item_screens.dart`, `/support/lost-items/report?trip=<id>`)
+
+The trip (when, pickup, drop-off), "What did you leave?" (3–2000 characters), a note that the driver sees the text but not the phone number. Disabled with a notice when the trip completed more than 7 days ago. `POST /api/support/lost-items` with a key, then the report replaces the form. `already_reported` / `report_window_closed` are shown as errors.
+
+### LostItemScreen (`/support/lost-items/:id`)
+
+`GET /api/support/lost-items/:id`. Status pill and what happens next for the viewer (rider or driver side), the description and date, then the actions:
+
+| Viewer | Status | Action |
+|---|---|---|
+| rider | found | "I got it back" → `POST .../status {status: RETURNED}` |
+| driver / fleet | reported | an optional note, "I found it" and "It's not in the car" → `POST .../respond {found, note?}` |
+| driver / fleet | not found | "I found it" |
+| driver / fleet | found | "It's not in the car" |
+
+The messages (no names or numbers; "You", "Driver", "Rider", "Car owner", "Anbessa support") and a reply box until the report is closed (`POST .../messages`).
+
+### DriverLostItemsScreen (`/support/lost-items`)
+
+Account → Lost items in driver mode: the reports whose `viewerRole` is DRIVER or FLEET, with description, date and status → the report. Pull to refresh, skeleton, retry, empty state.
+
+## Scheduled rides (`rider/scheduled/`)
+
+### ScheduledRidesScreen (`scheduled_rides_screen.dart`, `/scheduled`)
+
+Account → Scheduled rides. The upcoming bookings (`scheduledRidesProvider`) as `ScheduledRideTile`s (see HistoryScreen), "Schedule a ride" (`startScheduling`, as the home chip) and "Book from 30 minutes to 7 days ahead." Skeleton, error with Retry, an empty state ("No rides booked"). Pull to refresh.
+
+`ScheduledRidesController` (`scheduled_rides_controller.dart`): `GET /api/trips/scheduled?status=upcoming&limit=50` while signed in and the flag is on (else empty, no request); refreshed on every `scheduled:status` and on reconnect. A `scheduled:status` DISPATCHED with a `tripId` also refreshes the active trip, so the router opens the trip being matched. `added` inserts a new booking in time order; `cancel` removes it.
 
 ## Flagged modules (`flagged/flagged_modules.dart`)
 
 | Screen | Entry point | What it does |
 |---|---|---|
-| ScheduledRidesScreen | home chip, account (flag `scheduledRides`) | lists `ScheduledRidesRepository.list()` (empty) → "Coming soon" with "Schedule a ride" |
-| ScheduleRideScreen | `/scheduled/new` | "not available yet" |
-| SosScreen | trip screens (flag `sos`) | "Call police" dials `tel:991`; "Alert safety team" calls `SafetyRepository.raiseSos(tripId, lat, lng)`, which answers `not_available` |
-| SupportScreen / NewTicketScreen | account (flag `support`) | "Coming soon" / "not available yet" |
-| PromosScreen / RedeemCodeScreen | home, account, quote (flag `promos`) | "Coming soon" / "not available yet" |
 | DeleteAccountScreen | account (flag `accountDeletion`) | a warning and a delete button; `AccountRepository.requestDeletion()` answers `not_available` |
+
+Scheduled rides and promo codes left this file once trip-service and pricing-service had them. There is no rider "promotions" list or redeem endpoint, so the former Promos and Redeem screens (and their home chip, account tile and `/promos` routes) are gone; codes are entered on the quote screen.

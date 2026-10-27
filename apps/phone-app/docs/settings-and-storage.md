@@ -18,7 +18,6 @@ Every key is declared in `lib/core/prefs_keys.dart` (`PrefsKeys`). Four controll
 | `dismissed_announcements` | String list | empty | `DismissedAnnouncements` (`features/bootstrap/gates.dart`) | announcement ids not to show again; the last 50 are kept |
 | `emergency_contact` | String `name|+251…` | absent | `EmergencyContactController` | the emergency contact. Shown in Account; not used by the SOS screen |
 | `notif_trip` | bool | true | `NotificationPrefsController` | "Trip updates" toggle. **Stored only**: nothing reads it |
-| `notif_promo` | bool | true | same | "Promotions" toggle. Stored only |
 | `notif_sound` | bool | true | same | "Sound" toggle. Stored only |
 | `notif_vibrate_offer` | bool | true | `HapticsSettings` (`core/ux/haptics.dart`) | the vibration pattern on a new offer |
 | `haptics` | bool | true | `HapticsSettings` | every other haptic |
@@ -27,6 +26,7 @@ Every key is declared in `lib/core/prefs_keys.dart` (`PrefsKeys`). Four controll
 | `keep_awake` | bool | true | `NavPrefsController` | wakelock on the driver trip screen |
 | `last_vehicle_id` | String | absent | `ShiftController.goOnline` | the car preselected on the driver home |
 | `client_config` | String (raw JSON) | absent | `ClientConfigController._fetch` | the last good client config, used when the fetch fails |
+| `map_mode` | String (`flat`, `threeD`, `satellite`) | absent (flat) | `MapModeController` (`features/maps/map_mode.dart`) | the map view; 3D shows flat where the vector engine doesn't run |
 
 Screen-local state that is not persisted: the booking itself, quotes, history filters, offer state, shift state (rebuilt from `GET /api/fleet/drivers/me`).
 
@@ -53,4 +53,5 @@ The access JWT is never stored; it lives in `TokenManager` memory.
 | Preferred mobile-money provider | payment-service `GET`/`PUT /api/payments/me/preferences` | Payment preferences |
 | Payout method | payment-service `PUT /api/payments/balances/:accountId/payout-method` | Payout method |
 | Push device registration | notification-service `/api/notifications/devices` | automatic |
+| Marketing messages by push / SMS (opt-outs) | notification-service `GET`/`PUT /api/notifications/me/marketing` | Notifications ("Offers and news from Anbessa"; replaced the local `notif_promo` toggle) |
 | Feature flags, maintenance, announcements, minimum versions | platform-service client config (admins set them in the web app per `apps/phone-app/README.md`) | read-only in the app |

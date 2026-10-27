@@ -67,7 +67,7 @@ class _OfferSheetState extends ConsumerState<OfferSheet> {
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(20, 18, 20, 16),
                 child: o == null
-                    ? Row(children: [Icon(Icons.info_outline, color: c.muted), const SizedBox(width: 10), Expanded(child: Text(widget.state.notice == 'cancelled' ? l.offerCancelled : l.offerExpired, style: AnbessaType.body.copyWith(color: c.text)))])
+                    ? Text(widget.state.notice == 'cancelled' ? l.offerCancelled : l.offerExpired, style: AnbessaType.body.copyWith(color: c.text))
                     : Column(
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -97,9 +97,9 @@ class _OfferSheetState extends ConsumerState<OfferSheet> {
                             ],
                           ),
                           const SizedBox(height: 14),
-                          _Place(icon: Icons.trip_origin, color: c.accent, text: o.pickup.address ?? l.pickupLabel),
+                          _Place(color: c.accent, text: o.pickup.address ?? l.pickupLabel),
                           Padding(padding: const EdgeInsets.only(left: 7), child: Container(width: 2, height: 10, color: c.border)),
-                          _Place(icon: Icons.stop_rounded, color: c.text, text: o.dropoff.address ?? l.dropoffLabel),
+                          _Place(square: true, color: c.text, text: o.dropoff.address ?? l.dropoffLabel),
                           const SizedBox(height: 14),
                           Row(
                             children: [
@@ -127,10 +127,13 @@ class _OfferSheetState extends ConsumerState<OfferSheet> {
 }
 
 class _Place extends StatelessWidget {
-  const _Place({required this.icon, required this.color, required this.text});
-  final IconData icon;
+  const _Place({required this.color, required this.text, this.square = false});
   final Color color;
   final String text;
+  final bool square;
   @override
-  Widget build(BuildContext context) => Row(children: [Icon(icon, size: 16, color: color), const SizedBox(width: 10), Expanded(child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: AnbessaType.body.copyWith(fontWeight: FontWeight.w500)))]);
+  Widget build(BuildContext context) => Row(children: [
+        // the same plain dot / square the map uses for pickup and drop-off
+        SizedBox(width: 16, child: Center(child: Container(width: 10, height: 10, decoration: BoxDecoration(color: color, shape: square ? BoxShape.rectangle : BoxShape.circle)))),
+        const SizedBox(width: 10), Expanded(child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: AnbessaType.body.copyWith(fontWeight: FontWeight.w500)))]);
 }

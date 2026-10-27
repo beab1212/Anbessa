@@ -36,7 +36,11 @@ The service column follows the host-mode port table (`ApiEndpoints.defaultHostPo
 
 | Method and path | Bearer | Used by |
 |---|---|---|
-| `POST /api/trips` (Idempotency-Key) | JWT | QuoteScreen → BookingController.request |
+| `POST /api/trips` (Idempotency-Key) `{quoteId, paymentMethod, billingOrgId?, purpose?}` | JWT | QuoteScreen → BookingController.request (422 `policy_violation` with `rule` for company rides) |
+| `POST /api/trips/scheduled` (Idempotency-Key) `{quoteId, paymentMethod, scheduledFor, billingOrgId?, purpose?}` | JWT | QuoteScreen → BookingController.schedule (flag `scheduledRides`) |
+| `GET /api/trips/scheduled?status=upcoming&limit=50` | JWT | ScheduledRidesController (Activity, `/scheduled`; on `scheduled:status`, reconnect, pull to refresh) |
+| `POST /api/trips/scheduled/:id/cancel` | JWT | ScheduledRideTile "Cancel booking" |
+| `GET /api/trips/corporate/:orgId/policy` | JWT | corporatePolicyProvider (quote screen, company method: is a purpose required) |
 | `GET /api/trips/active` | JWT | ActiveTripController (build, reconnect, resume, after `active_trip_exists`) |
 | `GET /api/trips?as=&before=&limit=` | JWT | TripHistory (Activity), paymentDueProvider (`as=rider&limit=1`), Account trip count |
 | `GET /api/trips/:id` | JWT | tripProvider (receipts, trips not active), ActiveTripController (final state of a trip that ended while away) |
@@ -68,7 +72,7 @@ The service column follows the host-mode port table (`ApiEndpoints.defaultHostPo
 
 | Method and path | Bearer | Used by |
 |---|---|---|
-| `POST /api/pricing/estimates` | JWT | BookingController.quote (route editor, quote screen, swap, expired quote) |
+| `POST /api/pricing/estimates` (`promoCode?`) | JWT | BookingController.quote (route editor, quote screen, swap, expired quote, promo applied / removed). The answer's `promo` outcome and each quote's `discountMinor` / `payableMinor` drive the promo row, the cards and the button |
 
 ### mapping-service (`/api/maps`)
 
@@ -96,6 +100,7 @@ The service column follows the host-mode port table (`ApiEndpoints.defaultHostPo
 | `GET /api/payments/top-ups/:id` | JWT | TopUpScreen (every 5 s until settled) |
 | `PUT /api/payments/balances/:accountId/payout-method` | JWT | PayoutMethodScreen |
 | `GET /api/payments/earnings/me?period=` | JWT | EarningsSummaryController (driver home `today`, earnings screen) |
+| `GET /api/payments/incentives/me?cityId=` | JWT | incentivesProvider (earnings screen) |
 
 ### fleet-service (`/api/fleet`)
 
@@ -122,10 +127,35 @@ The service column follows the host-mode port table (`ApiEndpoints.defaultHostPo
 |---|---|---|
 | `POST /api/notifications/devices` | JWT | PushService (after sign-in, on token refresh; only with Firebase configured) |
 | `POST /api/notifications/devices/remove` | JWT | PushService.unregister (before sign-out) |
+| `GET /api/notifications/me/marketing` | JWT | MarketingPrefsController (Notifications screen) |
+| `PUT /api/notifications/me/marketing` `{push?, sms?}` | JWT | Notifications screen switches |
+
+### support-service (`/api/support`)
+
+Through `SupportRepository` / `SafetyRepository` (`lib/features/support/support_repository.dart`) over `SupportApi`. Port 3009 in host mode; Kong routes `/api/support` in gateway mode.
+
+| Method and path | Bearer | Used by |
+|---|---|---|
+| `POST /api/support/tickets` (Idempotency-Key) | JWT | NewTicketScreen |
+| `GET /api/support/me/tickets?limit=50` | JWT | myTicketsProvider (SupportScreen) |
+| `GET /api/support/tickets/:id` | JWT | TicketThreadController (TicketScreen; again after a reply or reopen) |
+| `POST /api/support/tickets/:id/messages` | JWT | TicketScreen reply box |
+| `POST /api/support/tickets/:id/reopen` | JWT | TicketScreen "Reopen" |
+| `POST /api/support/lost-items` (Idempotency-Key) | JWT | ReportLostItemScreen |
+| `GET /api/support/me/lost-items?limit=50` | JWT | myLostItemsProvider (SupportScreen, ReceiptScreen for riders, DriverLostItemsScreen) |
+| `GET /api/support/lost-items/:id` | JWT | LostItemThreadController (LostItemScreen) |
+| `POST /api/support/lost-items/:id/messages` | JWT | LostItemScreen reply box |
+| `POST /api/support/lost-items/:id/status` `{status: RETURNED}` | JWT | LostItemScreen "I got it back" (rider) |
+| `POST /api/support/lost-items/:id/respond` | JWT | LostItemScreen "I found it" / "It's not in the car" (driver or fleet) |
+| `POST /api/support/sos` (Idempotency-Key) | JWT | SosScreen, after the 2 s hold (one key per screen, reused on retry) |
+| `GET /api/support/sos/:id` | JWT | SosScreen, every 5 s until the alert is resolved |
+| `POST /api/support/sos/:id/location` | JWT | SosScreen, when a newer position is > 30 m from the last one sent |
+
+The `support:*` socket pushes (ticket messages, lost items, SOS) are not listened to; the screens poll or refresh instead.
 
 ### Wrappers with no caller in the app
 
-`IdentityApi.me()` / `cities()`, `PlatformApi.clientConfig()` (the controller calls the path directly), `PricingApi.estimates()` / `fares()`, `TripsApi.ratingOf()`, `AuthApi.updateName()`, `PaymentsApi.orgBalance()` / `balance()`, `FleetApi.retireVehicle()` / `currentSession()`. audit-service is never called.
+`IdentityApi.me()` / `cities()`, `PlatformApi.clientConfig()` (the controller calls the path directly), `PricingApi.estimates()` / `fares()`, `TripsApi.ratingOf()` / `scheduledTrip()`, `AuthApi.updateName()`, `PaymentsApi.orgBalance()` / `balance()`, `FleetApi.retireVehicle()` / `currentSession()`. audit-service is never called.
 
 ## Socket.io (realtime-gateway, `WS_URL`)
 
@@ -139,6 +169,8 @@ Connected while signed in, with `auth: {token: <JWT>}`. Details in [architecture
 | `trip:offer` | trip-service | OfferController |
 | `trip:offer_expired` | trip-service | OfferController |
 | `trip:offer_cancelled` | trip-service | OfferController |
+| `trip:reassigned` | trip-service (to the driver a dispatcher took the trip from) | ActiveTripController: drops the trip, sets `tripReassignedProvider`; DriverTripScreen leaves with a notice. The rider gets a `trip:status` with the new driver instead, which refetches the parties |
+| `scheduled:status` | trip-service (booked, edited, cancelled, failed, dispatched) | ScheduledRidesController: refreshes; DISPATCHED with `tripId` also refreshes the active trip |
 | `driver:location` | realtime-gateway | driverLiveProvider (rider trip) |
 | `payment:action_required` | payment-service | TripPaymentsController (pay screen) |
 | `payment:captured` | payment-service | TripPaymentsController |
@@ -161,5 +193,5 @@ Connected while signed in, with `auth: {token: <JWT>}`. Details in [architecture
 | FCM | PushService |
 | Payment provider pages (`checkoutUrl`) | PayScreen, TopUpScreen (in-app browser view) |
 | `google.navigation:`, `comgooglemaps://`, `waze://`, `geo:`, `maps://`, Google Maps web | DriverTripScreen directions |
-| `tel:991` | SosScreen |
+| `tel:991`, `tel:<emergency contact>` | SosScreen |
 | Play Store / App Store pages | UpdateRequiredScreen |

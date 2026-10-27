@@ -1,4 +1,6 @@
-// The modules waiting for their backend render cleanly (large text, light and dark) and say so.
+// The module still waiting for its backend (account deletion) renders cleanly (large text, light
+// and dark). SOS and support have their backend now (support_screens_test.dart); so do scheduled
+// rides and promo codes (scheduled_realtime_test.dart, booking_extras_test.dart).
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -7,21 +9,11 @@ import 'package:phone_app/features/flagged/flagged_modules.dart';
 import 'driver_screens_test.dart' show pumpDriver;
 
 void main() {
-  final screens = <String, Widget>{
-    'scheduled rides': const ScheduledRidesScreen(),
-    'support': const SupportScreen(),
-    'promos': const PromosScreen(),
-    'new ticket': const NewTicketScreen(),
-    'SOS': const SosScreen(),
-    'delete account': const DeleteAccountScreen(),
-  };
-  for (final e in screens.entries) {
-    for (final b in Brightness.values) {
-      testWidgets('${e.key} (${b.name})', (tester) async {
-        await pumpDriver(tester, e.value, brightness: b);
-        if (e.key != 'SOS' && e.key != 'delete account') expect(find.text('Coming soon'), findsOneWidget);
-        expect(tester.takeException(), isNull);
-      });
-    }
+  for (final b in Brightness.values) {
+    testWidgets('delete account (${b.name})', (tester) async {
+      await pumpDriver(tester, const DeleteAccountScreen(), brightness: b);
+      expect(find.text('Delete my account'), findsWidgets);
+      expect(tester.takeException(), isNull);
+    });
   }
 }

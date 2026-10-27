@@ -75,7 +75,7 @@ class _SavedPlacesScreenState extends ConsumerState<SavedPlacesScreen> {
                     ),
                 ],
               ),
-            OutlinedButton.icon(onPressed: () => _pick(PlaceLabel.other), icon: const Icon(Icons.add_location_alt_outlined), label: Text(l.addPlace)),
+            OutlinedButton(onPressed: () => _pick(PlaceLabel.other), child: Text(l.addPlace)),
           ],
         ),
       ),

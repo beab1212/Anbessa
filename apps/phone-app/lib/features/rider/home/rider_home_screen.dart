@@ -15,6 +15,7 @@ import '../../maps/anbessa_map.dart';
 import '../../maps/nearby_cars_layer.dart';
 import '../../shell/shells.dart';
 import '../booking/booking_controller.dart';
+import '../scheduled/scheduled_rides_screen.dart';
 import '../places/saved_places_controller.dart';
 
 class RiderHomeScreen extends ConsumerStatefulWidget {
@@ -95,7 +96,8 @@ class _RiderHomeScreenState extends ConsumerState<RiderHomeScreen> with SingleTi
           cars: poses,
           follow: _following ? FollowMode.me : FollowMode.none,
           followZoom: 15,
-          onUserGesture: () => setState(() => _following = !_following ? _following : false),
+          onUserGesture: () => setState(() => _following = false),
+          onRecenter: () => setState(() => _following = true),
           topInset: bannerH + 64,
           bottomInset: _sheetHeight,
           callouts: [
@@ -117,7 +119,7 @@ class _RiderHomeScreenState extends ConsumerState<RiderHomeScreen> with SingleTi
                   borderRadius: BorderRadius.circular(AnbessaRadius.pill),
                   child: Container(
                     padding: const EdgeInsets.fromLTRB(4, 4, 14, 4),
-                    decoration: BoxDecoration(borderRadius: BorderRadius.circular(AnbessaRadius.pill), boxShadow: AnbessaElevation.card(c.brightness)),
+                    decoration: BoxDecoration(borderRadius: BorderRadius.circular(AnbessaRadius.pill), boxShadow: AnbessaElevation.floating(c.brightness)),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -163,7 +165,6 @@ class _HomeSheet extends ConsumerWidget {
     final places = ref.watch(savedPlacesProvider);
     final recent = ref.watch(recentPlacesProvider);
     final scheduled = ref.watch(featureProvider(Feature.scheduledRides));
-    final promos = ref.watch(featureProvider(Feature.promos));
 
     void book(Place p) {
       Haptics.medium();
@@ -189,13 +190,11 @@ class _HomeSheet extends ConsumerWidget {
               decoration: BoxDecoration(borderRadius: BorderRadius.circular(AnbessaRadius.lg), border: Border.all(color: c.border)),
               child: Row(
                 children: [
-                  Icon(Icons.search_rounded, color: c.accentStrong, size: 26),
-                  const SizedBox(width: 12),
                   Expanded(child: Text(l.whereTo, style: AnbessaType.h2.copyWith(color: c.text))),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     decoration: BoxDecoration(color: c.surface, borderRadius: BorderRadius.circular(AnbessaRadius.pill), border: Border.all(color: c.border)),
-                    child: Row(children: [Icon(Icons.schedule, size: 14, color: c.muted), const SizedBox(width: 4), Text(l.now, style: AnbessaType.label.copyWith(color: c.text2))]),
+                    child: Text(l.now, style: AnbessaType.label.copyWith(color: c.text2)),
                   ),
                 ],
               ),
@@ -249,21 +248,17 @@ class _HomeSheet extends ConsumerWidget {
               onDismissed: (_) => ref.read(bookingProvider.notifier).forget(p),
               child: ListTile(
                 contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-                leading: Container(width: 36, height: 36, decoration: BoxDecoration(color: c.surface2, shape: BoxShape.circle), child: Icon(Icons.history, color: c.muted, size: 20)),
                 title: Text(p.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: AnbessaType.body.copyWith(fontWeight: FontWeight.w500)),
                 subtitle: p.label == null ? null : Text(p.label!, maxLines: 1, overflow: TextOverflow.ellipsis, style: AnbessaType.caption.copyWith(color: c.muted)),
                 onTap: () => book(p),
               ),
             ),
         ],
-        if (scheduled || promos) ...[
+        if (scheduled) ...[
           const SizedBox(height: 14),
           Wrap(
             spacing: 8,
-            children: [
-              if (scheduled) ActionChip(avatar: const Icon(Icons.schedule, size: 18), label: Text(l.scheduleRide), onPressed: () => context.push(Routes.scheduledNew)),
-              if (promos) ActionChip(avatar: const Icon(Icons.local_offer_outlined, size: 18), label: Text(l.promos), onPressed: () => context.push(Routes.promos)),
-            ],
+            children: [ActionChip(label: Text(l.scheduleRide), onPressed: () => startScheduling(context, ref))],
           ),
         ],
       ],

@@ -24,6 +24,14 @@ abstract final class Env {
   static const tileUrlDark = String.fromEnvironment('TILE_URL_DARK', defaultValue: '');
   static const tileAttributionDark = String.fromEnvironment('TILE_ATTRIBUTION_DARK', defaultValue: ''); // empty: same as TILE_ATTRIBUTION
 
+  /// Vector map styles (MapLibre, Android and iOS). Empty: OpenFreeMap's free styles (no key).
+  static const mapStyleUrl = String.fromEnvironment('MAP_STYLE_URL', defaultValue: '');
+  static const mapStyleUrlDark = String.fromEnvironment('MAP_STYLE_URL_DARK', defaultValue: '');
+
+  /// Satellite imagery tiles ({z}/{y}/{x} or {z}/{x}/{y}). Empty: Esri World Imagery.
+  static const satelliteTileUrl = String.fromEnvironment('SATELLITE_TILE_URL', defaultValue: '');
+  static const satelliteAttribution = String.fromEnvironment('SATELLITE_ATTRIBUTION', defaultValue: '');
+
   /// `on`: the sign-in page lists the seed accounts (auth-service DEV_LOGIN=on; debug builds only).
   static const devLogin = String.fromEnvironment('DEV_LOGIN', defaultValue: 'off');
 

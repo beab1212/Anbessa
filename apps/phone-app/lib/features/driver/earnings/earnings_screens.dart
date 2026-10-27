@@ -1,6 +1,7 @@
 // Earnings (workflow 09): what the driver made today / this week / this month, where the fare
 // went, the balance and its state, limits and dues; top-ups by mobile money (the provider's
 // page, then `balance:topped_up`); the payout method; the statement and the list of top-ups.
+// Incentive programs ("complete N trips, earn X") show with the driver's progress.
 
 import 'dart:async';
 
@@ -12,6 +13,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../core/l10n/l10n.dart';
 import '../../../core/network/providers.dart';
 import '../../../core/router/routes.dart';
+import '../../config/client_config_provider.dart';
 import '../../rider/booking/booking_controller.dart';
 import 'earnings_chart.dart';
 import 'earnings_controller.dart';
@@ -50,6 +52,7 @@ class _EarningsScreenState extends ConsumerState<EarningsScreen> {
         onRefresh: () async {
           await ref.read(balanceProvider.notifier).refresh();
           await ref.read(earningsSummaryProvider(_period).notifier).refresh();
+          ref.invalidate(incentivesProvider);
         },
         child: CustomScrollView(
           slivers: [
@@ -99,6 +102,7 @@ class _EarningsScreenState extends ConsumerState<EarningsScreen> {
                       ],
                     ),
                   ],
+                  const _Incentives(),
                   const SizedBox(height: 18),
                   // the balance
                   if (bAsync.hasError && b == null) Problem(bAsync.error, describe: (e) => describeError(l, e), onRetry: () => ref.read(balanceProvider.notifier).refresh(), retryLabel: l.retry),
@@ -276,7 +280,7 @@ class _TopUpScreenState extends ConsumerState<TopUpScreen> {
             else
               Column(children: [const LinearProgressIndicator(), const SizedBox(height: 12), Notice(started.instructions ?? l.topUpStarted(providerLabel(started.provider ?? '')), tone: NoticeTone.info)]),
             const SizedBox(height: 12),
-            if (started.isOpen && started.checkoutUrl != null) OutlinedButton.icon(onPressed: () => launchUrl(Uri.parse(started.checkoutUrl!), mode: LaunchMode.inAppBrowserView), icon: const Icon(Icons.open_in_new), label: Text(l.openPaymentPage)),
+            if (started.isOpen && started.checkoutUrl != null) OutlinedButton(onPressed: () => launchUrl(Uri.parse(started.checkoutUrl!), mode: LaunchMode.inAppBrowserView), child: Text(l.openPaymentPage)),
             const SizedBox(height: 8),
             PrimaryButton(label: l.done, onPressed: () => context.pop()),
           ] else ...[
@@ -374,7 +378,7 @@ class _PayoutMethodScreenState extends ConsumerState<PayoutMethodScreen> {
             ],
           ),
           const SizedBox(height: 14),
-          TextField(controller: _dest, keyboardType: TextInputType.phone, decoration: InputDecoration(labelText: l.payoutDestination, hintText: _provider == 'chapa' ? '1000123456789' : '+251 911 22 33 44', prefixIcon: Icon(_provider == 'chapa' ? Icons.numbers : Icons.phone_outlined)), onChanged: (_) => setState(() {})),
+          TextField(controller: _dest, keyboardType: TextInputType.phone, decoration: InputDecoration(labelText: l.payoutDestination, hintText: _provider == 'chapa' ? '1000123456789' : '+251 911 22 33 44'), onChanged: (_) => setState(() {})),
           const SizedBox(height: 12),
           Problem(_error, describe: (e) => describeError(l, e)),
           const SizedBox(height: 8),
@@ -524,6 +528,89 @@ class TopUpsScreen extends ConsumerWidget {
                 );
               },
             ),
+    );
+  }
+}
+
+/// Running, upcoming and recently closed incentive programs; nothing when there are none or they
+/// can't be loaded (the rest of the screen matters more).
+class _Incentives extends ConsumerWidget {
+  const _Incentives();
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final l = context.l10n;
+    final c = context.colors;
+    final loc = context.localeTag;
+    final list = ref.watch(incentivesProvider).value ?? const <Incentive>[];
+    if (list.isEmpty) return const SizedBox.shrink();
+    final now = DateTime.now().toUtc();
+    final types = ref.watch(configProvider).vehicleTypes;
+    return Padding(
+      padding: const EdgeInsets.only(top: 14),
+      child: SectionGroup(
+        title: l.incentivesTitle,
+        margin: EdgeInsets.zero,
+        children: [
+          for (final i in list)
+            Padding(
+              key: ValueKey(i.id),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          i.name,
+                          style: AnbessaType.body.copyWith(color: c.text, fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        l.incentiveReward(birr(i.rewardMinor, locale: loc)),
+                        style: AnbessaType.body2.copyWith(color: c.text, fontFeatures: AnbessaType.tabular),
+                      ),
+                    ],
+                  ),
+                  if (i.vehicleType != null)
+                    Text(l.incentiveVehicle(types.where((v) => v.code == i.vehicleType).firstOrNull?.name ?? i.vehicleType!), style: AnbessaType.caption.copyWith(color: c.muted)),
+                  const SizedBox(height: 8),
+                  ProgressMeter(value: i.progress, semanticsLabel: l.incentiveProgress(i.trips, i.targetTrips)),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          l.incentiveProgress(i.trips, i.targetTrips),
+                          style: AnbessaType.caption.copyWith(color: c.text2, fontFeatures: AnbessaType.tabular),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Flexible(
+                        child: Text(
+                          i.closed
+                              ? (i.awardedMinor > 0 ? l.incentiveEarned(birr(i.awardedMinor, locale: loc)) : l.incentiveMissed)
+                              : i.counting(now)
+                              ? l.incentiveCounting
+                              : i.startsLater(now)
+                              ? l.incentiveStarts(dayAndTime(i.startsAt, locale: loc))
+                              : l.incentiveEnds(dayAndTime(i.endsAt, locale: loc)),
+                          textAlign: TextAlign.end,
+                          style: AnbessaType.caption.copyWith(color: i.closed && i.awardedMinor > 0 ? c.success : c.muted),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: Text(l.incentivesLede, style: AnbessaType.caption.copyWith(color: c.muted)),
+          ),
+        ],
+      ),
     );
   }
 }

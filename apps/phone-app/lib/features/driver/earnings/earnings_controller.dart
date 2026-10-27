@@ -50,3 +50,12 @@ class BalanceController extends AsyncNotifier<Balance?> {
 }
 
 final balanceProvider = AsyncNotifierProvider<BalanceController, Balance?>(BalanceController.new);
+
+/// The driver's incentive programs in their city with their own progress
+/// (GET /api/payments/incentives/me). Empty for riders; refreshed with the earnings screen.
+final incentivesProvider = FutureProvider<List<Incentive>>((ref) async {
+  final session = ref.watch(currentSessionProvider);
+  if (session == null || !session.canDrive) return const [];
+  final city = ref.watch(currentCityProvider);
+  return ref.read(apisProvider).payments.myIncentives(cityId: city.id);
+});

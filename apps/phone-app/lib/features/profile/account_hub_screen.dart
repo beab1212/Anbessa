@@ -1,5 +1,5 @@
 // Account (both modes): who you are, your rating and trips, and every setting grouped: Ride,
-// Preferences, Safety, Account, Support, About. Flagged entries show "Coming soon".
+// Preferences, Safety, Account, Help, About. Flagged entries whose backend is missing show "Coming soon".
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -30,7 +30,6 @@ class AccountScreen extends ConsumerWidget {
     final version = ref.watch(appVersionProvider).value;
     final support = ref.watch(featureProvider(Feature.support));
     final scheduled = ref.watch(featureProvider(Feature.scheduledRides));
-    final promos = ref.watch(featureProvider(Feature.promos));
     final deletion = ref.watch(featureProvider(Feature.accountDeletion));
     final rating = ref.watch(myRatingProvider).value;
     final trips = ref.watch(tripHistoryProvider(mode == AppMode.driver ? 'driver' : 'rider')).value?.trips.length;
@@ -96,8 +95,7 @@ class AccountScreen extends ConsumerWidget {
                     children: [
                       SettingsTile(icon: Icons.home_work_outlined, title: l.savedPlaces, onTap: () => context.push(Routes.savedPlaces)),
                       SettingsTile(icon: Icons.payments_outlined, title: l.paymentPreferences, onTap: () => context.push(Routes.paymentPrefs)),
-                      if (scheduled) SettingsTile(icon: Icons.schedule, title: l.scheduledRides, badge: comingSoon, onTap: () => context.push(Routes.scheduled)),
-                      if (promos) SettingsTile(icon: Icons.local_offer_outlined, title: l.promos, badge: comingSoon, onTap: () => context.push(Routes.promos)),
+                      if (scheduled) SettingsTile(icon: Icons.schedule, title: l.scheduledRides, onTap: () => context.push(Routes.scheduled)),
                     ],
                   ),
                 if (mode == AppMode.driver)
@@ -107,6 +105,7 @@ class AccountScreen extends ConsumerWidget {
                       SettingsTile(icon: Icons.directions_car_outlined, title: l.vehicles, onTap: () => context.push(Routes.driverVehicles)),
                       SettingsTile(icon: Icons.navigation_outlined, title: l.navigation, onTap: () => context.push(Routes.navigationPrefs)),
                       SettingsTile(icon: Icons.account_balance_wallet_outlined, title: l.tabEarnings, onTap: () => context.go(Routes.driverEarnings)),
+                      if (support) SettingsTile(icon: Icons.backpack_outlined, title: l.lostItems, subtitle: l.driverLostItemsTileLede, onTap: () => context.push(Routes.lostItems)),
                     ],
                   ),
                 SectionGroup(
@@ -136,7 +135,7 @@ class AccountScreen extends ConsumerWidget {
                     SettingsTile(icon: Icons.devices_outlined, title: l.sessions, onTap: () => context.push(Routes.sessions)),
                   ],
                 ),
-                if (support) SectionGroup(title: l.support, children: [SettingsTile(icon: Icons.help_outline, title: l.support, badge: comingSoon, onTap: () => context.push(Routes.support))]),
+                if (support) SectionGroup(title: l.support, children: [SettingsTile(icon: Icons.help_outline, title: l.support, subtitle: l.supportTileLede, onTap: () => context.push(Routes.support))]),
                 SectionGroup(
                   title: l.about,
                   children: [

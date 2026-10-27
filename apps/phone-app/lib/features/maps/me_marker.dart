@@ -1,9 +1,9 @@
-// The person's own position: a blue dot with a heading cone and a breathing accuracy circle.
+// The person's own position: a blue dot with a heading cone (the raster engine also draws the
+// accuracy circle).
 
 import 'dart:math';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' show LatLng;
 import 'package:ride_app_core/ride_app_core.dart';
 
@@ -15,15 +15,6 @@ class MePose {
   /// metres
   final double? accuracy;
 }
-
-CircleLayer meAccuracyLayer(AnbessaColors c, MePose me) => CircleLayer(
-      circles: [
-        if (me.accuracy != null && me.accuracy! > 15)
-          CircleMarker(point: me.position, radius: me.accuracy!, useRadiusInMeter: true, color: c.info.withValues(alpha: 0.12), borderColor: c.info.withValues(alpha: 0.35), borderStrokeWidth: 1),
-      ],
-    );
-
-Marker meMarker(MePose me) => Marker(point: me.position, width: 48, height: 48, child: MeDot(heading: me.heading));
 
 class MeDot extends StatelessWidget {
   const MeDot({super.key, this.heading});

@@ -108,9 +108,9 @@ class _DriverTripScreenState extends ConsumerState<DriverTripScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Padding(padding: const EdgeInsets.fromLTRB(20, 4, 20, 8), child: Align(alignment: Alignment.centerLeft, child: Text(l.navOpenIn, style: AnbessaType.h2))),
-              ListTile(leading: const Icon(Icons.map_outlined), title: Text(l.navGoogleMaps), onTap: () => Navigator.pop(ctx, NavApp.google)),
-              ListTile(leading: const Icon(Icons.alt_route), title: Text(l.navWaze), onTap: () => Navigator.pop(ctx, NavApp.waze)),
-              ListTile(leading: const Icon(Icons.navigation_outlined), title: Text(l.navSystemMaps), onTap: () => Navigator.pop(ctx, NavApp.system)),
+              ListTile(title: Text(l.navGoogleMaps), onTap: () => Navigator.pop(ctx, NavApp.google)),
+              ListTile(title: Text(l.navWaze), onTap: () => Navigator.pop(ctx, NavApp.waze)),
+              ListTile(title: Text(l.navSystemMaps), onTap: () => Navigator.pop(ctx, NavApp.system)),
               const SizedBox(height: 8),
             ],
           ),
@@ -137,6 +137,14 @@ class _DriverTripScreenState extends ConsumerState<DriverTripScreen> {
   Widget build(BuildContext context) {
     final l = context.l10n;
     final c = context.colors;
+    // dispatch moved this trip to another driver: leave it
+    ref.listen(tripReassignedProvider, (_, e) {
+      if (e == null || e.tripId != widget.tripId) return;
+      Haptics.error();
+      showToast(context, l.tripReassigned, tone: NoticeTone.warning);
+      ref.read(tripReassignedProvider.notifier).set(null);
+      context.go(Routes.driverHome);
+    });
     final tripAsync = ref.watch(tripProvider(widget.tripId));
     final t = tripAsync.value;
     if (t == null) {
@@ -198,6 +206,7 @@ class _DriverTripScreenState extends ConsumerState<DriverTripScreen> {
             follow: follow,
             followZoom: 17,
             onUserGesture: () => setState(() => _overview = true),
+            onRecenter: () => setState(() => _overview = false),
             topInset: top + (navigating ? 120 : 64),
             bottomInset: _sheetHeight,
             callouts: [
@@ -222,7 +231,7 @@ class _DriverTripScreenState extends ConsumerState<DriverTripScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     if (!t.isActive) MapControlButton(icon: Icons.arrow_back, tooltip: l.back, onTap: () => context.go(Routes.driverHome)),
-                    if (sosOn && t.isActive) MapControlButton(icon: Icons.sos, tooltip: l.sos, active: true, onTap: () => context.push('${Routes.sos}?trip=${t.id}')),
+                    if (sosOn && sosAvailable(t, DateTime.now())) MapControlButton(icon: Icons.sos, tooltip: l.sos, active: true, onTap: () => context.push('${Routes.sos}?trip=${t.id}')),
                     if (Env.fakeLocationOn) ...[const SizedBox(width: 8), MapChip(icon: Icons.bug_report_outlined, label: l.devTools, onTap: () => setState(() => _devOpen = !_devOpen))],
                     const SizedBox(width: 8),
                     // the chips wrap onto a second line at large text sizes
@@ -234,7 +243,7 @@ class _DriverTripScreenState extends ConsumerState<DriverTripScreen> {
                         children: [
                           if (navigating) ...[
                             MapChip(icon: _overview ? Icons.navigation : Icons.map_outlined, label: _overview ? l.navFollowMode : l.navOverviewMode, onTap: () => setState(() => _overview = !_overview)),
-                            MapChip(icon: Icons.directions, label: l.openDirections, tone: c.accentStrong, onTap: () => _directions(target)),
+                            MapChip(icon: Icons.directions, label: l.openDirections, onTap: () => _directions(target)),
                           ],
                         ],
                       ),
@@ -295,13 +304,7 @@ class _DriverTripScreenState extends ConsumerState<DriverTripScreen> {
                           if (metersToPickup != null)
                             Padding(
                               padding: const EdgeInsets.only(bottom: 10),
-                              child: Row(
-                                children: [
-                                  Icon(Icons.place_outlined, size: 18, color: metersToPickup <= 150 ? c.success : c.muted),
-                                  const SizedBox(width: 6),
-                                  Expanded(child: Text(l.toPickupDistance(km(metersToPickup.round())), style: AnbessaType.body2.copyWith(color: metersToPickup <= 150 ? c.success : c.text2, fontWeight: FontWeight.w600))),
-                                ],
-                              ),
+                              child: Text(l.toPickupDistance(km(metersToPickup.round())), style: AnbessaType.body2.copyWith(color: metersToPickup <= 150 ? c.success : c.text2, fontWeight: FontWeight.w600)),
                             ),
                           SwipeToConfirm(label: l.slideArrived, icon: Icons.place, tone: metersToPickup != null && metersToPickup <= 300 ? Tone.green : Tone.amber, busy: _busy, onConfirmed: () => _do(() => ref.read(apisProvider).trips.arrive(t.id))),
                           TextButton(onPressed: _busy ? null : () => _cancel(t), child: Text(l.cancelTripDriver)),
@@ -309,7 +312,7 @@ class _DriverTripScreenState extends ConsumerState<DriverTripScreen> {
                       DriverStage.waitingAtPickup => [
                           Row(
                             children: [
-                              CountdownRing(remaining: waiting > freeWaiting ? Duration.zero : freeWaiting - waiting, total: freeWaiting, size: 56, strokeWidth: 4, child: Icon(Icons.timer_outlined, color: waiting > freeWaiting ? c.warning : c.accentStrong)),
+                              CountdownRing(remaining: waiting > freeWaiting ? Duration.zero : freeWaiting - waiting, total: freeWaiting, size: 56, strokeWidth: 4, child: const SizedBox.shrink()),
                               const SizedBox(width: 12),
                               Expanded(
                                 child: Column(
@@ -351,7 +354,7 @@ class _DriverTripScreenState extends ConsumerState<DriverTripScreen> {
                                 Text(t.paymentMethod == PaymentMethod.cash ? l.collectCashTitle : t.paymentMethod == PaymentMethod.corporate ? l.companyPays : l.riderPaysDigital, style: AnbessaType.label.copyWith(color: t.paymentMethod == PaymentMethod.cash ? c.warning : c.success)),
                                 const SizedBox(height: 4),
                                 AnimatedMoney(t.fare.chargedMinor, locale: context.localeTag, style: AnbessaType.display.copyWith(color: c.text)),
-                                if (t.paymentMethod == PaymentMethod.cash) Text(l.collectCash(birr(t.fare.chargedMinor, locale: context.localeTag)), style: AnbessaType.body2.copyWith(color: c.text2)),
+                                if (t.paymentMethod == PaymentMethod.cash) Text(l.collectCash(birr(t.fare.payableMinor, locale: context.localeTag)), style: AnbessaType.body2.copyWith(color: c.text2)),
                               ],
                             ),
                           ),

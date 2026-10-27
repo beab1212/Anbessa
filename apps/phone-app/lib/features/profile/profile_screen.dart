@@ -48,9 +48,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            ListTile(leading: const Icon(Icons.photo_camera_outlined), title: Text(l.takePhotoOption), onTap: () => Navigator.pop(ctx, 'camera')),
-            ListTile(leading: const Icon(Icons.photo_library_outlined), title: Text(l.chooseFromGalleryOption), onTap: () => Navigator.pop(ctx, 'gallery')),
-            if (ref.read(currentSessionProvider)?.profile.image != null) ListTile(leading: Icon(Icons.delete_outline, color: context.colors.danger), title: Text(l.removePhoto), onTap: () => Navigator.pop(ctx, 'remove')),
+            ListTile(title: Text(l.takePhotoOption), onTap: () => Navigator.pop(ctx, 'camera')),
+            ListTile(title: Text(l.chooseFromGalleryOption), onTap: () => Navigator.pop(ctx, 'gallery')),
+            if (ref.read(currentSessionProvider)?.profile.image != null) ListTile(title: Text(l.removePhoto, style: TextStyle(color: context.colors.danger)), onTap: () => Navigator.pop(ctx, 'remove')),
           ],
         ),
       ),
@@ -96,29 +96,21 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         padding: const EdgeInsets.all(20),
         children: [
           Center(
-            child: Stack(
-              children: [
-                AvatarImage(src: s?.profile.image, name: s?.displayName ?? '', size: 112, ring: true),
-                Positioned(
-                  right: 0,
-                  bottom: 0,
-                  child: Material(
-                    color: c.primaryFill,
-                    shape: const CircleBorder(),
-                    child: InkWell(
-                      customBorder: const CircleBorder(),
-                      onTap: _photoBusy ? null : _changePhoto,
-                      child: Padding(padding: const EdgeInsets.all(9), child: _photoBusy ? SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: c.onAccent)) : Icon(Icons.photo_camera, size: 18, color: c.onAccent)),
-                    ),
-                  ),
-                ),
-              ],
+            child: GestureDetector(
+              onTap: _photoBusy ? null : _changePhoto,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  AvatarImage(src: s?.profile.image, name: s?.displayName ?? '', size: 112, ring: true),
+                  if (_photoBusy) SizedBox(width: 28, height: 28, child: CircularProgressIndicator(strokeWidth: 2.5, color: c.text)),
+                ],
+              ),
             ),
           ),
           const SizedBox(height: 8),
           Center(child: TextButton(onPressed: _photoBusy ? null : _changePhoto, child: Text(l.changePhoto))),
           const SizedBox(height: 16),
-          TextField(controller: _name, decoration: InputDecoration(labelText: l.nameLabel, prefixIcon: const Icon(Icons.person_outline)), textCapitalization: TextCapitalization.words, onChanged: (_) => setState(() {})),
+          TextField(controller: _name, decoration: InputDecoration(labelText: l.nameLabel), textCapitalization: TextCapitalization.words, onChanged: (_) => setState(() {})),
           const SizedBox(height: 12),
           SectionGroup(
             margin: EdgeInsets.zero,

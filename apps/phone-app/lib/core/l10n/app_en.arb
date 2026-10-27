@@ -653,7 +653,7 @@
   "entryLatePayment": "Late payment",
   "simulatedProvider": "simulated",
   "scheduledRides": "Scheduled rides",
-  "scheduledRidesLede": "Book a ride for later. Coming soon.",
+  "scheduledRidesLede": "Book a ride up to 7 days ahead. The price is fixed when you book.",
   "scheduleRide": "Schedule a ride",
   "sosTitle": "Emergency",
   "sosLede": "If you're in danger, call the police. Anbessa's safety team can also be alerted with your live location.",
@@ -1157,5 +1157,307 @@
   },
   "stopSharing": "Stop sharing",
   "sharingStopped": "The link no longer works.",
-  "sharingOn": "Sharing live"
+  "sharingOn": "Sharing live",
+  "mapModeTitle": "Map view",
+  "mapModeFlat": "Flat map",
+  "mapModeFlatLede": "Clear streets, north at the top.",
+  "mapMode3d": "3D",
+  "mapMode3dLede": "Tilted, with buildings. Best while driving.",
+  "mapMode3dPhonesOnly": "Available in the phone app.",
+  "mapModeSatellite": "Satellite",
+  "mapModeSatelliteLede": "Aerial photos. Good for finding a gate or a building.",
+  "mapModeSatelliteShort": "Sat",
+  "send": "Send",
+  "replyHint": "Write a reply",
+  "threadYou": "You",
+  "threadSupport": "Anbessa support",
+  "threadFleet": "Car owner",
+  "threadMessages": "Messages",
+  "supportTileLede": "Your requests, or ask us something new",
+  "supportYourRequests": "Your requests",
+  "supportUpdated": "updated {when}",
+  "@supportUpdated": {
+    "placeholders": {
+      "when": {
+        "type": "String"
+      }
+    }
+  },
+  "supportEmptyTitle": "No requests yet",
+  "supportEmptyBody": "If something went wrong on a trip or with a payment, tell us here and we'll answer in the app.",
+  "supportEmergencyNote": "In danger? Call 991. During a trip, the SOS button also alerts Anbessa's safety team.",
+  "ticketWhatAbout": "What is it about?",
+  "ticketCategorySafety": "Safety",
+  "ticketCategorySafetyHint": "Something made you feel unsafe",
+  "ticketCategoryPayment": "Payment",
+  "ticketCategoryPaymentHint": "A charge, a refund, your balance",
+  "ticketCategoryTrip": "A trip",
+  "ticketCategoryTripHint": "The route, the fare, the driver or the rider",
+  "ticketCategoryLostItem": "Lost item",
+  "ticketCategoryAccount": "Your account",
+  "ticketCategoryAccountHint": "Signing in, your profile, your documents",
+  "ticketCategoryFeedback": "Feedback",
+  "ticketCategoryFeedbackHint": "An idea or a compliment",
+  "ticketSafetyNotice": "If you're in danger now, call 991 first. Safety requests go to our safety team straight away.",
+  "ticketLostItemHint": "Left something in a car? Open the trip in Activity and tap “I left something”.",
+  "ticketTrip": "Trip",
+  "ticketTripLabel": "About a trip",
+  "ticketNoTrip": "Not about a trip",
+  "ticketPickTrip": "Which trip?",
+  "ticketMessageLabel": "Message",
+  "ticketMessageHint": "Tell us what happened. The more detail, the faster we can help.",
+  "ticketAnswer": "Our answer",
+  "ticketWaitingYouLede": "We asked you something. Reply below so we can carry on.",
+  "ticketReopen": "Reopen",
+  "ticketReopenHint": "What still needs sorting?",
+  "ticketReopenLede": "Not sorted? You can reopen this request for 7 days after our answer.",
+  "ticketClosedLede": "This request is closed. If you still need help, start a new one.",
+  "ticketStatusOpen": "Received",
+  "ticketStatusInProgress": "In progress",
+  "ticketStatusWaitingYou": "Waiting for you",
+  "ticketStatusResolved": "Answered",
+  "ticketStatusClosed": "Closed",
+  "lostItems": "Lost items",
+  "lostItemTitle": "Lost item",
+  "reportLostItem": "I left something",
+  "reportLostItemLede": "Tell your driver what you left in the car",
+  "receiptHelpTitle": "Help with this trip",
+  "receiptGetHelp": "Report a problem with this trip",
+  "lostReportLede": "We pass your message to the driver and show you their answer. You can report up to 7 days after the trip.",
+  "lostTheTrip": "The trip",
+  "lostTripWhen": "When",
+  "lostDescribeLabel": "What did you leave?",
+  "lostDescribeHint": "For example: a black backpack on the back seat",
+  "lostPrivacyNote": "Your driver sees this description and your messages, not your phone number.",
+  "lostSend": "Send to the driver",
+  "lostReportedOn": "Reported {when}",
+  "@lostReportedOn": {
+    "placeholders": {
+      "when": {
+        "type": "String"
+      }
+    }
+  },
+  "lostWhatYouLeft": "What you left",
+  "lostWhatRiderLeft": "What the rider left",
+  "lostStatusReported": "Reported",
+  "lostStatusFound": "Found",
+  "lostStatusNotFound": "Not found",
+  "lostStatusReturned": "Returned",
+  "lostStatusClosed": "Closed",
+  "lostLedeReportedRider": "We've told your driver. You'll see their answer here.",
+  "lostLedeReportedDriver": "A rider thinks they left this in your car. Please check and answer.",
+  "lostLedeFoundRider": "Your driver found it. Agree below on how to get it back, then confirm when you have it.",
+  "lostLedeFoundDriver": "Thanks for finding it. Agree with the rider below on how to hand it back.",
+  "lostLedeNotFoundRider": "Your driver couldn't find it. If it turns up, they can still mark it found.",
+  "lostLedeNotFoundDriver": "You said it isn't in the car. If it turns up, mark it found.",
+  "lostLedeReturned": "Back with its owner.",
+  "lostLedeClosed": "This report is closed.",
+  "lostConfirmReturned": "I got it back",
+  "lostNoteLabel": "Note for the rider (optional)",
+  "lostNoteHint": "Where and when they can pick it up",
+  "lostAnswerFound": "I found it",
+  "lostAnswerNotFound": "It's not in the car",
+  "driverLostItemsLede": "Riders' reports about things left in your car. Please answer each one.",
+  "driverLostItemsEmpty": "No lost items reported",
+  "driverLostItemsTileLede": "Things riders left in your car",
+  "sosHoldHint": "Hold for 2 seconds",
+  "sosHoldLede": "Hold the button for 2 seconds. We send your trip and your location to Anbessa's safety team.",
+  "sosNoTrip": "Alerting the safety team works during a trip. You can still call 991.",
+  "sosWindowClosed": "The safety alert works during a trip and for 30 minutes after it. You can still call 991 or contact support.",
+  "sosSending": "Sending your alert…",
+  "sosFailed": "We couldn't send the alert. If you're in danger, call 991 now.",
+  "sosSendAgain": "Send the alert again",
+  "sosStatusOpen": "Alert sent",
+  "sosStatusAcknowledged": "Safety team on it",
+  "sosStatusResolved": "Closed",
+  "sosOpenTitle": "Help is coming",
+  "sosOpenBody": "Anbessa's safety team has your trip and your location and will contact you. Stay somewhere safe and keep your phone with you.",
+  "sosAcknowledgedTitle": "The safety team has your alert",
+  "sosAcknowledgedBody": "Someone is handling it now. If you're in immediate danger, call 991.",
+  "sosResolvedTitle": "This alert is closed",
+  "sosResolvedBody": "The safety team closed this alert.",
+  "sosOutcomeFalseAlarm": "Closed as a false alarm. If you still need help, call 991 or send a new alert.",
+  "sosOutcomeAssisted": "The safety team helped and closed the alert.",
+  "sosOutcomeEscalated": "Passed to the emergency services.",
+  "sosSentAt": "Sent",
+  "sosSeenAt": "Seen by the team",
+  "sosDuplicate": "You'd already sent an alert for this trip. This is the same one.",
+  "sosApproximate": "We couldn't get your exact location, so we sent your trip's area. Turn on location if you can.",
+  "sosStatusStale": "Can't refresh the status right now. Your alert was sent.",
+  "sosCallContact": "Call {name}",
+  "@sosCallContact": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "errorUseLostItems": "Report lost items from the trip's receipt.",
+  "errorReopenWindowClosed": "It's more than 7 days since our answer, so this can't be reopened. Start a new request.",
+  "errorTicketResolved": "We've answered this request. Reopen it to reply.",
+  "errorTicketClosed": "This request is closed.",
+  "errorAlreadyReported": "There's already an open report for this trip.",
+  "errorReportWindowClosed": "Lost items can be reported up to 7 days after a completed trip.",
+  "errorLostItemClosed": "This report is closed.",
+  "errorSosUnavailable": "The safety alert only works during a trip and for 30 minutes after. Call 991 if you're in danger.",
+  "errorSosResolved": "This alert is already closed.",
+  "errorRequestInProgress": "Still sending your last request. Try again in a moment.",
+  "promoAdd": "Add",
+  "promoRemove": "Remove code",
+  "promoCodeHint": "Enter your code",
+  "promoApplied": "{code} applied",
+  "@promoApplied": {
+    "placeholders": {
+      "code": {
+        "type": "String"
+      }
+    }
+  },
+  "promoSaves": "You save {amount}",
+  "@promoSaves": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "promoNotForThisRide": "{code} doesn't discount this vehicle type",
+  "@promoNotForThisRide": {
+    "placeholders": {
+      "code": {
+        "type": "String"
+      }
+    }
+  },
+  "promoUnknownCode": "This code doesn't exist.",
+  "promoNotActive": "This code isn't active.",
+  "promoNotStarted": "This code isn't valid yet.",
+  "promoExpired": "This code has expired.",
+  "promoExhausted": "This code has been used up.",
+  "promoNotInCity": "This code isn't valid in this city.",
+  "promoVehicleNotEligible": "This code isn't valid for these vehicle types.",
+  "promoLimitReached": "You've already used this code.",
+  "promoInvalidFormat": "Codes are 3 to 32 letters, digits, _ or -.",
+  "pickupTime": "Pickup time",
+  "scheduleFor": "Schedule {type}",
+  "@scheduleFor": {
+    "placeholders": {
+      "type": {
+        "type": "String"
+      }
+    }
+  },
+  "scheduleWhen": "Pick a time",
+  "scheduleWindowLede": "Book from {minutes} minutes to {days} days ahead.",
+  "@scheduleWindowLede": {
+    "placeholders": {
+      "minutes": {
+        "type": "int"
+      },
+      "days": {
+        "type": "int"
+      }
+    }
+  },
+  "scheduleRepriceNote": "We check the price again shortly before pickup. You pay the lower one.",
+  "scheduledBooked": "Ride booked for {when}",
+  "@scheduledBooked": {
+    "placeholders": {
+      "when": {
+        "type": "String"
+      }
+    }
+  },
+  "errorTooSoon": "Choose a time at least 30 minutes from now, or request a ride now.",
+  "errorTooFarAhead": "You can book up to 7 days ahead.",
+  "errorTooManyScheduled": "You already have the most upcoming rides allowed. Cancel one to book another.",
+  "errorScheduleConflict": "You already have a ride booked within an hour of that time.",
+  "errorPolicyViolation": "Your company's ride policy doesn't allow this ride.",
+  "payPersonally": "Pay personally instead",
+  "purposeLabel": "Trip purpose or cost centre",
+  "purposeRequired": "Your company asks for this",
+  "purposeOptional": "Optional",
+  "upcomingRides": "Upcoming",
+  "noScheduledRides": "No rides booked",
+  "cancelBooking": "Cancel booking",
+  "cancelBookingLede": "Cancel this ride? It's free until we start looking for a driver.",
+  "keepBooking": "Keep it",
+  "bookingCancelled": "Booking cancelled",
+  "scheduledStatusScheduled": "Booked",
+  "scheduledStatusDispatching": "Finding a driver",
+  "scheduledStatusDispatched": "Driver search started",
+  "scheduledStatusCancelled": "Cancelled",
+  "scheduledStatusFailed": "Couldn't book",
+  "searchStartsAt": "Driver search starts at {time}",
+  "@searchStartsAt": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "scheduledDispatched": "Your scheduled ride is looking for a driver.",
+  "driverChanged": "Your driver changed. The new driver is on the way.",
+  "tripReassigned": "This trip was moved to another driver.",
+  "marketingTitle": "Offers and news from Anbessa",
+  "marketingLede": "Trip, payment and safety messages always come.",
+  "marketingPush": "By notification",
+  "marketingSms": "By SMS",
+  "notifOtherLocal": "The settings above this note are kept with your account. The others apply on this phone.",
+  "incentivesTitle": "Incentives",
+  "incentiveProgress": "{trips} of {target} trips",
+  "@incentiveProgress": {
+    "placeholders": {
+      "trips": {
+        "type": "int"
+      },
+      "target": {
+        "type": "int"
+      }
+    }
+  },
+  "incentiveReward": "Earn {amount}",
+  "@incentiveReward": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "incentiveEnds": "Ends {date}",
+  "@incentiveEnds": {
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "incentiveStarts": "Starts {date}",
+  "@incentiveStarts": {
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "incentiveCounting": "Ended. Counting your trips.",
+  "incentiveEarned": "Earned {amount}",
+  "@incentiveEarned": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "incentiveMissed": "Ended. Target not reached.",
+  "incentiveVehicle": "{type} trips only",
+  "@incentiveVehicle": {
+    "placeholders": {
+      "type": {
+        "type": "String"
+      }
+    }
+  },
+  "incentivesLede": "Completed trips count once they are settled. Rewards go to your balance when the program ends."
 }

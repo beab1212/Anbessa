@@ -57,7 +57,7 @@ class FixedEarnings extends EarningsSummaryController {
 
 const driverRoles = [{'r': 'RIDER'}, {'r': 'DRIVER'}];
 
-Future<void> pumpDriver(WidgetTester tester, Widget home, {ShiftState shift = const ShiftState(), Trip? trip, Brightness brightness = Brightness.light, DriverHome? driverHome, EarningsSummary? summary, List<Override> overrides = const []}) async {
+Future<void> pumpDriver(WidgetTester tester, Widget home, {ShiftState shift = const ShiftState(), Trip? trip, Brightness brightness = Brightness.light, DriverHome? driverHome, EarningsSummary? summary, List<Incentive> incentives = const [], List<Override> overrides = const []}) async {
   SharedPreferences.setMockInitialValues({});
   final prefs = await SharedPreferences.getInstance();
   tester.view.physicalSize = const Size(360 * 3, 740 * 3);
@@ -82,6 +82,7 @@ Future<void> pumpDriver(WidgetTester tester, Widget home, {ShiftState shift = co
       shiftProvider.overrideWith(() => FixedShift(shift)),
       balanceProvider.overrideWith(() => FixedBalance(balance)),
       earningsSummaryProvider.overrideWith2((period) => FixedEarnings(period, summary0)),
+      incentivesProvider.overrideWith((ref) async => incentives),
       activeTripProvider.overrideWith(() => FixedActiveTrip(trip)),
       locationSourceProvider.overrideWithValue(FakeLocationSource(lat: 9.0107, lng: 38.7613)),
       tripPartiesProvider.overrideWith((ref, id) async => const TripParties(riderName: 'Sara Getachew')),
@@ -151,6 +152,20 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
     await tester.pump(const Duration(milliseconds: 400));
     expect(find.text("Rider's PIN"), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('completed cash trip with a promo: collect what the rider pays, not the full fare', (tester) async {
+    final j = Map<String, dynamic>.from(fixture('trip.json'));
+    j['status'] = 'completed';
+    j['paymentMethod'] = 'CASH';
+    j['times'] = {...asJson(j['times']), 'completedAt': DateTime.now().toUtc().toIso8601String()};
+    j['fare'] = {...asJson(j['fare']), 'finalMinor': 14000, 'promoDiscountMinor': 3000, 'promoCode': 'WELCOME30', 'payableMinor': 11000};
+    final t = Trip.fromJson(j);
+    await pumpDriver(tester, DriverTripScreen(tripId: t.id), trip: t);
+    expect(find.textContaining(birr(11000)), findsWidgets);
+    expect(find.textContaining(birr(14000)).evaluate().any((e) => ((e.widget as Text).data ?? '').contains('Collect')), isFalse);
+    expect(find.textContaining(birr(11000)).evaluate().any((e) => ((e.widget as Text).data ?? '').contains('Collect')), isTrue);
     expect(tester.takeException(), isNull);
   });
 }

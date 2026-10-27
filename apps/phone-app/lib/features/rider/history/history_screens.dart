@@ -8,9 +8,15 @@ import 'package:ride_app_core/ride_app_core.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../../core/l10n/l10n.dart';
 import '../../../core/network/providers.dart';
+import '../../../core/router/routes.dart';
 import '../../../core/session/session_controller.dart';
+import '../../config/client_config_provider.dart';
 import '../../maps/anbessa_map.dart';
+import '../../support/support_repository.dart';
+import '../../support/support_widgets.dart';
 import '../payments/pay_screen.dart';
+import '../scheduled/scheduled_rides_controller.dart';
+import '../scheduled/scheduled_rides_screen.dart';
 import '../trip/active_trip_controller.dart';
 
 class TripHistory extends AsyncNotifier<({List<Trip> trips, String? next})> {
@@ -75,6 +81,8 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     final session = ref.watch(currentSessionProvider);
     final both = session?.canDrive ?? false;
     final h = ref.watch(tripHistoryProvider(_as));
+    // the rider's upcoming scheduled rides sit above the past trips
+    final rider = _as == 'rider';
     final now = DateTime.now();
     final since = switch (_period) {
       HistoryPeriod.week => now.subtract(const Duration(days: 7)),
@@ -105,22 +113,26 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
           ),
           Expanded(
             child: RefreshIndicator(
-              onRefresh: () => ref.read(tripHistoryProvider(_as).notifier).refresh(),
+              onRefresh: () async {
+                if (rider) ref.read(scheduledRidesProvider.notifier).refresh();
+                await ref.read(tripHistoryProvider(_as).notifier).refresh();
+              },
               child: h.isLoading && trips.isEmpty
                   ? const Padding(padding: EdgeInsets.symmetric(horizontal: 16), child: SkeletonList(rows: 6))
                   : h.hasError && trips.isEmpty
                       ? ListView(children: [Padding(padding: const EdgeInsets.all(16), child: Problem(h.error, describe: (e) => describeError(l, e), onRetry: () => ref.read(tripHistoryProvider(_as).notifier).refresh(), retryLabel: l.retry))])
                       : trips.isEmpty
-                          ? ListView(children: [const SizedBox(height: 60), IllustratedEmpty(illustration: AnbessaIllustration.noTrips, title: l.noTrips, body: l.noTripsLede)])
+                          ? ListView(padding: const EdgeInsets.symmetric(horizontal: 16), children: [if (rider) const UpcomingRidesSection(), const SizedBox(height: 60), IllustratedEmpty(illustration: AnbessaIllustration.noTrips, title: l.noTrips, body: l.noTripsLede)])
                           : ListView(
                               controller: _scroll,
                               padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
                               children: [
+                                if (rider) const UpcomingRidesSection(),
                                 for (final e in groups.entries) ...[
                                   Padding(padding: const EdgeInsets.fromLTRB(4, 14, 4, 6), child: Text(e.key, style: AnbessaType.label.copyWith(color: c.muted, letterSpacing: 0.4))),
                                   SectionGroup(
                                     margin: EdgeInsets.zero,
-                                    children: [for (final t in e.value) _TripRow(trip: t, onTap: () => context.push(widget.receiptRoute(t.id)))],
+                                    children: [for (final t in e.value) _TripRow(trip: t, driverSide: _as == 'driver', onTap: () => context.push(widget.receiptRoute(t.id)))],
                                   ),
                                 ],
                                 if (h.value?.next != null) const Padding(padding: EdgeInsets.all(16), child: Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)))),
@@ -143,30 +155,30 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
 }
 
 class _TripRow extends StatelessWidget {
-  const _TripRow({required this.trip, required this.onTap});
+  const _TripRow({required this.trip, required this.onTap, this.driverSide = false});
   final Trip trip;
+  /// drivers see the fare their earning is based on; riders what they paid
+  final bool driverSide;
   final VoidCallback onTap;
   @override
   Widget build(BuildContext context) {
     final l = context.l10n;
     final c = context.colors;
     final cancelled = trip.status == TripStatus.cancelled;
-    final amount = cancelled ? (trip.cancellation?.feeMinor ?? 0) : trip.fare.chargedMinor;
+    final amount = cancelled ? (trip.cancellation?.feeMinor ?? 0) : (driverSide ? trip.fare.chargedMinor : trip.fare.payableMinor);
     return InkWell(
       onTap: onTap,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         child: Row(
           children: [
-            Container(width: 40, height: 40, decoration: BoxDecoration(color: cancelled ? c.dangerSoft : c.surface2, borderRadius: BorderRadius.circular(AnbessaRadius.sm)), child: Icon(cancelled ? Icons.close_rounded : vehicleIcon(trip.vehicleType), color: cancelled ? c.danger : c.accentStrong, size: 22)),
-            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(trip.dropoff.address ?? trip.vehicleType, maxLines: 1, overflow: TextOverflow.ellipsis, style: AnbessaType.body.copyWith(fontWeight: FontWeight.w500, color: c.text)),
                   const SizedBox(height: 2),
-                  Row(children: [Text(clockOf(trip.times.requestedAt), style: AnbessaType.caption.copyWith(color: c.muted, fontFeatures: AnbessaType.tabular)), const SizedBox(width: 6), StatusPill(tripStatusLabel(l, trip.status), tone: cancelled ? Tone.red : trip.status == TripStatus.completed ? Tone.green : Tone.blue)]),
+                  Row(children: [Text(clockOf(trip.times.requestedAt), style: AnbessaType.caption.copyWith(color: c.muted, fontFeatures: AnbessaType.tabular)), const SizedBox(width: 6), Flexible(child: StatusPill(tripStatusLabel(l, trip.status), tone: cancelled ? Tone.red : trip.status == TripStatus.completed ? Tone.green : Tone.blue))]),
                 ],
               ),
             ),
@@ -192,6 +204,9 @@ class ReceiptScreen extends ConsumerWidget {
     final money = asDriver ? ref.watch(tripPaymentsProvider(tripId)).value : null;
     final settlement = money?.settlements.where((s) => s.purpose == 'TRIP_FARE').firstOrNull;
     final parties = t?.driver == null ? null : ref.watch(tripPartiesProvider(tripId)).value;
+    final supportOn = ref.watch(featureProvider(Feature.support));
+    // the rider's report about this trip, if there is one (support-service keeps one live per trip)
+    final report = supportOn && !asDriver ? ref.watch(myLostItemsProvider).value?.where((i) => i.tripId == tripId && i.isRider).firstOrNull : null;
     return Scaffold(
       appBar: AppBar(
         title: Text(l.receiptTitle),
@@ -200,7 +215,7 @@ class ReceiptScreen extends ConsumerWidget {
             IconButton(
               tooltip: l.shareReceipt,
               icon: const Icon(Icons.share_outlined),
-              onPressed: () => SharePlus.instance.share(ShareParams(text: l.receiptShareText(dayAndTime(t.times.requestedAt, locale: context.localeTag), t.pickup.address ?? '—', t.dropoff.address ?? '—', birr(t.fare.chargedMinor, locale: context.localeTag), shortId(t.id)))),
+              onPressed: () => SharePlus.instance.share(ShareParams(text: l.receiptShareText(dayAndTime(t.times.requestedAt, locale: context.localeTag), t.pickup.address ?? '—', t.dropoff.address ?? '—', birr(asDriver ? t.fare.chargedMinor : t.fare.payableMinor, locale: context.localeTag), shortId(t.id)))),
             ),
         ],
       ),
@@ -225,7 +240,7 @@ class ReceiptScreen extends ConsumerWidget {
                   ),
                 ),
                 const SizedBox(height: 12),
-                Row(children: [StatusPill(tripStatusLabel(l, t.status), tone: t.status == TripStatus.completed ? Tone.green : t.status == TripStatus.cancelled ? Tone.red : Tone.blue), const Spacer(), Text(dayAndTime(t.times.requestedAt, locale: context.localeTag), style: AnbessaType.caption.copyWith(color: c.muted))]),
+                Row(children: [StatusPill(tripStatusLabel(l, t.status), tone: t.status == TripStatus.completed ? Tone.green : t.status == TripStatus.cancelled ? Tone.red : Tone.blue), const SizedBox(width: 8), Expanded(child: Text(dayAndTime(t.times.requestedAt, locale: context.localeTag), textAlign: TextAlign.end, style: AnbessaType.caption.copyWith(color: c.muted)))]),
                 const SizedBox(height: 12),
                 if (parties != null && (parties.driverName != null || parties.vehicle != null))
                   Padding(
@@ -263,6 +278,26 @@ class ReceiptScreen extends ConsumerWidget {
                         KeyValue(l.yourBalanceChange, MoneyText(settlement.earningsMinor, locale: context.localeTag, signed: true, style: TextStyle(fontWeight: FontWeight.w700, color: settlement.earningsMinor < 0 ? c.danger : c.success))),
                       ],
                     ),
+                  ),
+                ],
+                if (supportOn && t.status != TripStatus.unknown) ...[
+                  const SizedBox(height: 12),
+                  SectionGroup(
+                    title: l.receiptHelpTitle,
+                    margin: EdgeInsets.zero,
+                    children: [
+                      if (report != null)
+                        SettingsTile(
+                          icon: Icons.backpack_outlined,
+                          title: l.lostItemTitle,
+                          subtitle: report.description,
+                          trailing: StatusPill(lostItemStatusLabel(l, report.status), tone: lostItemStatusTone(report.status)),
+                          onTap: () => context.push(Routes.lostItem(report.id)),
+                        )
+                      else if (!asDriver && lostItemReportable(t, DateTime.now()))
+                        SettingsTile(icon: Icons.backpack_outlined, title: l.reportLostItem, subtitle: l.reportLostItemLede, onTap: () => context.push(Routes.lostItemReport(t.id))),
+                      SettingsTile(icon: Icons.help_outline, title: l.receiptGetHelp, onTap: () => context.push(Routes.supportNewAbout(t.id))),
+                    ],
                   ),
                 ],
               ],

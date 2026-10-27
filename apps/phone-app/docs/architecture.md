@@ -31,7 +31,8 @@ apps/phone-app/
       rider/                      home, booking (route editor, quote), trip, payments, rating, history, places
       driver/                     onboarding, shift (home), offers, trip, earnings, vehicles
       profile/                    account hub, profile, settings screens and their controllers
-      flagged/flagged_modules.dart  scheduled rides, SOS, support, promos, account deletion
+      support/                    SOS, help (tickets), lost items: repositories over SupportApi, screens
+      flagged/flagged_modules.dart  account deletion (and the kTips/kMaskedCalls/kChat switches)
   test/                           testing.md
   env/                            dev-host, dev-emulator, dev-kong, stack, staging (.json)
   android/ ios/ linux/            platforms-and-release.md
@@ -142,6 +143,10 @@ flowchart TB
 | `balanceProvider` | `features/driver/earnings/earnings_controller.dart` | `AsyncNotifierProvider<…, Balance?>` | the driver's balance (null for non-drivers) |
 | `bookingProvider` | `features/rider/booking/booking_controller.dart` | `NotifierProvider<BookingController, Booking>` | the booking in progress |
 | `routerProvider` | `core/router/app_router.dart` | `Provider<GoRouter>` | the router |
+| `safetyRepositoryProvider`, `supportRepositoryProvider` | `features/support/support_repository.dart` | `Provider` | `ApiSafetyRepository` / `ApiSupportRepository` over `apisProvider.support`; tests override them |
+| `myTicketsProvider`, `myLostItemsProvider` | same | `FutureProvider` (no automatic retry) | the first 50 tickets / lost-item reports |
+| `ticketThreadProvider(id)`, `lostItemThreadProvider(id)` | same | `AsyncNotifierProvider.family` | one thread, with reply, reopen, confirm-returned and found / not-found actions |
+| `sosAlertsProvider` | `features/support/sos_screen.dart` | `valueProvider<Map<String, SosAlert>>` | the alert sent per trip during this app run |
 
 Because `RouterNotifier` listens to `driverHomeProvider`, that provider is built for **every** signed-in person, so `GET /api/fleet/drivers/me` is called for riders too (`core/router/app_router.dart`, `RouterNotifier`).
 
@@ -304,13 +309,14 @@ The comment in `transitions.dart` says the slide-up is also for pay and rating; 
 | `/account/navigation` | `NavigationPrefsScreen` | default | |
 | `/driver/vehicles` | `VehiclesScreen` | default | registered with the shared routes |
 | `/account/delete` | `DeleteAccountScreen` | default | |
-| `/scheduled` | `ScheduledRidesScreen` | default | |
-| `/scheduled/new` | `ScheduleRideScreen` | default | |
-| `/sos` | `SosScreen(tripId: ?trip)` | default | |
-| `/support` | `SupportScreen` | default | |
-| `/support/new` | `NewTicketScreen` | default | |
-| `/promos` | `PromosScreen` | default | |
-| `/promos/redeem` | `RedeemCodeScreen` | default | |
+| `/scheduled` | `ScheduledRidesScreen` (`rider/scheduled/`) | default | |
+| `/sos` | `SosScreen(tripId: ?trip)` (`features/support/sos_screen.dart`) | default | |
+| `/support` | `SupportScreen` (`features/support/support_screens.dart`) | default | "Help" |
+| `/support/new` | `NewTicketScreen(tripId: ?trip)` | default | |
+| `/support/tickets/:id` | `TicketScreen` | default | |
+| `/support/lost-items` | `DriverLostItemsScreen` (`features/support/lost_item_screens.dart`) | default | |
+| `/support/lost-items/report` | `ReportLostItemScreen(tripId: ?trip)` | default | registered before `:id` |
+| `/support/lost-items/:id` | `LostItemScreen` | default | |
 
 Every route is registered whatever the feature flags say; the flags only hide the entry points.
 
@@ -320,7 +326,7 @@ Every route is registered whatever the feature flags say; the flags only hide th
 2. **Forced update.** If `updateRequiredProvider` is true: go to `/update-required`. If it is false and the path is `/update-required`: go to `/splash`.
 3. **Signed out** (session value is null). If the intro was never seen: `/intro`. Otherwise `/welcome`, except that `/welcome`, `/sign-in` and `/sign-in/verify` are allowed. A signed-in person on `/intro` goes to `/splash`.
 4. **Mode.** If `effectiveModeProvider` is null: `/mode`. From `/splash`, `/mode` or a sign-in path: the mode's home (`/rider/home` or `/driver/home`).
-   - Paths starting with `/account`, `/sos`, `/support`, `/scheduled`, `/promos` are allowed in either mode and **skip the remaining guards** (so the active-trip guard does not apply to them).
+   - Paths starting with `/account`, `/sos`, `/support`, `/scheduled` are allowed in either mode and **skip the remaining guards** (so the active-trip guard does not apply to them).
    - Paths starting with `/rider/book` are allowed in driver mode and skip the remaining guards (the route editor picks saved places from the account).
    - A rider on a `/driver…` path goes to `/rider/home`; a driver on a `/rider…` path goes to `/driver/home`.
 5. **Driver not approved.** In driver mode, once `driverHomeProvider` has a value: approved = `session.canDrive && (driver?.isActive ?? true)`. If not approved, every path goes to `/driver/onboarding` except paths under `/driver/onboarding`, `/driver/account`, `/driver/vehicles` and paths under `/driver/earnings`.
@@ -357,15 +363,15 @@ The comment in `routes.dart` says `anbessa://` and `https://app.anbessa.et` link
 | `phoneBooking` | on | nothing in `lib/` |
 | `corporateBooking` | on | `QuoteScreen`: offers "Company account" when on **and** the JWT has an org id |
 | `tripPin` | off | `RiderTripScreen` (shows the PIN), `DriverTripScreen` (asks for it before start) |
-| `scheduledRides` | off | rider home chip, account tile |
-| `sos` | off | SOS button on both trip screens |
-| `support` | off | account section |
-| `promos` | off | rider home chip, account tile, promo row on the quote |
+| `scheduledRides` | off | rider home chip, account tile, "Pickup time" on the quote, "Upcoming" in Activity, `scheduledRidesProvider` (no request while off) |
+| `sos` | off | SOS button on both trip screens (while `sosAvailable`: an active trip with a driver, or ≤ 30 min after drop-off) |
+| `support` | off | Account → Help, driver Account → Lost items, the receipt's "Help with this trip" |
+| `promos` | off | promo-code row on the quote |
 | `accountDeletion` | off | account tile |
 
 With the fallback config (no response ever received) every flag is off, including the two that default to on. Compile-time switches in `features/flagged/flagged_modules.dart`: `kTipsEnabled` (rating screen tip row shows "Coming soon" while false), `kMaskedCallsEnabled` (the call button on the driver trip card is hidden while false), `kChatEnabled` (not read anywhere). All three are `false`.
 
-The flagged modules (`flagged_modules.dart`) each have a repository interface whose default implementation throws `AppError(501, not_available)` (lists return empty). A real implementation would override `scheduledRidesRepositoryProvider`, `safetyRepositoryProvider`, `supportRepositoryProvider`, `promosRepositoryProvider` or `accountRepositoryProvider`.
+The flagged module left in `flagged_modules.dart` (account deletion) has a repository interface whose default implementation throws `AppError(501, not_available)`; a real implementation would override `accountRepositoryProvider`. Scheduled rides (`features/rider/scheduled/`) and promo codes (the quote screen and `BookingController`) call trip-service and pricing-service directly through `apisProvider`. SOS and support have their backend (support-service): `safetyRepositoryProvider` and `supportRepositoryProvider` in `features/support/support_repository.dart` default to the real `SupportApi` implementations; the flags only hide the entry points.
 
 ### Forced update
 
@@ -451,47 +457,66 @@ Starts at Meskel Square (9.0107, 38.7613), accuracy 5 m, permission always grant
 
 `features/maps/`.
 
-### AnbessaMap
+### Two engines, one widget
 
-A `ConsumerStatefulWidget` over flutter_map and `flutter_map_animations`.
+`AnbessaMap` (`anbessa_map.dart`) is what screens use. It picks an engine with `vectorMapsProvider`:
+
+| Engine | File | Where | Draws |
+|---|---|---|---|
+| Vector: MapLibre (`maplibre` 0.3.6; 0.3.7 needs Flutter 3.47) | `vector_map.dart` | Android, iOS | vector tiles; flat, 3D (tilted, buildings extruded) and satellite |
+| Raster: flutter_map + `flutter_map_animations` | `raster_map.dart` | Linux desktop, tests (MapLibre has no desktop or test implementation) | raster tiles; flat and satellite (3D shows flat) |
+
+Both draw the same pins: `pinsFor()` builds one list of `MapPin`s (overlays, nearby cars, pickup, drop-off, the person, the car, callouts) and each engine places them (`MarkerLayer` / MapLibre `WidgetLayer`). Pins are Flutter widgets, so they look the same on both. Route lines share `routeStroke()`.
+
+### Map modes (`map_mode.dart`, `map_styles.dart`)
+
+| Mode | Vector engine | Raster engine |
+|---|---|---|
+| Flat (2D) | OpenFreeMap `positron` (light) / `dark` (dark theme): quiet styles so routes and cars stand out | `TILE_URL` or OpenStreetMap; dark theme darkens them (or `TILE_URL_DARK`) |
+| 3D | the same style, camera pitch 55° (60° while navigating), OpenMapTiles buildings extruded under the route (`anbessa-buildings-3d`, theme-coloured); tilt by gesture | not available: flat |
+| Satellite | an inline raster style over Esri World Imagery (`SATELLITE_TILE_URL` overrides) | the same imagery as a tile layer |
+
+The chosen mode is stored in preferences (`map_mode`) and applies to every map. `effectiveMapModeProvider` turns 3D into flat where the vector engine doesn't run. The mode switch is the first map control (its label is the mode: "2D", "3D", "Sat"); it opens a sheet with the three choices. Defaults need no API key; production points `MAP_STYLE_URL` / `MAP_STYLE_URL_DARK` / `SATELLITE_TILE_URL` at its own servers (Esri imagery's terms should be checked before production use).
+
+### AnbessaMap
 
 | Parameter | Meaning |
 |---|---|
 | `fit` | points to keep in view (pickup, drop-off, car…); refitted when they change or the insets change |
 | `center`, `zoom = 13` | the start when there is nothing to fit or follow; default centre is the current city's bbox centre |
-| `pickup`, `dropoff` | amber pin, dark ("ink") pin |
+| `pickup`, `dropoff` | pickup: an ink ring pin; drop-off: a filled square pin |
 | `driverPose` | the animated car (`AnimatedPose` from a `MarkerAnimator`); `driver` is an older static form |
-| `mePose` | the person's dot with heading cone and accuracy circle; `me` is the older point form |
+| `mePose` | the person's dot with heading cone (the raster engine also draws the accuracy circle); `me` is the older point form |
 | `routes` | `RouteLine`s; `line` is an older straight dotted line |
 | `cars` | anonymous nearby cars (`CarPose`) |
 | `callouts` | labels above points (`MapCallout`: ETA over the car, place names over pins) |
-| `topInset`, `bottomInset` | pixels covered by banners and the sheet; fits and follows keep the subject in the free area, and the controls and attribution sit above `bottomInset` |
+| `overlays` | any widget at a point (`MapOverlay`), e.g. the search pulse at the pickup |
+| `topInset`, `bottomInset` | pixels covered by banners and the sheet; fits and follows keep the subject in the free area, and the controls and credit sit above `bottomInset` |
 | `follow`, `followZoom = 16` | `FollowMode` |
-| `showControls`, `interactive`, `padding`, `children` | |
-| `onUserGesture`, `onTap`, `onMove` | `onMove` gets the camera centre 250 ms after a move or fling ends (drag-to-pick) |
-| `controller`, `mapController` | external controllers |
+| `showControls`, `showModeSwitch`, `interactive`, `padding` | |
+| `onUserGesture` | every pan, pinch or turn by the person (screens drop follow mode on it; the route editor lifts its pin) |
+| `onRecenter` | the recenter control was pressed (screens follow again); with it the control always shows |
+| `onTap`, `onMove` | `onMove` gets the camera centre after a gesture ends (drag-to-pick) |
 
-Behaviour:
+Behaviour (both engines):
 
-- Zoom 9–19. Rotation by gesture is allowed only in `driverBearing` mode.
-- `FollowMode`: `none`, `me` (follow `mePose`), `driver` (follow `driverPose`, north up), `driverBearing` (follow `driverPose`, map turned so the car's heading points up, car placed 18 % of the free height below centre). Following moves the camera on every rebuild without animation, so the camera does not lag the car.
-- A drag, pinch, double tap or scroll-wheel event while following breaks the follow and calls `onUserGesture` once. The recenter button (my_location while following, center_focus_strong when fitting) restores it.
-- A compass button appears when the map is rotated more than 0.5° outside `driverBearing`; it animates back to north.
-- Every fit is animated (`AnbessaMotion.camera`, 500 ms) unless reduced motion is on. `fitWithInsets` (`fit.dart`) adds 48 px above, 32 px below and the side padding; a single point is shown at zoom 15.
-- Tiles come from `tileStyleProvider` (`map_tiles.dart`), which follows `isDarkProvider`: `TILE_URL` (or OpenStreetMap when empty) for light; `TILE_URL_DARK` for dark, or, when it's empty, the light tiles drawn through flutter_map's `darkModeTilesContainerBuilder` (one colour filter over all tiles). CARTO's public dark tiles were dropped: they now answer "API key required". Retina tiles when the URL contains `{r}` and the pixel ratio is above 1.5. The attribution is drawn by the app, one line, unscaled, 9 px.
-- A tile load error sets `mapTilesDownProvider` to true; nothing reads that provider.
-- Markers counter-rotate against the map rotation so headings stay true. The car is amber on a trip, green off a trip, faint when stale.
+- `FollowMode`: `none`, `me`, `driver` (north up), `driverBearing` (map turned so the car's heading points up, the car in the lower part of the free area). The raster engine moves the camera on every rebuild; the vector engine at most ~12 times a second (each move crosses to native code).
+- A gesture while following breaks the follow (and calls `onUserGesture`); recenter restores it.
+- A north needle shows when the map is turned outside `driverBearing`; tapping it turns north up.
+- Fits are animated (`AnbessaMotion.camera`) unless reduced motion is on; 48 px above, 32 px below and the side padding; a single point is shown at zoom 15; the vector engine never fits closer than zoom 17.
+- The credit line is drawn by the app (one line, 9 px). A raster tile error sets `mapTilesDownProvider`.
+- Pins add the map's rotation so headings stay true. The car is amber on a trip, green off a trip, faint when stale.
 
 ### Route lines (`route_layer.dart`)
 
 | Kind | Drawing |
 |---|---|
-| `primary` | 9 px casing (white, or #0B1220 in dark) under a 5 px accent line |
+| `primary` | 9 px casing under a 5 px line: ink on the light map; amber on the dark map and over imagery (black disappears there) |
 | `traversed` | 5 px faint line (the part already driven) |
-| `secondary` | 4 px dashed info-blue line (the leg that is not the current one) |
+| `secondary` | 4 px dashed line (the leg that is not the current one) |
 | `straight` | 3 px dotted line (no geometry) |
 
-`RouteLine.fromPolyline6(encoded)` decodes the services' polylines; null or empty gives an empty line, which is not drawn.
+`RouteLine.fromPolyline6(encoded)` decodes the services' polylines; null or empty gives an empty line, which is not drawn. The vector engine caches its line layers (MapLibre compares layers by identity) and rebuilds them only when the routes or the look change.
 
 ### MarkerAnimator (`marker_animator.dart`)
 
@@ -544,7 +569,7 @@ Both settings default to on (prefs `haptics`, `notif_vibrate_offer`).
 ## Localisation
 
 - `l10n.yaml`: ARB dir `lib/core/l10n`, template `app_en.arb`, output class `AppLocalizations` in `lib/core/l10n/generated/`, `nullable-getter: false`.
-- `app_en.arb` and `app_am.arb` each define 610 messages with the same keys.
+- `app_en.arb` and `app_am.arb` each define 734 messages with the same keys.
 - `lib/core/l10n/generated/` is git-ignored (`apps/phone-app/.gitignore`). `flutter run/build/test` regenerate it; `dart run melos run gen` (root `pubspec.yaml`, `melos exec --file-exists=l10n.yaml -- flutter gen-l10n`) does it for `flutter analyze`.
 - `localeProvider` (`features/profile/account_screens.dart`): null = follow the system (Flutter's default resolution against `en`, `am`), or a chosen `Locale`, persisted as `locale`. Set from Account → Language and from the pills on the Welcome screen.
 - `lib/core/l10n/l10n.dart`: `context.l10n`, `context.localeTag`; `describeError(l, error)` maps every known `ErrorCodes` value to a message (validation errors join the field messages; unknown codes use the backend message); label helpers for payment methods, trip, driver and vehicle statuses, document kinds and hints, offline reasons, statement entry kinds, cancel reasons, rating tags, manoeuvres, and payment providers (`telebirr`, `CBE Birr`, `Chapa`, `Bank`).

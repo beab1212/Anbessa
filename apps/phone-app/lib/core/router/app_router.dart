@@ -24,12 +24,16 @@ import '../../features/profile/saved_places_screen.dart';
 import '../../features/rider/booking/quote_screen.dart';
 import '../../features/rider/booking/route_editor_screen.dart';
 import '../../features/rider/history/history_screens.dart';
+import '../../features/rider/scheduled/scheduled_rides_screen.dart';
 import '../../features/rider/home/rider_home_screen.dart';
 import '../../features/rider/payments/pay_screen.dart';
 import '../../features/rider/rating/rating_screen.dart';
 import '../../features/rider/trip/active_trip_controller.dart';
 import '../../features/rider/trip/rider_trip_screen.dart';
 import '../../features/shell/shells.dart';
+import '../../features/support/lost_item_screens.dart';
+import '../../features/support/sos_screen.dart';
+import '../../features/support/support_screens.dart';
 import '../session/session_controller.dart';
 import 'routes.dart';
 import 'transitions.dart';
@@ -146,16 +150,23 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: Routes.navigationPrefs, builder: (_, _) => const NavigationPrefsScreen()),
       GoRoute(path: Routes.driverVehicles, builder: (_, _) => const VehiclesScreen()),
       GoRoute(path: Routes.deleteAccount, builder: (_, _) => const DeleteAccountScreen()),
-      GoRoute(path: Routes.scheduled, builder: (_, _) => const ScheduledRidesScreen(), routes: [GoRoute(path: 'new', builder: (_, _) => const ScheduleRideScreen())]),
+      GoRoute(path: Routes.scheduled, builder: (_, _) => const ScheduledRidesScreen()),
       GoRoute(path: Routes.sos, builder: (_, s) => SosScreen(tripId: s.uri.queryParameters['trip'])),
-      GoRoute(path: Routes.support, builder: (_, _) => const SupportScreen(), routes: [GoRoute(path: 'new', builder: (_, _) => const NewTicketScreen())]),
-      GoRoute(path: Routes.promos, builder: (_, _) => const PromosScreen(), routes: [GoRoute(path: 'redeem', builder: (_, _) => const RedeemCodeScreen())]),
+      GoRoute(path: Routes.support, builder: (_, _) => const SupportScreen(), routes: [
+        GoRoute(path: 'new', builder: (_, s) => NewTicketScreen(tripId: s.uri.queryParameters['trip'])),
+        GoRoute(path: 'tickets/:id', builder: (_, s) => TicketScreen(ticketId: s.pathParameters['id']!)),
+        GoRoute(path: 'lost-items', builder: (_, _) => const DriverLostItemsScreen(), routes: [
+          // before ':id' so "report" is never read as an id
+          GoRoute(path: 'report', builder: (_, s) => ReportLostItemScreen(tripId: s.uri.queryParameters['trip'] ?? '')),
+          GoRoute(path: ':id', builder: (_, s) => LostItemScreen(lostItemId: s.pathParameters['id']!)),
+        ]),
+      ]),
     ],
   );
 });
 
 const _authPaths = {Routes.welcome, Routes.signIn, Routes.verify};
-const _anywherePrefixes = ['/account', '/sos', '/support', '/scheduled', '/promos'];
+const _anywherePrefixes = ['/account', '/sos', '/support', '/scheduled'];
 /// The route editor also picks saved places from the account, whatever the mode.
 const _riderBookingPrefix = '/rider/book';
 

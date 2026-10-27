@@ -74,6 +74,7 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> {
               ],
             ],
             onUserGesture: () => setState(() => _following = false),
+            onRecenter: () => setState(() => _following = true),
             topInset: top + 56,
             bottomInset: o == null ? _sheetHeight : 320,
           ),
@@ -272,7 +273,7 @@ class DevLocationPanel extends ConsumerWidget {
         crossAxisAlignment: WrapCrossAlignment.center,
         spacing: 4,
         children: [
-          Text('fake GPS ${pos == null ? '' : '${pos.lat.toStringAsFixed(4)}, ${pos.lng.toStringAsFixed(4)}'}', style: TextStyle(fontSize: 11, color: c.accentStrong, fontFamilyFallback: monoFamilyFallback)),
+          Text('fake GPS ${pos == null ? '' : '${pos.lat.toStringAsFixed(4)}, ${pos.lng.toStringAsFixed(4)}'}', style: TextStyle(fontSize: 11, color: c.text2, fontFamilyFallback: monoFamilyFallback)),
           TextButton(onPressed: () => src.set(8.9806, 38.7578), child: const Text('Bole')),
           TextButton(onPressed: () => src.set(9.0107, 38.7613), child: const Text('Meskel')),
           TextButton(onPressed: () => src.set(9.0349, 38.7469), child: const Text('Piassa')),

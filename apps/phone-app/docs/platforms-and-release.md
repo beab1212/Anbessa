@@ -118,3 +118,4 @@ Other keys: `UIBackgroundModes` `location` and `remote-notification`; `FlutterDe
 | `wakelock_plus` | `>=1.7.0 <1.8.1` | see Linux above |
 | `pinput` (core) | ^6.0.1 | 7.x is built on material_ui, not flutter/material |
 | `socket_io_client` | ^3.1.6 | realtime-gateway is Socket.io v4 |
+| `maplibre` | `>=0.3.6 <0.3.7` | 0.3.7 needs Flutter 3.47 / Dart 3.13; its Android build applies the ktlint Gradle plugin, so `android/settings.gradle.kts` declares `org.jlleitschuh.gradle.ktlint` 14.2.0 `apply false` |

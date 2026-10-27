@@ -23,22 +23,46 @@ class RouteLine {
   bool get isEmpty => points.length < 2;
 }
 
-/// Flutter-map polylines for the lines: a casing under a fill for the road ones.
-List<Polyline> routePolylines(AnbessaColors c, List<RouteLine> routes) {
+/// How a route kind is drawn, for both engines. The main route is ink on the light map and amber
+/// on the dark map and over imagery (where black disappears), with a casing that separates it
+/// from the streets under it.
+@immutable
+class RouteStroke {
+  const RouteStroke({required this.color, required this.width, this.casing, this.casingWidth = 0, this.dash});
+  final Color color;
+  final double width;
+  final Color? casing;
+  final double casingWidth;
+  /// dash and gap lengths in line widths; null is solid
+  final List<double>? dash;
+}
+
+RouteStroke routeStroke(AnbessaColors c, RouteKind kind, {bool onImagery = false}) {
+  final bright = c.isDark || onImagery;
+  return switch (kind) {
+    RouteKind.primary => RouteStroke(color: bright ? c.accent : c.text, width: 5, casing: bright ? const Color(0xFF111214) : Colors.white, casingWidth: 9),
+    RouteKind.traversed => RouteStroke(color: c.faint.withValues(alpha: 0.9), width: 5),
+    RouteKind.secondary => RouteStroke(color: bright ? Colors.white : c.text2, width: 4, dash: const [2, 1.5]),
+    RouteKind.straight => RouteStroke(color: bright ? Colors.white : c.text2, width: 3, dash: const [0.5, 2]),
+  };
+}
+
+/// flutter_map polylines for the lines: a casing under a fill for the road ones.
+List<Polyline> routePolylines(AnbessaColors c, List<RouteLine> routes, {bool onImagery = false}) {
   final out = <Polyline>[];
   for (final r in routes) {
     if (r.isEmpty) continue;
-    switch (r.kind) {
-      case RouteKind.primary:
-        out.add(Polyline(points: r.points, color: c.isDark ? const Color(0xFF0B1220) : Colors.white, strokeWidth: 9, strokeCap: StrokeCap.round, strokeJoin: StrokeJoin.round));
-        out.add(Polyline(points: r.points, color: c.isDark ? c.accentStrong : c.accent, strokeWidth: 5, strokeCap: StrokeCap.round, strokeJoin: StrokeJoin.round));
-      case RouteKind.traversed:
-        out.add(Polyline(points: r.points, color: c.faint.withValues(alpha: 0.9), strokeWidth: 5, strokeCap: StrokeCap.round, strokeJoin: StrokeJoin.round));
-      case RouteKind.secondary:
-        out.add(Polyline(points: r.points, color: c.info, strokeWidth: 4, strokeCap: StrokeCap.round, pattern: StrokePattern.dashed(segments: const [12, 8])));
-      case RouteKind.straight:
-        out.add(Polyline(points: r.points, color: c.text2, strokeWidth: 3, pattern: const StrokePattern.dotted(spacingFactor: 2.5)));
-    }
+    final s = routeStroke(c, r.kind, onImagery: onImagery);
+    if (s.casing != null) out.add(Polyline(points: r.points, color: s.casing!, strokeWidth: s.casingWidth, strokeCap: StrokeCap.round, strokeJoin: StrokeJoin.round));
+    final dash = s.dash;
+    out.add(Polyline(
+      points: r.points,
+      color: s.color,
+      strokeWidth: s.width,
+      strokeCap: StrokeCap.round,
+      strokeJoin: StrokeJoin.round,
+      pattern: dash == null ? const StrokePattern.solid() : (dash[0] < 1 ? const StrokePattern.dotted(spacingFactor: 2.5) : StrokePattern.dashed(segments: [dash[0] * s.width * 2, dash[1] * s.width * 2])),
+    ));
   }
   return out;
 }

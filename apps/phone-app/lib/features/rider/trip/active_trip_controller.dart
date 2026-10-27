@@ -1,6 +1,8 @@
 // The trip in progress, for either side: loaded from GET /api/trips/active at boot, updated by
 // every `trip:status` event, refetched when the socket reconnects or the app resumes (events may
 // have been missed). Also the other side's name and car (/parties) and the driver's live position.
+// A dispatcher can move a matched trip to another driver: the old driver gets `trip:reassigned`
+// (the trip leaves them), the rider a `trip:status` with the new driver (their parties refetch).
 
 import 'dart:async';
 
@@ -23,6 +25,7 @@ class ActiveTripController extends AsyncNotifier<Trip?> {
     _events?.cancel();
     _events = hub.events.listen((e) {
       if (e is TripStatusEvent) _apply(e.trip);
+      if (e is TripReassignedEvent) _reassigned(e);
     });
     _states?.cancel();
     _states = hub.states.listen((s) {
@@ -43,7 +46,16 @@ class ActiveTripController extends AsyncNotifier<Trip?> {
   void _apply(Trip t) {
     final current = state.value;
     if (current != null && current.id != t.id && current.isActive) return; // another trip's event (stale)
+    // another driver now (reassigned by dispatch): the name, photo and car are someone else's
+    if (current?.id == t.id && current?.driver?.userId != null && current?.driver?.userId != t.driver?.userId) ref.invalidate(tripPartiesProvider(t.id));
     state = AsyncData(t); // ended trips stay until the screen is done with them
+  }
+
+  /// This driver's trip went to someone else: it isn't theirs to show any more.
+  void _reassigned(TripReassignedEvent e) {
+    if (state.value?.id != e.tripId) return;
+    ref.read(tripReassignedProvider.notifier).set(e);
+    state = const AsyncData(null);
   }
 
   /// A trip the app just created or acted on.
@@ -73,6 +85,16 @@ class ActiveTripController extends AsyncNotifier<Trip?> {
 }
 
 final activeTripProvider = AsyncNotifierProvider<ActiveTripController, Trip?>(ActiveTripController.new);
+
+/// The last `trip:reassigned` that took the active trip away (the driver trip screen leaves and
+/// says so, then clears it).
+class TripReassigned extends Notifier<TripReassignedEvent?> {
+  @override
+  TripReassignedEvent? build() => null;
+  void set(TripReassignedEvent? e) => state = e;
+}
+
+final tripReassignedProvider = NotifierProvider<TripReassigned, TripReassignedEvent?>(TripReassigned.new);
 
 /// One trip by id: the active one when it matches, else fetched (history, receipts).
 final tripProvider = FutureProvider.family<Trip, String>((ref, id) async {

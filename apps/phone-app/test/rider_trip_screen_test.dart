@@ -30,7 +30,7 @@ Trip tripAt(String status, {bool withDriver = true}) {
   if (status == 'en_route') j['times'] = {...asJson(j['times']), 'arrivedAt': '2026-10-27T09:10:00Z'};
   if (status == 'completed') {
     j['times'] = {...asJson(j['times']), 'completedAt': '2026-10-27T09:30:00Z'};
-    j['fare'] = {...asJson(j['fare']), 'finalMinor': 14000};
+    j['fare'] = {...asJson(j['fare']), 'finalMinor': 14000, 'payableMinor': 14000}; // the server recomputes what the rider pays
   }
   return Trip.fromJson(j);
 }
@@ -102,6 +102,17 @@ void main() {
     await pumpTrip(tester, tripAt('completed'));
     expect(find.text("You've arrived"), findsOneWidget);
     expect(find.textContaining('140'), findsWidgets);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('completed with a promo: the rider pays the fare minus the discount', (tester) async {
+    final j = Map<String, dynamic>.from(fixture('trip.json'));
+    j['status'] = 'completed';
+    j['times'] = {...asJson(j['times']), 'completedAt': '2026-10-27T09:30:00Z'};
+    j['fare'] = {...asJson(j['fare']), 'finalMinor': 14000, 'promoDiscountMinor': 3000, 'promoCode': 'WELCOME30', 'payableMinor': 11000};
+    await pumpTrip(tester, Trip.fromJson(j), brightness: Brightness.dark);
+    expect(find.text(birr(11000)), findsWidgets);
+    expect(find.text('Promo code WELCOME30 · −${birr(3000)}'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

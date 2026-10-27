@@ -26,68 +26,62 @@ class WelcomeScreen extends ConsumerWidget {
     final locale = ref.watch(localeProvider);
     final isAm = (locale?.languageCode ?? Localizations.localeOf(context).languageCode) == 'am';
     return Scaffold(
-      body: Stack(
-        children: [
-          // a warm wash behind the logo
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            height: 360,
-            child: DecoratedBox(
-              decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [c.accentSoft, c.canvas])),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Align(
+              alignment: Alignment.centerRight,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                child: PillTabs<String>(
+                  expand: false,
+                  items: const [('en', 'English'), ('am', 'አማርኛ')],
+                  selected: isAm ? 'am' : 'en',
+                  onChanged: (v) => ref.read(localeProvider.notifier).set(Locale(v)),
+                ),
+              ),
             ),
-          ),
-          SafeArea(
-            child: Column(
-              children: [
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                    child: PillTabs<String>(
-                      expand: false,
-                      items: const [('en', 'English'), ('am', 'አማርኛ')],
-                      selected: isAm ? 'am' : 'en',
-                      onChanged: (v) => ref.read(localeProvider.notifier).set(Locale(v)),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
+                children: [
+                  const SizedBox(height: 24),
+                  const PopIn(child: Align(alignment: Alignment.centerLeft, child: AnbessaLogo(size: 72))),
+                  const SizedBox(height: 28),
+                  FadeSlideIn(delay: const Duration(milliseconds: 80), child: Text(l.welcomeTitle, style: AnbessaType.display.copyWith(color: c.text))),
+                  const SizedBox(height: 12),
+                  FadeSlideIn(delay: const Duration(milliseconds: 160), child: Text(l.welcomeLede, style: AnbessaType.body.copyWith(color: c.text2, fontSize: 16))),
+                  const SizedBox(height: 28),
+                  if (reason == SignOutReason.sessionEnded) Padding(padding: const EdgeInsets.only(bottom: 12), child: Notice(l.errorSessionEnded, tone: NoticeTone.info)),
+                  if (reason == SignOutReason.suspended) Padding(padding: const EdgeInsets.only(bottom: 12), child: Notice(l.errorSuspended, tone: NoticeTone.error)),
+                  if (Env.devLoginOn) ...[
+                    const SizedBox(height: 8),
+                    Theme(
+                      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                      child: ExpansionTile(
+                        tilePadding: EdgeInsets.zero,
+                        title: Text(l.devSignInTitle, style: AnbessaType.body2.copyWith(color: c.muted)),
+                        children: const [DevSignInPanel()],
+                      ),
                     ),
-                  ),
-                ),
-                Expanded(
-                  child: ListView(
-                    padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
-                    children: [
-                      const SizedBox(height: 24),
-                      const PopIn(child: Align(alignment: Alignment.centerLeft, child: AnbessaLogo(size: 72))),
-                      const SizedBox(height: 28),
-                      FadeSlideIn(delay: const Duration(milliseconds: 80), child: Text(l.welcomeTitle, style: AnbessaType.display.copyWith(color: c.text))),
-                      const SizedBox(height: 12),
-                      FadeSlideIn(delay: const Duration(milliseconds: 160), child: Text(l.welcomeLede, style: AnbessaType.body.copyWith(color: c.text2, fontSize: 16))),
-                      const SizedBox(height: 36),
-                      if (reason == SignOutReason.sessionEnded) Padding(padding: const EdgeInsets.only(bottom: 12), child: Notice(l.errorSessionEnded, tone: NoticeTone.info)),
-                      if (reason == SignOutReason.suspended) Padding(padding: const EdgeInsets.only(bottom: 12), child: Notice(l.errorSuspended, tone: NoticeTone.error)),
-                      FadeSlideIn(delay: const Duration(milliseconds: 240), child: PrimaryButton(label: l.signInWithPhone, icon: Icons.phone_android, onPressed: () => context.push(Routes.signIn))),
-                      const SizedBox(height: 10),
-                      FadeSlideIn(delay: const Duration(milliseconds: 300), child: OutlinedButton.icon(onPressed: () => context.push('${Routes.signIn}?driver=1'), icon: const Icon(Icons.drive_eta_outlined), label: Text(l.driveWithAnbessa))),
-                      if (Env.devLoginOn) ...[
-                        const SizedBox(height: 28),
-                        Theme(
-                          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-                          child: ExpansionTile(
-                            tilePadding: EdgeInsets.zero,
-                            leading: Icon(Icons.bug_report_outlined, color: c.muted),
-                            title: Text(l.devSignInTitle, style: AnbessaType.body2.copyWith(color: c.muted)),
-                            children: const [DevSignInPanel()],
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ],
+                  ],
+                ],
+              ),
             ),
-          ),
-        ],
+            // the two ways in stay pinned to the bottom, whatever the text size
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  FadeSlideIn(delay: const Duration(milliseconds: 240), child: PrimaryButton(label: l.signInWithPhone, icon: Icons.phone_android, onPressed: () => context.push(Routes.signIn))),
+                  const SizedBox(height: 10),
+                  FadeSlideIn(delay: const Duration(milliseconds: 300), child: OutlinedButton(onPressed: () => context.push('${Routes.signIn}?driver=1'), child: Text(l.driveWithAnbessa))),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -384,7 +378,7 @@ class _DevSignInPanelState extends ConsumerState<DevSignInPanel> {
                       leading: AvatarImage(name: a.name, size: 36),
                       title: Text(a.label, style: const TextStyle(fontWeight: FontWeight.w600)),
                       subtitle: Text('${a.name} · ${formatPhone(a.phone)}${a.seeded ? '' : ' · ${l.devNotSeeded}'}'),
-                      trailing: _busy == a.key ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.login),
+                      trailing: _busy == a.key ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : null,
                       onTap: () => _signIn(a),
                     ),
                 ],
@@ -403,7 +397,7 @@ class ModeSwitcherScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final l = context.l10n;
     final c = context.colors;
-    Widget option(int i, IconData icon, String title, String lede, AppMode mode) => FadeSlideIn(
+    Widget option(int i, String title, String lede, AppMode mode) => FadeSlideIn(
           delay: Duration(milliseconds: 80 * i),
           child: Material(
             color: c.surface,
@@ -419,8 +413,6 @@ class ModeSwitcherScreen extends ConsumerWidget {
                 decoration: BoxDecoration(borderRadius: BorderRadius.circular(AnbessaRadius.xl), border: Border.all(color: c.border)),
                 child: Row(
                   children: [
-                    Container(width: 56, height: 56, decoration: BoxDecoration(color: c.accentSoft, borderRadius: BorderRadius.circular(AnbessaRadius.lg)), child: Icon(icon, size: 30, color: c.accentStrong)),
-                    const SizedBox(width: 16),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -444,9 +436,9 @@ class ModeSwitcherScreen extends ConsumerWidget {
             const SizedBox(height: 20),
             Text(l.chooseModeTitle, style: AnbessaType.h1.copyWith(color: c.text)),
             const SizedBox(height: 20),
-            option(0, Icons.hail, l.rideTitle, l.rideLede, AppMode.rider),
+            option(0, l.rideTitle, l.rideLede, AppMode.rider),
             const SizedBox(height: 12),
-            option(1, Icons.drive_eta, l.driveTitle, l.driveLede, AppMode.driver),
+            option(1, l.driveTitle, l.driveLede, AppMode.driver),
           ],
         ),
       ),

@@ -19,6 +19,8 @@ dependencies:
   dio: ^5.11.1
   socket_io_client: ^3.1.6     # realtime-gateway is Socket.io v4
   flutter_map: ^8.3.2          # raster tiles from the self-hosted tile stack (OSM fallback in dev)
+  # vector maps with 2D/3D on Android and iOS (0.3.7 needs Flutter 3.47); flutter_map stays for Linux and tests
+  maplibre: '>=0.3.6 <0.3.7'
   latlong2: ^0.10.1
   flutter_secure_storage: ^11.2.0
   shared_preferences: ^2.5.6

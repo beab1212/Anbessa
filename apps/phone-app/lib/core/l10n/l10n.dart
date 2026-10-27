@@ -26,7 +26,13 @@ String describeError(AppLocalizations l, Object? error) {
     ErrorCodes.maintenance => l.errorMaintenance,
     ErrorCodes.notAvailable => l.errorNotAvailable,
     ErrorCodes.activeTripExists => l.activeTripExists,
-    ErrorCodes.quoteExpired || ErrorCodes.invalidQuote => l.quoteExpired,
+    ErrorCodes.quoteExpired || ErrorCodes.invalidQuote || ErrorCodes.quoteUsed => l.quoteExpired,
+    ErrorCodes.tooSoon => l.errorTooSoon,
+    ErrorCodes.tooFarAhead => l.errorTooFarAhead,
+    ErrorCodes.tooManyScheduled => l.errorTooManyScheduled,
+    ErrorCodes.scheduleConflict => l.errorScheduleConflict,
+    // the server's sentence names the rule and its limit ("… up to 500 ETB"); English only
+    ErrorCodes.policyViolation => error.message.isNotEmpty && !l.localeName.startsWith('am') ? error.message : l.errorPolicyViolation,
     ErrorCodes.paymentMethodUnavailable => l.paymentMethodUnavailable,
     ErrorCodes.vehicleTypeUnavailable => l.vehicleTypeUnavailable,
     ErrorCodes.outsideServiceArea => l.outsideServiceArea,
@@ -47,10 +53,46 @@ String describeError(AppLocalizations l, Object? error) {
     ErrorCodes.balanceBlocked => l.denialBalanceBlocked,
     ErrorCodes.expiryRequired => l.expiryRequired,
     ErrorCodes.amountOutOfRange => l.amountOutOfRange,
+    ErrorCodes.useLostItems => l.errorUseLostItems,
+    ErrorCodes.reopenWindowClosed => l.errorReopenWindowClosed,
+    ErrorCodes.ticketResolved => l.errorTicketResolved,
+    ErrorCodes.ticketClosed => l.errorTicketClosed,
+    ErrorCodes.alreadyReported => l.errorAlreadyReported,
+    ErrorCodes.reportWindowClosed => l.errorReportWindowClosed,
+    ErrorCodes.lostItemClosed => l.errorLostItemClosed,
+    ErrorCodes.sosUnavailable => l.errorSosUnavailable,
+    ErrorCodes.sosResolved => l.errorSosResolved,
+    ErrorCodes.requestInProgress => l.errorRequestInProgress,
     ErrorCodes.validation => error.issues.isNotEmpty ? error.issues.map((i) => i.message).join(' ') : error.message,
     _ => error.message.isNotEmpty ? error.message : l.errorGeneric,
   };
 }
+
+/// Why a promo code wasn't applied ([PromoRejection]); the server's sentence for unknown reasons.
+String promoRejectionText(AppLocalizations l, PromoOutcome o) => switch (o.reason) {
+      PromoRejection.unknownCode => l.promoUnknownCode,
+      PromoRejection.notActive => l.promoNotActive,
+      PromoRejection.notStarted => l.promoNotStarted,
+      PromoRejection.expired => l.promoExpired,
+      PromoRejection.exhausted => l.promoExhausted,
+      PromoRejection.notInCity => l.promoNotInCity,
+      PromoRejection.vehicleTypeNotEligible => l.promoVehicleNotEligible,
+      PromoRejection.limitReached => l.promoLimitReached,
+      PromoRejection.invalidFormat => l.promoInvalidFormat,
+      _ => o.message ?? l.promoUnknownCode,
+    };
+
+/// "Promo code WELCOME50" for a fare's discount line.
+String promoLabel(AppLocalizations l, TripFare f) => f.promoCode == null ? l.promoCode : '${l.promoCode} ${f.promoCode}';
+
+String scheduledStatusLabel(AppLocalizations l, ScheduledStatus s) => switch (s) {
+      ScheduledStatus.scheduled => l.scheduledStatusScheduled,
+      ScheduledStatus.dispatching => l.scheduledStatusDispatching,
+      ScheduledStatus.dispatched => l.scheduledStatusDispatched,
+      ScheduledStatus.cancelled => l.scheduledStatusCancelled,
+      ScheduledStatus.failed => l.scheduledStatusFailed,
+      ScheduledStatus.unknown => '—',
+    };
 
 String paymentMethodLabel(AppLocalizations l, PaymentMethod m) => switch (m) {
       PaymentMethod.cash => l.cash,

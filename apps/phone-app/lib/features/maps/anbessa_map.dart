@@ -1,33 +1,35 @@
-// The map (flutter_map, raster tiles). It draws routes, pins, the cars and the person, keeps its
-// subject inside the part not covered by sheets and banners, animates every camera move, and can
-// follow the car (north up, or turned the way the car is going for the driver's navigation).
-// The older parameters (`fit`, `pickup`, `dropoff`, `driver`, `me` as a point, `line`) still work.
+// The map. Screens describe what's on it (routes, pins, the cars, the person, labels), how much is
+// covered by sheets and banners, and whether to follow someone; the engine draws it.
+//
+// Two engines with the same behaviour:
+//   - vector_map.dart: MapLibre (vector tiles, 2D / 3D / satellite) on Android and iOS
+//   - raster_map.dart: flutter_map (raster tiles, 2D / satellite) on the desktop and in tests
+// Both draw the same pins (built here), keep their subject inside the uncovered part, animate
+// camera moves, and can follow the car (north up, or turned the way it's going for navigation).
 
-import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:flutter_map_animations/flutter_map_animations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart' show LatLng;
 import 'package:ride_app_core/ride_app_core.dart';
 import '../../core/l10n/l10n.dart';
 import '../../core/state.dart';
-import '../config/client_config_provider.dart';
 import 'callouts.dart';
-import 'fit.dart';
-import 'map_tiles.dart';
+import 'map_mode.dart';
 import 'marker_animator.dart';
 import 'me_marker.dart';
+import 'raster_map.dart';
 import 'route_layer.dart';
+import 'vector_map.dart';
 
 export 'callouts.dart' show MapCallout;
+export 'map_mode.dart' show MapMode, mapModeProvider;
 export 'marker_animator.dart' show AnimatedPose;
 export 'me_marker.dart' show MePose;
 export 'route_layer.dart' show RouteLine, RouteKind;
 
-/// Tiles failed to load (the self-hosted stack is down, or no network).
+/// Tiles failed to load (the tile server is down, or no network).
 final mapTilesDownProvider = valueProvider<bool>(false);
 
 enum FollowMode { none, me, driver, driverBearing }
@@ -40,7 +42,17 @@ class CarPose {
   final double? heading;
 }
 
-class AnbessaMap extends ConsumerStatefulWidget {
+/// Any widget pinned to a point (e.g. the search pulse at the pickup).
+@immutable
+class MapOverlay {
+  const MapOverlay({required this.point, required this.size, required this.child, this.alignment = Alignment.center});
+  final LatLng point;
+  final Size size;
+  final Widget child;
+  final Alignment alignment;
+}
+
+class AnbessaMap extends ConsumerWidget {
   const AnbessaMap({
     super.key,
     this.fit = const [],
@@ -56,19 +68,19 @@ class AnbessaMap extends ConsumerStatefulWidget {
     this.routes = const [],
     this.cars = const [],
     this.callouts = const [],
+    this.overlays = const [],
     this.topInset = 0,
     this.bottomInset = 0,
     this.follow = FollowMode.none,
     this.followZoom = 16,
     this.showControls = true,
+    this.showModeSwitch = true,
     this.onUserGesture,
+    this.onRecenter,
     this.onTap,
     this.onMove,
-    this.controller,
-    this.mapController,
     this.padding = const EdgeInsets.all(48),
     this.interactive = true,
-    this.children = const [],
   });
 
   /// Points to keep in view. Empty: [center] or the city.
@@ -89,240 +101,258 @@ class AnbessaMap extends ConsumerStatefulWidget {
   final List<RouteLine> routes;
   final List<CarPose> cars;
   final List<MapCallout> callouts;
+  final List<MapOverlay> overlays;
   /// pixels covered at the top (banners) and bottom (the sheet)
   final double topInset;
   final double bottomInset;
   final FollowMode follow;
   final double followZoom;
   final bool showControls;
-  /// the person panned or zoomed; screens use it to drop follow mode
+  /// the 2D / 3D / satellite switch among the controls
+  final bool showModeSwitch;
+  /// the person panned, zoomed or turned the map (every gesture); screens use it to drop follow mode
   final VoidCallback? onUserGesture;
+  /// the recenter control was pressed; screens use it to follow again. With it, the control shows
+  /// even when nothing is followed or fitted.
+  final VoidCallback? onRecenter;
   final void Function(LatLng)? onTap;
   /// the map centre after the person dragged it (drag-to-pick)
   final void Function(LatLng)? onMove;
-  final AnimatedMapController? controller;
-  /// a plain controller to drive (older screens); the map animates through it
-  final MapController? mapController;
   final EdgeInsets padding;
   final bool interactive;
-  final List<Widget> children;
 
-  @override
-  ConsumerState<AnbessaMap> createState() => AnbessaMapState();
-}
+  /// Every route line, the older straight [line] included.
+  List<RouteLine> get allRoutes => [...routes, if (line.length >= 2) RouteLine(line, kind: RouteKind.straight)];
 
-class AnbessaMapState extends ConsumerState<AnbessaMap> with TickerProviderStateMixin {
-  /// One tile layer; dark mode without its own tiles puts one colour filter over all of them.
-  Widget _tileLayer(BuildContext context, TileStyle tiles) {
-    final layer = TileLayer(
-      key: ValueKey('${tiles.url}|${tiles.darken}'),
-      urlTemplate: tiles.url,
-      subdomains: tiles.subdomains,
-      retinaMode: tiles.retina && MediaQuery.devicePixelRatioOf(context) > 1.5,
-      userAgentPackageName: 'com.anbessa.phone_app',
-      maxNativeZoom: 19,
-      errorTileCallback: (_, _, _) => ref.read(mapTilesDownProvider.notifier).set(true),
-    );
-    return tiles.darken ? darkModeTilesContainerBuilder(context, layer) : layer;
-  }
+  MePose? get mePoseOrPoint => mePose ?? (me == null ? null : MePose(position: me!));
 
-  late final AnimatedMapController _anim = widget.controller ?? AnimatedMapController(vsync: this, mapController: widget.mapController, duration: AnbessaMotion.camera, curve: AnbessaMotion.emphasized);
-  MapController get _ctrl => _anim.mapController;
-  List<LatLng> _lastFit = const [];
-  Timer? _moveDebounce;
-  Timer? _refit;
-  bool _ready = false;
-  bool _userBroke = false;
-  double _rotation = 0;
-
-  @override
-  void didUpdateWidget(covariant AnbessaMap oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.follow != widget.follow) _userBroke = false;
-    final insetsChanged = oldWidget.topInset != widget.topInset || oldWidget.bottomInset != widget.bottomInset;
-    if (widget.follow == FollowMode.none || _userBroke) {
-      if (widget.fit.isNotEmpty && (!sameLatLngs(widget.fit, _lastFit) || insetsChanged)) {
-        _refit?.cancel();
-        _refit = Timer(insetsChanged && sameLatLngs(widget.fit, _lastFit) ? const Duration(milliseconds: 200) : Duration.zero, () => _fitTo(widget.fit));
-      }
-    } else {
-      _followTick();
-    }
-  }
-
-  LatLng? get _subject => switch (widget.follow) {
-        FollowMode.me => widget.mePose?.position ?? widget.me,
-        FollowMode.driver || FollowMode.driverBearing => widget.driverPose == null ? widget.driver?.position : LatLng(widget.driverPose!.lat, widget.driverPose!.lng),
+  /// Who the camera follows, if anyone.
+  LatLng? get subject => switch (follow) {
+        FollowMode.me => mePose?.position ?? me,
+        FollowMode.driver || FollowMode.driverBearing => driverPose == null ? driver?.position : LatLng(driverPose!.lat, driverPose!.lng),
         FollowMode.none => null,
       };
 
-  void _followTick() {
-    if (!_ready || _userBroke) return;
-    final s = _subject;
-    if (s == null) return;
-    final bearing = widget.follow == FollowMode.driverBearing ? (widget.driverPose?.heading ?? widget.driver?.heading ?? 0) : 0.0;
-    // keep the car in the lower middle of the free area while navigating; centred otherwise
-    final free = _freeArea();
-    final offsetY = widget.follow == FollowMode.driverBearing ? free.height * 0.18 : 0.0;
-    _rotation = widget.follow == FollowMode.driverBearing ? -bearing : 0;
-    // tiny moves every frame: no animation, or the camera lags the car
-    _ctrl.move(s, widget.followZoom, offset: Offset(0, offsetY + (widget.topInset - widget.bottomInset) / 2));
-    if ((_ctrl.camera.rotation - _rotation).abs() > 0.5) _ctrl.rotate(_rotation);
-  }
-
-  Rect _freeArea() {
-    final size = context.size ?? const Size(360, 640);
-    return Rect.fromLTRB(0, widget.topInset, size.width, size.height - widget.bottomInset);
-  }
-
-  void _fitTo(List<LatLng> pts, {bool animate = true}) {
-    if (!mounted || !_ready || pts.isEmpty) return;
-    _lastFit = List.of(pts);
-    final fit = fitWithInsets(pts, top: widget.topInset, bottom: widget.bottomInset, side: widget.padding.left);
-    if (!animate || MediaQuery.disableAnimationsOf(context)) {
-      _ctrl.fitCamera(fit);
-    } else {
-      _anim.animatedFitCamera(cameraFit: fit, rotation: 0);
-    }
-  }
-
-  /// Screens call this from the recenter control.
-  void recenter() {
-    _userBroke = false;
-    widget.onUserGesture?.call();
-    if (widget.follow != FollowMode.none) {
-      final s = _subject;
-      if (s != null) _anim.animateTo(dest: s, zoom: widget.followZoom, rotation: widget.follow == FollowMode.driverBearing ? _rotation : 0);
-      return;
-    }
-    if (widget.fit.isNotEmpty) _fitTo(widget.fit);
-  }
-
-  void resetNorth() => _anim.animatedRotateReset();
+  double get subjectHeading => driverPose?.heading ?? driver?.heading ?? 0;
 
   @override
-  void dispose() {
-    _moveDebounce?.cancel();
-    _refit?.cancel();
-    if (widget.controller == null && widget.mapController == null) _anim.dispose();
-    super.dispose();
-  }
+  Widget build(BuildContext context, WidgetRef ref) => ref.watch(vectorMapsProvider) ? VectorMap(spec: this) : RasterMap(spec: this);
+}
+
+/// Something drawn at a point, the same for both engines.
+@immutable
+class MapPin {
+  const MapPin({required this.point, required this.size, required this.child, this.alignment = Alignment.center});
+  final LatLng point;
+  final Size size;
+  final Widget child;
+  /// which part of the widget sits on the point (bottomCenter: the tip of a pin)
+  final Alignment alignment;
+}
+
+/// The pins for a map, in drawing order. [mapRotation] gives the map's rotation in degrees
+/// (clockwise) where the pin is drawn, so headings stay true when the camera turns.
+List<MapPin> pinsFor(AnbessaMap w, double Function(BuildContext) mapRotation) {
+  final me = w.mePoseOrPoint;
+  final pose = w.driverPose;
+  final still = w.driver;
+  Widget turning(Widget Function(double rot) child) => Builder(builder: (ctx) => child(mapRotation(ctx)));
+  return [
+    for (final o in w.overlays) MapPin(point: o.point, size: o.size, alignment: o.alignment, child: o.child),
+    for (final car in w.cars) MapPin(point: car.position, size: const Size(26, 26), child: turning((r) => NearbyCarGlyph(heading: car.heading, mapRotation: r))),
+    if (w.pickup != null) MapPin(point: w.pickup!, size: const Size(36, 44), alignment: Alignment.bottomCenter, child: const PinMarker(tone: PinTone.pickup)),
+    if (w.dropoff != null) MapPin(point: w.dropoff!, size: const Size(36, 44), alignment: Alignment.bottomCenter, child: const PinMarker(tone: PinTone.dropoff)),
+    if (me != null) MapPin(point: me.position, size: const Size(48, 48), child: turning((r) => MeDot(heading: me.heading == null ? null : me.heading! + r))),
+    if (pose != null)
+      MapPin(point: LatLng(pose.lat, pose.lng), size: const Size(44, 44), child: turning((r) => CarMarker(heading: pose.heading, stale: pose.stale, mapRotation: r)))
+    else if (still != null)
+      MapPin(point: still.position, size: const Size(44, 44), child: turning((r) => CarMarker(heading: still.heading ?? 0, stale: still.stale, onTrip: still.onTrip, mapRotation: r))),
+    for (final m in w.callouts) MapPin(point: m.point, size: const Size(240, 34), alignment: Alignment(0, -m.offsetY / 17), child: Center(child: MapCalloutChip(callout: m))),
+  ];
+}
+
+/// The controls on the map's right edge: the 2D / 3D / satellite switch, a north needle when the
+/// map is turned, and recenter. Small flat squares; a word where a word says it better.
+class MapControls extends ConsumerWidget {
+  const MapControls({
+    super.key,
+    required this.rotation,
+    required this.onResetNorth,
+    required this.showRecenter,
+    required this.recenterActive,
+    required this.onRecenter,
+    this.showModeSwitch = true,
+  });
+  /// degrees; the north needle shows when it isn't 0
+  final double rotation;
+  final VoidCallback onResetNorth;
+  final bool showRecenter;
+  final bool recenterActive;
+  final VoidCallback onRecenter;
+  final bool showModeSwitch;
 
   @override
-  Widget build(BuildContext context) {
-    final c = context.colors;
+  Widget build(BuildContext context, WidgetRef ref) {
     final l = context.l10n;
-    final city = ref.watch(currentCityProvider);
-    final tiles = ref.watch(tileStyleProvider);
-    final initial = widget.center ?? _subject ?? (widget.fit.isNotEmpty ? widget.fit.first : LatLng(city.bbox.centerLat, city.bbox.centerLng));
-    final routes = [
-      ...widget.routes,
-      if (widget.line.length >= 2) RouteLine(widget.line, kind: RouteKind.straight),
-    ];
-    final me = widget.mePose ?? (widget.me == null ? null : MePose(position: widget.me!));
-    final driverPose = widget.driverPose;
-    final driverStatic = widget.driver;
-    final rotating = widget.follow == FollowMode.driverBearing;
-    // the controller has no camera until flutter_map has rendered once
-    final rot = _ready ? _ctrl.camera.rotation : 0.0;
-    return Stack(
+    final mode = ref.watch(effectiveMapModeProvider);
+    return MapControlColumn(
       children: [
-        FlutterMap(
-          mapController: _ctrl,
-          options: MapOptions(
-            initialCenter: initial,
-            initialZoom: widget.zoom,
-            minZoom: 9,
-            maxZoom: 19,
-            interactionOptions: InteractionOptions(flags: widget.interactive ? (rotating ? InteractiveFlag.all : InteractiveFlag.all & ~InteractiveFlag.rotate) : InteractiveFlag.none),
-            onTap: widget.onTap == null ? null : (_, p) => widget.onTap!(p),
-            onMapEvent: (e) {
-              if (e.source == MapEventSource.dragStart || e.source == MapEventSource.multiFingerGestureStart || e.source == MapEventSource.doubleTap || e.source == MapEventSource.scrollWheel) {
-                if (widget.follow != FollowMode.none && !_userBroke) {
-                  _userBroke = true;
-                  widget.onUserGesture?.call();
-                  setState(() {});
-                }
-              }
-              if (e is MapEventRotate || e is MapEventRotateEnd) setState(() {});
-              if (widget.onMove != null && (e is MapEventMoveEnd || e is MapEventFlingAnimationEnd)) {
-                _moveDebounce?.cancel();
-                _moveDebounce = Timer(const Duration(milliseconds: 250), () => widget.onMove!(_ctrl.camera.center));
-              }
-            },
-            onMapReady: () {
-              _ready = true;
-              if (widget.follow != FollowMode.none && _subject != null) {
-                _followTick();
-              } else if (widget.fit.isNotEmpty) {
-                _fitTo(widget.fit, animate: false);
-              }
-            },
-            backgroundColor: c.canvas,
+        if (showModeSwitch)
+          MapControlButton(
+            tooltip: l.mapModeTitle,
+            onTap: () => showMapModePicker(context),
+            child: Text(mapModeShort(l, mode), style: AnbessaType.label.copyWith(fontWeight: FontWeight.w800, color: context.colors.text)),
           ),
-          children: [
-            _tileLayer(context, tiles),
-            if (me != null) meAccuracyLayer(c, me),
-            if (routes.isNotEmpty) PolylineLayer(polylines: routePolylines(c, routes)),
-            MarkerLayer(
-              rotate: true,
-              markers: [
-                for (final car in widget.cars) Marker(point: car.position, width: 30, height: 30, child: NearbyCarGlyph(heading: car.heading, mapRotation: rot)),
-                if (widget.pickup != null) Marker(point: widget.pickup!, width: 40, height: 48, alignment: Alignment.topCenter, child: const PinMarker(tone: PinTone.amber)),
-                if (widget.dropoff != null) Marker(point: widget.dropoff!, width: 40, height: 48, alignment: Alignment.topCenter, child: const PinMarker(tone: PinTone.ink)),
-                if (me != null) meMarker(me),
-                if (driverPose != null)
-                  Marker(point: LatLng(driverPose.lat, driverPose.lng), width: 48, height: 48, child: CarMarker(heading: driverPose.heading, stale: driverPose.stale, mapRotation: rot))
-                else if (driverStatic != null)
-                  Marker(point: driverStatic.position, width: 48, height: 48, child: CarMarker(heading: driverStatic.heading ?? 0, stale: driverStatic.stale, onTrip: driverStatic.onTrip, mapRotation: rot)),
-                for (final m in widget.callouts) calloutMarker(c, m),
-              ],
-            ),
-            ...widget.children,
-          ],
-        ),
-        // the tile credit, small and never wider than the map (flutter_map's own widget overflows at large text)
-        Positioned(
-          left: 6,
-          right: 72,
-          bottom: widget.bottomInset + 4,
-          child: IgnorePointer(
-            child: Align(
-              alignment: Alignment.bottomLeft,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(color: c.surface.withValues(alpha: 0.75), borderRadius: BorderRadius.circular(4)),
-                child: Text(tiles.attribution, maxLines: 1, overflow: TextOverflow.ellipsis, textScaler: TextScaler.noScaling, style: TextStyle(fontSize: 9, color: c.muted)),
-              ),
-            ),
+        if (rotation.abs() > 0.5)
+          MapControlButton(
+            tooltip: l.resetNorth,
+            onTap: onResetNorth,
+            child: Transform.rotate(angle: rotation * pi / 180, child: const _NorthNeedle()),
           ),
-        ),
-        if (widget.showControls && widget.interactive)
-          Positioned(
-            right: 12,
-            bottom: widget.bottomInset + 12,
-            child: MapControlColumn(
-              children: [
-                if (rot.abs() > 0.5 && !rotating)
-                  MapControlButton(
-                    icon: Icons.explore,
-                    tooltip: l.resetNorth,
-                    onTap: resetNorth,
-                    child: Transform.rotate(angle: rot * pi / 180, child: Icon(Icons.navigation, color: c.danger, size: 22)),
-                  ),
-                if (widget.follow != FollowMode.none || widget.fit.isNotEmpty)
-                  MapControlButton(icon: widget.follow != FollowMode.none ? Icons.my_location : Icons.center_focus_strong, tooltip: l.recenter, active: widget.follow != FollowMode.none && !_userBroke, onTap: recenter),
-              ],
-            ),
-          ),
+        if (showRecenter) MapControlButton(icon: Icons.my_location, tooltip: l.recenter, active: recenterActive, onTap: onRecenter),
       ],
     );
   }
 }
 
-enum PinTone { amber, ink }
+/// A plain north needle: red half up, grey half down.
+class _NorthNeedle extends StatelessWidget {
+  const _NorthNeedle();
+  @override
+  Widget build(BuildContext context) => CustomPaint(size: const Size(12, 24), painter: _NeedlePainter(context.colors.danger, context.colors.faint));
+}
 
-/// A pin whose tip is the point (align the marker to the top).
+class _NeedlePainter extends CustomPainter {
+  const _NeedlePainter(this.north, this.south);
+  final Color north;
+  final Color south;
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width, h = size.height;
+    canvas.drawPath(Path()..moveTo(w / 2, 0)..lineTo(w, h / 2)..lineTo(0, h / 2)..close(), Paint()..color = north);
+    canvas.drawPath(Path()..moveTo(0, h / 2)..lineTo(w, h / 2)..lineTo(w / 2, h)..close(), Paint()..color = south);
+  }
+
+  @override
+  bool shouldRepaint(_NeedlePainter old) => old.north != north || old.south != south;
+}
+
+String mapModeShort(AppLocalizations l, MapMode m) => switch (m) { MapMode.flat => '2D', MapMode.threeD => '3D', MapMode.satellite => l.mapModeSatelliteShort };
+
+/// The map mode picker: three choices, each with a one-line description.
+Future<void> showMapModePicker(BuildContext context) => showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (ctx) => const _MapModeSheet(),
+    );
+
+class _MapModeSheet extends ConsumerWidget {
+  const _MapModeSheet();
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final l = context.l10n;
+    final c = context.colors;
+    final current = ref.watch(effectiveMapModeProvider);
+    final has3d = ref.watch(vectorMapsProvider);
+    Widget option(MapMode m, String title, String body, {bool enabled = true}) {
+      final selected = current == m;
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: Semantics(
+          button: true,
+          selected: selected,
+          enabled: enabled,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(AnbessaRadius.md),
+            onTap: !enabled
+                ? null
+                : () {
+                    Haptics.selection();
+                    ref.read(mapModeProvider.notifier).set(m);
+                    Navigator.pop(context);
+                  },
+            child: Opacity(
+              opacity: enabled ? 1 : 0.45,
+              child: Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: c.surface,
+                  borderRadius: BorderRadius.circular(AnbessaRadius.md),
+                  border: Border.all(color: selected ? c.text : c.border, width: 2),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 48,
+                      height: 48,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(color: selected ? c.text : c.canvas, borderRadius: BorderRadius.circular(AnbessaRadius.sm)),
+                      child: Text(mapModeShort(l, m), style: AnbessaType.label.copyWith(fontWeight: FontWeight.w800, color: selected ? c.surface : c.text)),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(title, style: AnbessaType.title.copyWith(color: c.text)),
+                          const SizedBox(height: 2),
+                          Text(body, style: AnbessaType.caption.copyWith(color: c.muted)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return SafeArea(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(l.mapModeTitle, style: AnbessaType.h2.copyWith(color: c.text)),
+            const SizedBox(height: 14),
+            option(MapMode.flat, l.mapModeFlat, l.mapModeFlatLede),
+            option(MapMode.threeD, l.mapMode3d, has3d ? l.mapMode3dLede : l.mapMode3dPhonesOnly, enabled: has3d),
+            option(MapMode.satellite, l.mapModeSatellite, l.mapModeSatelliteLede),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The credit line for the map data, small and never wider than the map.
+class MapCredit extends StatelessWidget {
+  const MapCredit(this.text, {super.key});
+  final String text;
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return IgnorePointer(
+      child: Align(
+        alignment: Alignment.bottomLeft,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          decoration: BoxDecoration(color: c.surface.withValues(alpha: 0.8), borderRadius: BorderRadius.circular(4)),
+          child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, textScaler: TextScaler.noScaling, style: TextStyle(fontSize: 9, color: c.muted)),
+        ),
+      ),
+    );
+  }
+}
+
+enum PinTone { pickup, dropoff }
+
+/// A pin whose tip is the point (align its bottom centre to the point). Pickup: a ring; drop-off:
+/// a filled square, like a flag.
 class PinMarker extends StatelessWidget {
   const PinMarker({super.key, required this.tone, this.lifted = false});
   final PinTone tone;
@@ -331,20 +361,20 @@ class PinMarker extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    final color = tone == PinTone.amber ? c.accent : c.text;
+    final ink = c.isDark ? Colors.white : c.text;
+    final head = tone == PinTone.pickup
+        ? Container(width: 22, height: 22, decoration: BoxDecoration(color: c.surface, shape: BoxShape.circle, border: Border.all(color: ink, width: 6)))
+        : Container(width: 20, height: 20, decoration: BoxDecoration(color: ink, borderRadius: BorderRadius.circular(4), border: Border.all(color: c.surface, width: 3)));
     return AnimatedSlide(
       duration: AnbessaMotion.of(context, AnbessaMotion.base),
       curve: AnbessaMotion.emphasized,
       offset: lifted ? const Offset(0, -0.25) : Offset.zero,
       child: Column(
         mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.end,
         children: [
-          Container(
-            width: 20,
-            height: 20,
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 3), boxShadow: const [BoxShadow(color: Color(0x33000000), blurRadius: 4, offset: Offset(0, 2))]),
-          ),
-          Container(width: 2, height: 14, color: color),
+          head,
+          Container(width: 3, height: 14, color: ink),
           AnimatedContainer(
             duration: AnbessaMotion.of(context, AnbessaMotion.base),
             width: lifted ? 10 : 6,
@@ -367,10 +397,10 @@ class DriverMarkerData {
   final bool onTrip;
 }
 
-/// The car: a rotated glyph, amber on a trip, grey when stale. Counter-rotates the map's rotation
-/// so its heading stays true when the camera turns.
+/// The car: an arrow on a disc, amber on a trip, grey when stale. Adds the map's rotation so its
+/// heading stays true when the camera turns.
 class CarMarker extends StatelessWidget {
-  const CarMarker({super.key, required this.heading, this.stale = false, this.onTrip = true, this.mapRotation = 0, this.size = 44});
+  const CarMarker({super.key, required this.heading, this.stale = false, this.onTrip = true, this.mapRotation = 0, this.size = 40});
   final double heading;
   final bool stale;
   final bool onTrip;
@@ -382,17 +412,36 @@ class CarMarker extends StatelessWidget {
     final color = stale ? c.faint : (onTrip ? c.accent : c.success);
     return Semantics(
       label: 'driver',
-      child: Transform.rotate(
-        angle: (heading + mapRotation) * pi / 180,
+      child: Center(
         child: Container(
           width: size,
           height: size,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 3), boxShadow: const [BoxShadow(color: Color(0x44000000), blurRadius: 6, offset: Offset(0, 2))]),
-          child: Icon(Icons.navigation, color: Colors.white, size: size * 0.5),
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle, border: Border.all(color: c.isDark ? c.canvas : Colors.white, width: 3)),
+          child: Transform.rotate(angle: (heading + mapRotation) * pi / 180, child: CustomPaint(painter: _ArrowPainter(c.isDark ? c.canvas : c.text))),
         ),
       ),
     );
   }
+}
+
+/// A plain arrowhead pointing up.
+class _ArrowPainter extends CustomPainter {
+  const _ArrowPainter(this.color);
+  final Color color;
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width, h = size.height;
+    final path = Path()
+      ..moveTo(w * 0.5, h * 0.2)
+      ..lineTo(w * 0.76, h * 0.78)
+      ..lineTo(w * 0.5, h * 0.64)
+      ..lineTo(w * 0.24, h * 0.78)
+      ..close();
+    canvas.drawPath(path, Paint()..color = color);
+  }
+
+  @override
+  bool shouldRepaint(_ArrowPainter old) => old.color != color;
 }
 
 /// A small anonymous car around the rider.
@@ -405,12 +454,9 @@ class NearbyCarGlyph extends StatelessWidget {
     final c = context.colors;
     return FadeSlideIn(
       offset: 0,
-      child: Transform.rotate(
-        angle: ((heading ?? 0) + mapRotation) * pi / 180,
-        child: Container(
-          decoration: BoxDecoration(color: c.surface, shape: BoxShape.circle, boxShadow: AnbessaElevation.card(c.brightness)),
-          child: Icon(Icons.navigation_rounded, color: c.text2, size: 16),
-        ),
+      child: Container(
+        decoration: BoxDecoration(color: c.surface, shape: BoxShape.circle, border: Border.all(color: c.borderStrong)),
+        child: Transform.rotate(angle: ((heading ?? 0) + mapRotation) * pi / 180, child: CustomPaint(painter: _ArrowPainter(c.text2))),
       ),
     );
   }
@@ -424,17 +470,16 @@ class DriverMarker extends StatelessWidget {
   Widget build(BuildContext context) => CarMarker(heading: data.heading ?? 0, stale: data.stale, onTrip: data.onTrip);
 }
 
-/// Something at the map centre while dragging to pick a place.
+/// The pin at the map centre while dragging to pick a place.
 class CenterPin extends StatelessWidget {
-  const CenterPin({super.key, this.tone = PinTone.amber, this.lifted = false});
+  const CenterPin({super.key, this.tone = PinTone.pickup, this.lifted = false});
   final PinTone tone;
   final bool lifted;
   @override
   Widget build(BuildContext context) => IgnorePointer(
-        child: Center(child: Padding(padding: const EdgeInsets.only(bottom: 37), child: PinMarker(tone: tone, lifted: lifted))),
+        child: Center(child: Padding(padding: const EdgeInsets.only(bottom: 41), child: PinMarker(tone: tone, lifted: lifted))),
       );
 }
 
 LatLng latLngOf(double lat, double lng) => LatLng(lat, lng);
 LatLng placeLatLng(TripPlace p) => LatLng(p.lat, p.lng);
-LatLngBounds boundsOf(List<LatLng> pts) => LatLngBounds.fromPoints(pts);

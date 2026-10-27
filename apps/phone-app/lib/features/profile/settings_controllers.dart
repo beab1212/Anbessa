@@ -1,5 +1,6 @@
 // On-device settings: notification toggles (local categories; there is no server inbox yet), the
-// emergency contact, navigation preferences and the default company for business rides.
+// emergency contact, navigation preferences and the default company for business rides. Plus the
+// one server-side notification setting: marketing messages by push / SMS (notification-service).
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,30 +12,49 @@ import '../maps/nav/external_nav.dart';
 
 @immutable
 class NotificationPrefs {
-  const NotificationPrefs({this.trip = true, this.promo = true, this.sound = true});
+  const NotificationPrefs({this.trip = true, this.sound = true});
   final bool trip;
-  final bool promo;
   final bool sound;
-  NotificationPrefs copyWith({bool? trip, bool? promo, bool? sound}) => NotificationPrefs(trip: trip ?? this.trip, promo: promo ?? this.promo, sound: sound ?? this.sound);
+  NotificationPrefs copyWith({bool? trip, bool? sound}) => NotificationPrefs(trip: trip ?? this.trip, sound: sound ?? this.sound);
 }
 
 class NotificationPrefsController extends Notifier<NotificationPrefs> {
   @override
   NotificationPrefs build() {
     final p = ref.watch(prefsProvider);
-    return NotificationPrefs(trip: p.getBool(PrefsKeys.notifTrip) ?? true, promo: p.getBool(PrefsKeys.notifPromo) ?? true, sound: p.getBool(PrefsKeys.notifSound) ?? true);
+    return NotificationPrefs(trip: p.getBool(PrefsKeys.notifTrip) ?? true, sound: p.getBool(PrefsKeys.notifSound) ?? true);
   }
 
-  Future<void> set({bool? trip, bool? promo, bool? sound}) async {
-    state = state.copyWith(trip: trip, promo: promo, sound: sound);
+  Future<void> set({bool? trip, bool? sound}) async {
+    state = state.copyWith(trip: trip, sound: sound);
     final p = ref.read(prefsProvider);
     await p.setBool(PrefsKeys.notifTrip, state.trip);
-    await p.setBool(PrefsKeys.notifPromo, state.promo);
     await p.setBool(PrefsKeys.notifSound, state.sound);
   }
 }
 
 final notificationPrefsProvider = NotifierProvider<NotificationPrefsController, NotificationPrefs>(NotificationPrefsController.new);
+
+/// Campaign messages by push and SMS (GET / PUT /api/notifications/me/marketing). A switch flips
+/// at once and goes back if the server refuses.
+class MarketingPrefsController extends AsyncNotifier<MarketingPrefs> {
+  @override
+  Future<MarketingPrefs> build() => ref.read(apisProvider).notifications.marketing();
+
+  Future<void> set({bool? push, bool? sms}) async {
+    final before = state.value;
+    if (before == null) return;
+    state = AsyncData(before.copyWith(push: push, sms: sms));
+    try {
+      state = AsyncData(await ref.read(apisProvider).notifications.setMarketing(push: push, sms: sms));
+    } catch (e) {
+      state = AsyncData(before);
+      rethrow;
+    }
+  }
+}
+
+final marketingPrefsProvider = AsyncNotifierProvider<MarketingPrefsController, MarketingPrefs>(MarketingPrefsController.new);
 
 @immutable
 class EmergencyContact {

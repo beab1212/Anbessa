@@ -14,6 +14,10 @@ The app is configured at compile time with `--dart-define` values, normally from
 | `TILE_ATTRIBUTION` | `© OpenStreetMap contributors` | credit drawn on the map | same |
 | `TILE_URL_DARK` | empty | dark tiles; empty = the light tiles through a dark filter | same |
 | `TILE_ATTRIBUTION_DARK` | empty (= `TILE_ATTRIBUTION`) | dark credit | same |
+| `MAP_STYLE_URL` | empty | vector style for the light theme (Android/iOS); empty = OpenFreeMap `positron` | `vectorStyleFor` (`map_styles.dart`) |
+| `MAP_STYLE_URL_DARK` | empty | vector style for the dark theme; empty = `MAP_STYLE_URL`, else OpenFreeMap `dark` | same |
+| `SATELLITE_TILE_URL` | empty | satellite imagery tiles (`{z}/{y}/{x}` or `{z}/{x}/{y}`); empty = Esri World Imagery | both engines |
+| `SATELLITE_ATTRIBUTION` | empty (= `Esri, Maxar, Earthstar Geographics`) | imagery credit | same |
 | `DEV_LOGIN` | `off` | `on` shows the dev sign-in panel, **only in debug builds** (`Env.devLoginOn = kDebugMode && on`) | WelcomeScreen |
 | `FAKE_LOCATION` | `off` | `on` uses `FakeLocationSource` and shows the dev location panel; always on for Linux desktop (`Env.fakeLocationOn`) | `locationSourceProvider`, driver screens |
 | `APP_LINK_HOST` | `app.anbessa.et` | public host for https app links. **Not read anywhere in `lib/`**; the Android manifest hardcodes `app.anbessa.et` | — |

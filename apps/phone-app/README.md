@@ -33,7 +33,9 @@ Checks, from the root: `dart run melos run analyze` and `dart run melos run test
 | `API_BASE_URL`, `HOST_BASE` | Kong's URL, or the host for the per-service ports |
 | `WS_URL` | realtime-gateway (Socket.io) |
 | `TILE_URL`, `TILE_ATTRIBUTION` | raster tiles `{z}/{x}/{y}`; empty = OpenStreetMap's (development only) |
-| `TILE_URL_DARK`, `TILE_ATTRIBUTION_DARK` | the dark-theme tiles; empty = the light tiles through a dark filter (CARTO's public dark tiles now need an API key) |
+| `TILE_URL_DARK`, `TILE_ATTRIBUTION_DARK` | the dark-theme raster tiles (desktop); empty = the light tiles through a dark filter |
+| `MAP_STYLE_URL`, `MAP_STYLE_URL_DARK` | vector map styles (Android and iOS); empty = OpenFreeMap `positron` / `dark` |
+| `SATELLITE_TILE_URL`, `SATELLITE_ATTRIBUTION` | satellite imagery tiles; empty = Esri World Imagery |
 | `DEV_LOGIN` | `on`: the dev sign-in panel (debug builds only; the backend refuses it in production) |
 | `FAKE_LOCATION` | `on`: simulated location (always on for Linux desktop) |
 | `APP_LINK_HOST` | host of the `https://` app links (`app.anbessa.et`) |
@@ -71,7 +73,7 @@ apps/phone-app
 - **Routing** (`lib/core/router/app_router.dart`): one go_router table, redirects in this order: still loading → splash; too old a version → update required; signed out → welcome; both roles and no choice → mode; driver mode without an approved profile → onboarding; an active trip takes over (SOS, support and account screens excepted). Deep links `anbessa://trip/<id>` and `https://app.anbessa.et/pay/<tripId>` resolve to the current mode.
 - **Realtime** (`lib/core/realtime/realtime_hub.dart`): one Socket.io connection while signed in. A fresh JWT before every (re)connect (the gateway only checks it at the handshake), trip rooms re-joined after reconnects, three refusals sign out. Without the socket, the rider's view of the driver falls back to polling, and the active trip is refetched on reconnect and on resume.
 - **Location** (`lib/core/location`): `GeolocatorSource` (on Android a foreground service keeps pings going while the driver is online) or `FakeLocationSource`. Online drivers ping every 4 s when moving and 10 s when still; the gateway's acks are counted on the home screen.
-- **Maps** (`lib/features/maps`): `AnbessaMap` on flutter_map + flutter_map_animations: raster tiles that follow the theme, an animated camera that fits pins and route above the bottom sheet, follow modes (me, the driver, the driver's heading for navigation), recenter and north buttons, road lines from the quote / trip / `GET /api/maps/route`, callouts, the nearby cars (`GET /api/locations/nearby`, polled every 10 s), and `MarkerAnimator`, which glides the car between pings, dead-reckons with `speed` and greys it when stale. `nav/` holds the driver's `NavigationController` (route with steps, progress, reroute when off the route for 8 s), the turn banner and list, and the external-navigation hand-off.
+- **Maps** (`lib/features/maps`): `AnbessaMap`, one widget over two engines: MapLibre on Android and iOS (vector maps in 2D, 3D with buildings, or satellite) and flutter_map on the desktop and in tests (2D and satellite). The person picks the mode with the map's first control; free styles with no API key by default (OpenFreeMap, Esri imagery). An animated camera that fits pins and route above the bottom sheet, follow modes (me, the driver, the driver's heading for navigation), recenter and north buttons, road lines from the quote / trip / `GET /api/maps/route`, callouts, the nearby cars (`GET /api/locations/nearby`, polled every 10 s), and `MarkerAnimator`, which glides the car between pings, dead-reckons with `speed` and greys it when stale. `nav/` holds the driver's `NavigationController` (route with steps, progress, reroute when off the route for 8 s), the turn banner and list, and the external-navigation hand-off.
 - **Design**: `packages/core/lib/src/ui`. Screens use the tokens and shared widgets, work at 1.3× text, and follow the system's reduce-motion setting. Page transitions are in `lib/core/router/transitions.dart`; haptics in `lib/core/ux/haptics.dart`.
 - **Settings**: on the device, in `SharedPreferences` (keys in `lib/core/prefs_keys.dart`): theme, language, mode, intro seen, recent places, last payment method, billing organisation, dismissed announcements, notification toggles, emergency contact, navigation app / bearing / keep awake. On the server: saved places (`/api/trips/places`), name and photo (`update-user`, a 256 px JPEG data URL), mobile-money provider, payout method, sessions. Notification toggles are local until a preferences service exists.
 - **Money**: amounts are minor units (santim) everywhere; `birr()` formats them per locale. Mobile money and card are charged after the trip; the pay screen follows `payment:action_required` / `captured` / `failed` and opens the provider's page. The providers are simulated by payment-service until the real integrations land.
@@ -87,13 +89,13 @@ Client-config (`GET /api/platform/client-config`) carries `features`. Admins swi
 | `corporateBooking` | company-account payment at the quote, for company employees | live |
 | `tripPin` | the rider sees the PIN; the driver must enter it | live |
 | (constants) `kTipsEnabled`, `kMaskedCallsEnabled`, `kChatEnabled` | tips on the rating screen, masked calls and chat on the trip screens | not yet: off in code |
-| `scheduledRides` | Scheduled rides (home, account) | not yet: screens, models and `ScheduledRidesRepository` exist |
-| `sos` | SOS button on active trips (call 991, alert the safety team) | calling works; alerting needs the safety service |
-| `support` | Support tickets (account) | not yet: `SupportRepository` |
-| `promos` | Promo codes (home, account) | not yet: `PromosRepository` |
+| `scheduledRides` | Scheduled rides (home chip, account, quote "Pickup time", Activity "Upcoming") | yes: trip-service `/api/trips/scheduled` |
+| `sos` | SOS button on active trips and for 30 min after drop-off (hold 2 s: call 991 and alert the safety team) | yes: support-service `/api/support` SOS |
+| `support` | Help and tickets (account, receipt), lost items (rider and driver) | yes: support-service `/api/support` |
+| `promos` | Promo-code row on the quote screen | yes: pricing-service `promoCode` on estimates |
 | `accountDeletion` | Delete account (account) | not yet: `AccountRepository` |
 
-These modules live in `lib/features/flagged/flagged_modules.dart`. Each repository's stand-in answers `not_available`, so turning a flag on early shows "not available yet" rather than breaking. When a service lands, implement the repository against it and override its provider.
+The modules still without a backend live in `lib/features/flagged/flagged_modules.dart`. Each repository's stand-in answers `not_available`, so turning a flag on early shows "not available yet" rather than breaking. When a service lands, implement the repository against it and override its provider.
 
 ## Changing the contracts
 
@@ -102,7 +104,7 @@ The Dart models mirror `libs/shared-types` and the services' views by hand. A ch
 ## Tests
 
 - `packages/core/test`: model fixtures, the API client against a fake HTTP adapter (auth refresh and replay, idempotency, error mapping), domain helpers.
-- `apps/phone-app/test`: TokenManager, OfferController (fake socket, haptics), the router's guard order (intro gate included), `MarkerAnimator`, `NavigationController`, and screen tests on a 360 dp screen at 1.3× text in light and dark: the smoke test (English and Amharic), the rider trip stages, the driver home / trip / PIN sheet, earnings and onboarding, the flagged modules. `support/fakes.dart` holds the fixed controllers they share.
+- `apps/phone-app/test`: TokenManager, OfferController (fake socket, haptics), the router's guard order (intro gate included), `MarkerAnimator`, `NavigationController`, and screen tests on a 360 dp screen at 1.3× text in light and dark: the smoke test (English and Amharic), the rider trip stages, the driver home / trip / PIN sheet, earnings and onboarding, promo codes, booking for later and company rides on the quote screen, scheduled rides in Activity, the new realtime pushes, incentives and marketing switches, the flagged modules. `support/fakes.dart` holds the fixed controllers they share.
 - Against the running services (`make dev-services`): there is no committed end-to-end suite yet. Contracts were checked with a throwaway Dart script that imports `ride_app_core`'s `src/` files and `socket_io_client` and drives a whole trip as a rider and a driver (nearby cars, saved places, route and ETA quotes, offer, live positions with speed, share link, rating tags, earnings); run such a script with `dart run --packages=.dart_tool/package_config.json <file>` from the repo root.
 
 ## Platforms

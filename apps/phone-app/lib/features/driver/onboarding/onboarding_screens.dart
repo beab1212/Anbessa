@@ -348,13 +348,13 @@ class _ApplyScreenState extends ConsumerState<ApplyScreen> {
           const SizedBox(height: 18),
           Text(l.applyLede, style: AnbessaType.body2.copyWith(color: c.text2)),
           const SizedBox(height: 18),
-          TextField(controller: _name, textCapitalization: TextCapitalization.words, autofillHints: const [AutofillHints.name], decoration: InputDecoration(labelText: l.fullName, prefixIcon: const Icon(Icons.person_outline)), onChanged: (_) => setState(() {})),
+          TextField(controller: _name, textCapitalization: TextCapitalization.words, autofillHints: const [AutofillHints.name], decoration: InputDecoration(labelText: l.fullName), onChanged: (_) => setState(() {})),
           const SizedBox(height: 12),
-          TextField(controller: _licence, textCapitalization: TextCapitalization.characters, decoration: InputDecoration(labelText: l.licenseNumber, prefixIcon: const Icon(Icons.badge_outlined)), onChanged: (_) => setState(() {})),
+          TextField(controller: _licence, textCapitalization: TextCapitalization.characters, decoration: InputDecoration(labelText: l.licenseNumber), onChanged: (_) => setState(() {})),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
             initialValue: city,
-            decoration: InputDecoration(labelText: l.cityLabel, prefixIcon: const Icon(Icons.location_city_outlined)),
+            decoration: InputDecoration(labelText: l.cityLabel),
             items: [for (final c in cfg.cities) DropdownMenuItem(value: c.id, child: Text(c.name))],
             onChanged: (v) => setState(() => _city = v),
           ),
@@ -542,13 +542,13 @@ class _DocumentCard extends StatelessWidget {
               Row(
                 children: [
                   if (d != null) ...[
-                    Expanded(child: OutlinedButton.icon(onPressed: enabled ? () => _view(context, d) : null, icon: const Icon(Icons.visibility_outlined, size: 18), label: Text(l.viewDocument))),
+                    Expanded(child: OutlinedButton(onPressed: enabled ? () => _view(context, d) : null, child: Text(l.viewDocument))),
                     const SizedBox(width: 8),
                   ],
                   Expanded(
                     child: item.needsUpload
                         ? PrimaryButton(label: l.upload, icon: Icons.upload_file, onPressed: enabled ? onPick : null)
-                        : OutlinedButton.icon(onPressed: enabled ? onPick : null, icon: const Icon(Icons.upload_file, size: 18), label: Text(l.replace)),
+                        : OutlinedButton(onPressed: enabled ? onPick : null, child: Text(l.replace)),
                   ),
                 ],
               ),
@@ -603,7 +603,8 @@ class _DocumentThumbState extends ConsumerState<DocumentThumb> {
   Widget build(BuildContext context) {
     final c = context.colors;
     final d = widget.document;
-    final glyph = Icon(d == null ? Icons.add_photo_alternate_outlined : d.isImage ? Icons.image_outlined : Icons.picture_as_pdf_outlined, color: d == null ? c.muted : c.accentStrong, size: 26);
+    // a plain file-type label instead of a glyph; an empty slot stays blank
+    final glyph = Text(d == null ? '' : d.isImage ? 'IMG' : 'PDF', style: AnbessaType.caption.copyWith(color: c.muted, fontWeight: FontWeight.w700, letterSpacing: 0.5));
     return ClipRRect(
       borderRadius: BorderRadius.circular(AnbessaRadius.sm),
       child: Container(
@@ -677,7 +678,7 @@ class _VehicleFormScreenState extends ConsumerState<VehicleFormScreen> {
         children: [
           Text(l.vehicleFormLede, style: AnbessaType.body2.copyWith(color: c.text2)),
           const SizedBox(height: 18),
-          TextField(controller: _plate, textCapitalization: TextCapitalization.characters, decoration: InputDecoration(labelText: l.plateNumber, hintText: '3-A40402', prefixIcon: const Icon(Icons.pin_outlined)), onChanged: (_) => setState(() {})),
+          TextField(controller: _plate, textCapitalization: TextCapitalization.characters, decoration: InputDecoration(labelText: l.plateNumber, hintText: '3-A40402'), onChanged: (_) => setState(() {})),
           const SizedBox(height: 14),
           Text(l.vehicleType, style: AnbessaType.label.copyWith(color: c.muted, letterSpacing: 0.4)),
           const SizedBox(height: 8),
@@ -703,15 +704,13 @@ class _VehicleFormScreenState extends ConsumerState<VehicleFormScreen> {
                       width: 104,
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: sel ? c.accentSoft : c.surface,
+                        color: c.surface,
                         borderRadius: BorderRadius.circular(AnbessaRadius.md),
-                        border: Border.all(color: sel ? c.accent : c.border, width: sel ? 2 : 1),
+                        border: Border.all(color: sel ? c.text : c.border, width: sel ? 2 : 1),
                       ),
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          VehicleGlyph(t.code, size: 34),
-                          const SizedBox(height: 6),
                           Text(t.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: AnbessaType.label.copyWith(color: c.text)),
                         ],
                       ),
@@ -819,8 +818,6 @@ class _VehicleScreenState extends ConsumerState<VehicleScreen> {
                 radius: AnbessaRadius.lg,
                 child: Row(
                   children: [
-                    VehicleGlyph(v.vehicleType, size: 44),
-                    const SizedBox(width: 12),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,

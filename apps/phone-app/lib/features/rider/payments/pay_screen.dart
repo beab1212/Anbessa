@@ -146,11 +146,9 @@ class _PayScreenState extends ConsumerState<PayScreen> {
     if (!trip.isDigital) {
       hero = Column(
         children: [
-          Container(width: 64, height: 64, decoration: BoxDecoration(color: c.accentSoft, shape: BoxShape.circle), child: Icon(trip.paymentMethod == PaymentMethod.cash ? Icons.payments_outlined : Icons.business_outlined, size: 32, color: c.accentStrong)),
-          const SizedBox(height: 14),
-          AnimatedMoney(trip.fare.chargedMinor, locale: context.localeTag, style: AnbessaType.display.copyWith(color: c.text)),
+          AnimatedMoney(trip.fare.payableMinor, locale: context.localeTag, style: AnbessaType.display.copyWith(color: c.text)),
           const SizedBox(height: 8),
-          Text(trip.paymentMethod == PaymentMethod.cash ? l.payCashInstruction(birr(trip.fare.chargedMinor, locale: context.localeTag)) : l.payCorporateInstruction, textAlign: TextAlign.center, style: AnbessaType.body.copyWith(color: c.text2)),
+          Text(trip.paymentMethod == PaymentMethod.cash ? l.payCashInstruction(birr(trip.fare.payableMinor, locale: context.localeTag)) : l.payCorporateInstruction, textAlign: TextAlign.center, style: AnbessaType.body.copyWith(color: c.text2)),
         ],
       );
     } else if (fare == null) {
@@ -214,7 +212,7 @@ class _PayScreenState extends ConsumerState<PayScreen> {
               FloatingCard(padding: const EdgeInsets.all(20), child: hero),
               const SizedBox(height: 12),
               Problem(_error, describe: (e) => describeError(l, e)),
-              if (trip.isDigital && fare != null && fare.isOpen) TextButton.icon(onPressed: () => ref.read(tripPaymentsProvider(widget.tripId).notifier).refresh(), icon: const Icon(Icons.refresh), label: Text(l.checkStatus)),
+              if (trip.isDigital && fare != null && fare.isOpen) TextButton(onPressed: () => ref.read(tripPaymentsProvider(widget.tripId).notifier).refresh(), child: Text(l.checkStatus)),
               const SizedBox(height: 12),
               ReceiptCard(trip: trip),
               const SizedBox(height: 20),
@@ -284,7 +282,8 @@ class ReceiptCard extends StatelessWidget {
         children: [
           KeyValue(l.fareLabel, MoneyText(trip.fare.estimateMinor, locale: loc)),
           if ((trip.fare.waitingFeeMinor ?? 0) > 0) KeyValue(l.waitingFeeLabel, MoneyText(trip.fare.waitingFeeMinor, locale: loc)),
-          KeyValue(l.totalLabel, MoneyText(trip.fare.chargedMinor, locale: loc, style: AnbessaType.title.copyWith(color: c.text))),
+          if (trip.fare.promoDiscountMinor > 0) KeyValue(promoLabel(l, trip.fare), MoneyText(-trip.fare.promoDiscountMinor, locale: loc, style: TextStyle(color: c.success))),
+          KeyValue(l.totalLabel, MoneyText(trip.fare.payableMinor, locale: loc, style: AnbessaType.title.copyWith(color: c.text))),
           KeyValue(l.paymentMethod, Text(paymentMethodLabel(l, trip.paymentMethod))),
           KeyValue(l.pickupLabel, Text(trip.pickup.address ?? '—')),
           KeyValue(l.dropoffLabel, Text(trip.dropoff.address ?? '—')),

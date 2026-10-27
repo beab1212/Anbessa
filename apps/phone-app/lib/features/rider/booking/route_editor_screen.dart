@@ -6,7 +6,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
@@ -50,7 +49,6 @@ class _RouteEditorScreenState extends ConsumerState<RouteEditorScreen> {
   Place? _mapPlace;
   bool _resolving = false;
   Object? _error;
-  final _mapCtrl = MapController();
 
   bool get _savedMode => widget.mode == RouteEditorMode.savedPlace;
 
@@ -93,7 +91,6 @@ class _RouteEditorScreenState extends ConsumerState<RouteEditorScreen> {
     _dropoffCtrl.dispose();
     _pickupFocus.dispose();
     _dropoffFocus.dispose();
-    _mapCtrl.dispose();
     super.dispose();
   }
 
@@ -231,7 +228,7 @@ class _RouteEditorScreenState extends ConsumerState<RouteEditorScreen> {
     final local = common.where(match).take(q.isEmpty ? 6 : 8).toList();
     final remote = text.length >= 2 && _remoteFor == text ? _remote.where((r) => !local.any((x) => x.name == r.name)).toList() : const <Place>[];
     final activePickup = _active == RouteField.pickup && !_savedMode;
-    final tone = activePickup ? PinTone.amber : PinTone.ink;
+    final tone = activePickup ? PinTone.pickup : PinTone.dropoff;
 
     if (_onMap) {
       final start = ref.read(lastPositionProvider)?.let((p) => LatLng(p.lat, p.lng)) ?? LatLng(city.bbox.centerLat, city.bbox.centerLng);
@@ -239,7 +236,6 @@ class _RouteEditorScreenState extends ConsumerState<RouteEditorScreen> {
         body: Stack(
           children: [
             AnbessaMap(
-              mapController: _mapCtrl,
               center: start,
               zoom: 16,
               onMove: _onMapMoved,
@@ -281,7 +277,7 @@ class _RouteEditorScreenState extends ConsumerState<RouteEditorScreen> {
       );
     }
 
-    Widget field(RouteField f, TextEditingController ctrl, FocusNode focus, IconData icon, Color color, String hint) => TextField(
+    Widget field(RouteField f, TextEditingController ctrl, FocusNode focus, Color? dot, String hint, {bool square = false}) => TextField(
           controller: ctrl,
           focusNode: focus,
           textInputAction: TextInputAction.search,
@@ -292,9 +288,11 @@ class _RouteEditorScreenState extends ConsumerState<RouteEditorScreen> {
           onTap: () => ctrl.selection = TextSelection(baseOffset: 0, extentOffset: ctrl.text.length),
           decoration: InputDecoration(
             hintText: hint,
-            prefixIcon: Icon(icon, color: color, size: 20),
+            // pickup / drop-off keep the map's plain dot and square; the search field has none
+            prefixIcon: dot == null ? null : Center(widthFactor: 1, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 14), child: Container(width: 10, height: 10, decoration: BoxDecoration(color: dot, shape: square ? BoxShape.rectangle : BoxShape.circle)))),
             suffixIcon: ctrl.text.isNotEmpty
                 ? IconButton(
+                    tooltip: l.close,
                     icon: const Icon(Icons.close, size: 18),
                     onPressed: () {
                       ctrl.clear();
@@ -314,15 +312,15 @@ class _RouteEditorScreenState extends ConsumerState<RouteEditorScreen> {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
             child: _savedMode
-                ? field(RouteField.dropoff, _dropoffCtrl, _dropoffFocus, Icons.search, c.accentStrong, l.searchPlaces)
+                ? field(RouteField.dropoff, _dropoffCtrl, _dropoffFocus, null, l.searchPlaces)
                 : Row(
                     children: [
                       Expanded(
                         child: Column(
                           children: [
-                            field(RouteField.pickup, _pickupCtrl, _pickupFocus, Icons.trip_origin, c.accent, l.pickupHint),
+                            field(RouteField.pickup, _pickupCtrl, _pickupFocus, c.accent, l.pickupHint),
                             const SizedBox(height: 8),
-                            field(RouteField.dropoff, _dropoffCtrl, _dropoffFocus, Icons.stop_rounded, c.text, l.dropoffHint),
+                            field(RouteField.dropoff, _dropoffCtrl, _dropoffFocus, c.text, l.dropoffHint, square: true),
                           ],
                         ),
                       ),
@@ -348,22 +346,22 @@ class _RouteEditorScreenState extends ConsumerState<RouteEditorScreen> {
             child: ListView(
               padding: const EdgeInsets.only(bottom: 24),
               children: [
-                _Row(icon: Icons.my_location, tone: c.accentStrong, title: l.useCurrentLocation, busy: _resolving, onTap: _resolving ? null : _useMyLocation),
-                _Row(icon: Icons.map_outlined, tone: c.accentStrong, title: l.chooseOnMap, onTap: () => setState(() => _onMap = true)),
+                _Row(title: l.useCurrentLocation, busy: _resolving, onTap: _resolving ? null : _useMyLocation),
+                _Row(title: l.chooseOnMap, onTap: () => setState(() => _onMap = true)),
                 const Divider(height: 8),
                 if (_searchDown && text.length >= 2) Padding(padding: const EdgeInsets.fromLTRB(16, 8, 16, 8), child: Notice(l.searchDown, tone: NoticeTone.warning)),
                 if (_searching) const Padding(padding: EdgeInsets.symmetric(horizontal: 16), child: SkeletonList(rows: 3)),
                 if (savedHits.isNotEmpty) ...[
                   _Header(l.savedPlacesHeader),
-                  for (final p in savedHits) _Row(icon: p.label == PlaceLabel.home ? Icons.home_rounded : p.label == PlaceLabel.work ? Icons.work_rounded : Icons.star_rounded, tone: c.accentStrong, title: p.name, subtitle: p.address, onTap: () => _picked(p.place)),
+                  for (final p in savedHits) _Row(title: p.name, subtitle: p.address, onTap: () => _picked(p.place)),
                 ],
                 if (recentHits.isNotEmpty) ...[
                   _Header(l.recentPlaces),
-                  for (final p in recentHits) _Row(icon: Icons.history, tone: c.muted, title: p.name, subtitle: p.label, onTap: () => _picked(p)),
+                  for (final p in recentHits) _Row(title: p.name, subtitle: p.label, onTap: () => _picked(p)),
                 ],
                 if (local.isNotEmpty || remote.isNotEmpty) _Header(text.length >= 2 ? l.searchResults : l.commonPlaces),
-                for (final p in local) _Row(icon: Icons.place_outlined, tone: c.muted, title: p.name, subtitle: p.label, onTap: () => _picked(p)),
-                for (final p in remote) _Row(icon: Icons.place_outlined, tone: c.muted, title: p.name, subtitle: p.label, onTap: () => _picked(p)),
+                for (final p in local) _Row(title: p.name, subtitle: p.label, onTap: () => _picked(p)),
+                for (final p in remote) _Row(title: p.name, subtitle: p.label, onTap: () => _picked(p)),
                 if (text.length >= 2 && savedHits.isEmpty && recentHits.isEmpty && local.isEmpty && remote.isEmpty && !_searching && !_searchDown)
                   IllustratedEmpty(illustration: AnbessaIllustration.searchEmpty, title: l.noResults, compact: true),
               ],
@@ -386,9 +384,7 @@ class _Header extends StatelessWidget {
 }
 
 class _Row extends StatelessWidget {
-  const _Row({required this.icon, required this.tone, required this.title, this.subtitle, this.onTap, this.busy = false});
-  final IconData icon;
-  final Color tone;
+  const _Row({required this.title, this.subtitle, this.onTap, this.busy = false});
   final String title;
   final String? subtitle;
   final VoidCallback? onTap;
@@ -397,7 +393,6 @@ class _Row extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.colors;
     return ListTile(
-      leading: Container(width: 38, height: 38, decoration: BoxDecoration(color: c.surface2, shape: BoxShape.circle), child: Icon(icon, color: tone, size: 20)),
       title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: AnbessaType.body.copyWith(fontWeight: FontWeight.w500)),
       subtitle: subtitle == null || subtitle!.isEmpty ? null : Text(subtitle!, maxLines: 1, overflow: TextOverflow.ellipsis, style: AnbessaType.caption.copyWith(color: c.muted)),
       trailing: busy ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : null,

@@ -25,7 +25,6 @@ Future<Vehicle?> showVehiclePicker(BuildContext context, {required List<Vehicle>
                       Opacity(
                         opacity: v.canDrive == false ? 0.6 : 1,
                         child: ChoiceRow(
-                          leading: VehicleGlyph(v.vehicleType, size: 40, selected: v.id == selectedId),
                           title: '${v.plateNumber} · ${v.label}',
                           subtitle: v.canDrive == false ? (v.denialMessage != null ? describeError(l, AppError(status: 403, code: v.denial ?? '', message: v.denialMessage!)) : l.notEligible) : (v.isFleet ? l.fleetCar : l.ready),
                           selected: v.id == selectedId,

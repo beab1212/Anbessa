@@ -41,15 +41,38 @@ class NotificationsScreen extends ConsumerWidget {
     final c = context.colors;
     final n = ref.watch(notificationPrefsProvider);
     final h = ref.watch(hapticsSettingsProvider);
+    final marketing = ref.watch(marketingPrefsProvider);
+    final m = marketing.value;
+    Future<void> setMarketing({bool? push, bool? sms}) async {
+      try {
+        await ref.read(marketingPrefsProvider.notifier).set(push: push, sms: sms);
+      } catch (e) {
+        if (context.mounted) showToast(context, describeError(l, e), tone: NoticeTone.error);
+      }
+    }
+
     return Scaffold(
       appBar: AppBar(title: Text(l.notifications)),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
           SectionGroup(
+            title: l.marketingTitle,
+            children: [
+              if (marketing.isLoading && m == null)
+                const Padding(padding: EdgeInsets.all(16), child: SkeletonList(rows: 2))
+              else if (m == null)
+                Padding(padding: const EdgeInsets.all(12), child: Problem(marketing.error, describe: (e) => describeError(l, e), onRetry: () => ref.invalidate(marketingPrefsProvider), retryLabel: l.retry))
+              else ...[
+                SettingsSwitchTile(icon: Icons.campaign_outlined, title: l.marketingPush, value: m.push, onChanged: (v) => setMarketing(push: v)),
+                SettingsSwitchTile(icon: Icons.sms_outlined, title: l.marketingSms, value: m.sms, onChanged: (v) => setMarketing(sms: v)),
+              ],
+            ],
+          ),
+          Padding(padding: const EdgeInsets.fromLTRB(4, 0, 4, 16), child: Text(l.marketingLede, style: AnbessaType.caption.copyWith(color: c.muted))),
+          SectionGroup(
             children: [
               SettingsSwitchTile(icon: Icons.directions_car_outlined, title: l.notifTripUpdates, subtitle: l.notifTripUpdatesLede, value: n.trip, onChanged: (v) => ref.read(notificationPrefsProvider.notifier).set(trip: v)),
-              SettingsSwitchTile(icon: Icons.campaign_outlined, title: l.notifPromos, value: n.promo, onChanged: (v) => ref.read(notificationPrefsProvider.notifier).set(promo: v)),
               SettingsSwitchTile(icon: Icons.volume_up_outlined, title: l.notifSound, value: n.sound, onChanged: (v) => ref.read(notificationPrefsProvider.notifier).set(sound: v)),
             ],
           ),
@@ -59,7 +82,7 @@ class NotificationsScreen extends ConsumerWidget {
               SettingsSwitchTile(icon: Icons.touch_app_outlined, title: l.notifHaptics, value: h.haptics, onChanged: (v) => ref.read(hapticsSettingsProvider.notifier).setHaptics(v)),
             ],
           ),
-          Text(l.notifLocalOnly, style: AnbessaType.caption.copyWith(color: c.muted)),
+          Text(l.notifOtherLocal, style: AnbessaType.caption.copyWith(color: c.muted)),
         ],
       ),
     );
@@ -100,9 +123,9 @@ class _SafetyScreenState extends ConsumerState<SafetyScreen> {
           const SizedBox(height: 6),
           Text(l.emergencyContactLede, style: AnbessaType.body2.copyWith(color: c.text2)),
           const SizedBox(height: 20),
-          TextField(controller: _name, decoration: InputDecoration(labelText: l.contactName, prefixIcon: const Icon(Icons.person_outline)), textCapitalization: TextCapitalization.words, onChanged: (_) => setState(() {})),
+          TextField(controller: _name, decoration: InputDecoration(labelText: l.contactName), textCapitalization: TextCapitalization.words, onChanged: (_) => setState(() {})),
           const SizedBox(height: 12),
-          TextField(controller: _phone, keyboardType: TextInputType.phone, decoration: InputDecoration(labelText: l.contactPhone, prefixIcon: const Icon(Icons.phone_outlined), hintText: '+251 9…'), onChanged: (_) => setState(() {})),
+          TextField(controller: _phone, keyboardType: TextInputType.phone, decoration: InputDecoration(labelText: l.contactPhone, hintText: '+251 9…'), onChanged: (_) => setState(() {})),
           const SizedBox(height: 12),
           Problem(_error, describe: (e) => describeError(l, e)),
           const SizedBox(height: 8),
@@ -239,7 +262,7 @@ class _OrganizationsScreenState extends ConsumerState<OrganizationsScreen> {
                       trailing: o.isCorporate && corporate.length > 1
                           ? IconButton(
                               tooltip: l.defaultBilling,
-                              icon: Icon((billing ?? corporate.first.id) == o.id ? Icons.check_circle : Icons.radio_button_unchecked, color: (billing ?? corporate.first.id) == o.id ? c.accentStrong : c.borderStrong),
+                              icon: Icon((billing ?? corporate.first.id) == o.id ? Icons.check_circle : Icons.radio_button_unchecked, color: (billing ?? corporate.first.id) == o.id ? c.text : c.borderStrong),
                               onPressed: () => ref.read(billingOrgProvider.notifier).set(o.id),
                             )
                           : null,
