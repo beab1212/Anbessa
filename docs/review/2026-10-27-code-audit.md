@@ -34,7 +34,8 @@ Severity: **P0** blocks production or loses money / signs users out; **P1** wron
 - **P1 — fixed** `GET /api/payments/balances/me?open=false` created the account (`z.coerce.boolean()` reads `"false"` as true); same in platform-service `?refresh=false`. Both now use a strict flag.
 - **P1** Charge retries against an unreachable provider never count an attempt and repeat every 30 s forever. A simulated refund whose call failed stays `PROCESSING` forever.
 - **P1** The weekly payout batch is created on the first 10-minute tick of an Addis Monday; if the service is down all Monday, that week is skipped.
-- **P2** Permission oddities: "check with provider" needs `commission:collect`; `GET /top-ups` isn't city-filtered; `payment:read @ ORG` can never match. Office-cash duplicate receipts are checked in code only (no unique index). Kong caps the whole service at 120/min while webhooks allow 600/min. Outbox, inbox and webhook-event rows are never purged. `seed:dev` points at a missing file.
+- **P2 — fixed** `GET /api/payments/top-ups` wasn't city-filtered. It now lists only the cities where the person holds `topup:record_cash`, `topup:approve_cash` or `balance:read` (by the balance owner's city) and takes `?cityId=` (403 outside reach); `GET /api/payments/payments?cityId=` is refused the same way.
+- **P2** Permission oddities: "check with provider" needs `commission:collect`; `payment:read @ ORG` can never match. Office-cash duplicate receipts are checked in code only (no unique index). Kong caps the whole service at 120/min while webhooks allow 600/min. Outbox, inbox and webhook-event rows are never purged. `seed:dev` points at a missing file.
 
 ## Trips (trip-service)
 
@@ -73,7 +74,8 @@ Severity: **P0** blocks production or loses money / signs users out; **P1** wron
 
 ## Auth
 
-- **P1** Several staff routes (`/users`, `/users/:id`, `/stats`, the approvals inbox) check permissions without a city, so city-scoped holders get 403.
+- **P1 — fixed** `/users`, `/users/:id` and `/stats` checked permissions without a city, so city-scoped holders got 403. The directory now opens for `user:read_masked` in any city (masked phones, devices hidden without PII or a global grant) and `/stats` takes `?cityId=` (`report:read` there). Organisations are also listed and read with `org:suspend` as well as `org:read` (new `GET /organizations/:id`).
+- **P1 — fixed** The approvals inbox (`GET /approvals`) checked without a city, so city-scoped holders of the request/approve permissions got 403. Requests now carry `city_id`; the inbox shows each action's requests in the cities where the person holds its request or approve permission (global holders: all; city-less requests: global holders only), and approve/reject check the approve permission in the request's city (maker ≠ checker unchanged). `role:request` for a city role is checked in that city.
 - **P1** Nothing lifts a timed suspension when `ban_expires` passes; token minting stays refused until reinstate.
 - **P2** The general rate limit (300/min per IP) is in-memory per replica and covers `/internal/*` (fleet too). `role:grant` duplicate-pending check races. Permission-matrix seeding at start isn't locked. `outbox.attempts` is never written; the relay has no back-off or DLQ and no shutdown flush. `AUTH_INTERNAL_URL` is parsed but unused. `/internal/organizations/:id/members/:userId` returns the unmasked phone.
 
@@ -81,7 +83,10 @@ Severity: **P0** blocks production or loses money / signs users out; **P1** wron
 
 - **P1** Phone: riders call `GET /api/fleet/drivers/me` on every start. `anbessa://trip/<id>` probably doesn't route (`trip` is the URI host). The billing-organisation setting is ignored by booking (first org in the JWT is used). Notification toggles (`notif_trip/promo/sound`) are stored and never read. The emergency contact isn't used by SOS. Release builds are signed with debug keys; iOS and Android bundle ids differ; no Google Maps / Waze query schemes declared; the offer notification asks for a full-screen intent the manifest doesn't declare.
 - **P2** Phone: the rider's own dot never moves after the first fix; the rider cancel fee shown is hard-coded (30 ETB); mode isn't cleared on sign-out; unused providers and API wrappers (see `apps/phone-app/docs`).
-- **P1** Web: `/partner/org/:orgId/book` has no guard; `/staff/phone` opens even with `phoneBooking` off. The public `/t/:token` page asked for staff and partner tokens on load (**fixed**). `GATEWAY_URL` is overridden by the per-service URLs in the standard `.env`.
+- **P1 — fixed** Web: the staff menu and route guards checked `report:read`, `user:read_masked` and `balance:read` without a city (and Companies only `org:read`), hiding Overview, Users and the money pages from city-scoped roles. They now use `inAnyCity` (and `org:read` or `org:suspend`).
+- **P1 — fixed** Whoever booked a trip for someone else (phone or company booking) and the billed company couldn't see the live car: location-service only let the rider, the driver and the car's fleet owner read it. `trip.matched` now carries `bookedById` and `billingOrgId`; the booker joins the trip members and the billed company's `trip:read` holders may read the position. The partner trip page polls it.
+- **P1 — fixed** Web: `/partner/org/:orgId/book` had no permission check; the page now refuses without `trip:create_on_behalf` and `trip:bill_corporate @ ORG` (or with `features.corporateBooking` off). The public `/t/:token` page asked for staff and partner tokens on load (**fixed**).
+- **P1** Web: `/staff/phone` opened even with `phoneBooking` off (**fixed**: the route now shows a notice when the flag is off). `GATEWAY_URL` is overridden by the per-service URLs in the standard `.env`.
 
 ## Events (from `libs/shared-types/docs/event-catalog.md`)
 
@@ -94,6 +99,6 @@ About 25 of 47 topics are produced and never consumed, including: `driver.locati
 - `Role.md`: approvals go through APPROVED/FAILED (code: PENDING → EXECUTED); `SUPER_ADMIN` lacks `report:read` (code grants it); `vehicle:transfer` needs approval (not in `APPROVAL_PERMISSIONS`); a `SERVICE` role (doesn't exist); `user.suspended` drives denial (code: Redis keys); status line says no audit service.
 - `Database.md`: `driver.location` consumers, `driver.state` and `*.dlq` topics, `acks=all`, pg_partman, a `template` table, `seen` scores in seconds — none match.
 - Workflows 01, 02, 03, 04, 05, 06, 08, 09: event names, endpoints, limits and timings differ in many places; each service's `docs/` lists them.
-- `docs/testing/README.md`: says the web app has no tests (it has 18) and names phone-app files that don't exist.
+- `docs/testing/README.md`: says the web app has no tests (it has 68) and names phone-app files that don't exist.
 - `docs/development/README.md`: ports 3000–3007 (now 3000–3011); Kong "only in stack-up" (also `dev-gateway`); `GATEWAY_URL` instructions don't work with the standard `.env`.
 - Four links in `docs/design` point to a `learned/` folder that isn't in the repo.

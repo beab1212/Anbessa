@@ -43,6 +43,7 @@ Each folder has `README.md` (start here), `architecture.md`, `api.md`, `events.m
 | notification-service | 3006 | OTP delivery, push, notification history | [docs](../services/notification-service/docs/README.md) |
 | mapping-service | 3007 | Routing (OSRM), distance tables, search | [docs](../services/mapping-service/docs/README.md) |
 | fleet-service | 3008 | Drivers, vehicles, documents, review, driving sessions | [docs](../services/fleet-service/docs/README.md) |
+| support-service | 3009 | Support tickets, lost items, SOS alerts, safety incidents | [docs](../services/support-service/docs/README.md) |
 | audit-service | 3010 | The append-only audit log | [docs](../services/audit-service/docs/README.md) |
 | platform-service | 3011 | Live settings, cities, vehicle types, client config, announcements | [docs](../services/platform-service/docs/README.md) |
 
