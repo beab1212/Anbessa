@@ -9,6 +9,10 @@ describe("endpoint allowlist", () => {
     ["app", "GET", "/jwks"],
     ["admin", "POST", "/sign-in/email"],
     ["admin", "POST", "/two-factor/verify-totp"],
+    ["admin", "POST", "/two-factor/verify-backup-code"],
+    ["admin", "POST", "/two-factor/generate-backup-codes"],
+    ["admin", "POST", "/update-user"],
+    ["admin", "GET", "/list-sessions"],
   ] as const)("%s allows %s %s", (surface, method, path) => {
     expect(isAllowed(surface, method, path)).toBe(true);
   });

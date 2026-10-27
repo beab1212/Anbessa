@@ -44,7 +44,7 @@ Migrations are **not** applied at start. Apply them with `prisma migrate deploy`
 | Command | What runs | Needs |
 |---|---|---|
 | `pnpm test` | Unit tests in `tests/unit` (Vitest) | nothing |
-| `pnpm test:integration` | `tests/integration` against the real app via Fastify `inject` | Postgres. `global-setup.ts` drops and recreates `auth_service_test` (name must end in `_test`) and runs `prisma migrate deploy`. Files run sequentially; 30 s per test |
+| `pnpm test:integration` | `tests/integration` against the real app via Fastify `inject` | Postgres. `global-setup.ts` drops and recreates `auth_service_test` (name must end in `_test`) and runs `prisma migrate deploy`; each test file then runs on its own copy (`CREATE DATABASE auth_service_test_<random> TEMPLATE auth_service_test`, dropped when the file ends), so rows one file leaves behind can't affect another. Files run sequentially; 30 s per test |
 | `pnpm lint`, `pnpm typecheck` | ESLint on `src`, `tsc --noEmit` | |
 
 The integration harness (`tests/integration/harness.ts`) uses `OTP_DELIVERY=console` with a sink that captures codes, in-memory `deny`/`pv` signals instead of Redis, `AUTH_RATE_LIMIT=off`, no Kafka (events stay in `outbox`, and tests read them from the table).

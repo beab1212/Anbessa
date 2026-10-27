@@ -142,6 +142,7 @@ model Organization {
   city        City         @relation(fields: [cityId], references: [id])
   members     Member[]
   invitations Invitation[]
+  suspensions OrganizationSuspension[]
 
   @@index([kind, cityId])
   @@map("organization")
@@ -205,6 +206,9 @@ model ApprovalRequest {
   createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz
   decidedAt  DateTime? @map("decided_at") @db.Timestamptz
   expiresAt  DateTime  @map("expires_at") @db.Timestamptz
+  /// the city the action applies to (city-scoped request/approve grants see and decide only their
+  /// cities); null = a platform-wide action, which needs a global grant
+  cityId     String?   @map("city_id")
 
   @@index([status, createdAt])
   @@index([action, status, createdAt(sort: Desc)], map: "ix_approval_action_status")
@@ -262,4 +266,24 @@ model Outbox {
 
   @@index([createdAt], map: "ix_outbox_unpublished")
   @@map("outbox")
+}
+
+/// One row per organisation suspension (workflow 16): what it changed (the status before), why,
+/// and who lifted it. Kept outside `organization` so Better Auth never returns the reason to partners.
+model OrganizationSuspension {
+  id              String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  organizationId  String    @map("organization_id") @db.Uuid
+  /// PENDING | VERIFIED: restored on reinstatement
+  previousStatus  String    @map("previous_status")
+  reason          String
+  suspendedBy     String    @map("suspended_by") @db.Uuid
+  suspendedAt     DateTime  @default(now()) @map("suspended_at") @db.Timestamptz
+  reinstatedBy    String?   @map("reinstated_by") @db.Uuid
+  reinstatedAt    DateTime? @map("reinstated_at") @db.Timestamptz
+  reinstateReason String?   @map("reinstate_reason")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, suspendedAt(sort: Desc)])
+  @@map("organization_suspension")
 }

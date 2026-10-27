@@ -6,7 +6,7 @@
 
 import { randomBytes } from "node:crypto";
 import { v7 as uuidv7 } from "uuid";
-import { authorize, can, hasRole, ROLES, roleInfo, type Principal, type RoleAssignment } from "@ride-app/shared-authz";
+import { authorize, can, citiesWith, hasRole, ROLES, roleInfo, type Permission, type Principal, type RoleAssignment } from "@ride-app/shared-authz";
 import type { Db } from "../db.js";
 import type { Prisma } from "../generated/prisma/client.js";
 import { badRequest, conflict, forbidden, notFound } from "../lib/errors.js";
@@ -30,6 +30,38 @@ export interface IdentityDeps {
 }
 
 type Tx = Prisma.TransactionClient;
+
+/** Cities where the principal holds any of `permissions` ("*" = every city, via a global grant). */
+function citiesWithAny(principal: Principal, permissions: Permission[]): string[] | "*" {
+  const out = new Set<string>();
+  for (const perm of permissions) {
+    const c = citiesWith(principal, perm);
+    if (c === "*") return "*";
+    for (const id of c) out.add(id);
+  }
+  return [...out];
+}
+
+/**
+ * The masked user directory (list and detail). Users aren't bound to a city (a rider rides, a
+ * driver drives, a partner books wherever they like), so there is no city to check a CITY grant
+ * against: holding `user:read_masked` in ANY city opens the masked view (dispatchers, onboarding,
+ * support, operations, marketing and analysts hold it city-scoped). What reveals personal data
+ * stays as strict as before: unmasked phones need `user:read_pii` without a city (a global grant),
+ * session IP addresses and devices are shown only to global directory readers or PII holders,
+ * and every write (suspend, reinstate, sign out, MFA reset) keeps its own scope.
+ * Returns whether the caller reads the directory everywhere (a global grant).
+ */
+function authorizeDirectory(principal: Principal): { everywhere: boolean } {
+  const cities = citiesWith(principal, "user:read_masked");
+  if (cities !== "*" && cities.length === 0) authorize(principal, "user:read_masked"); // throws the usual 403
+  return { everywhere: cities === "*" };
+}
+
+const ORG_READERS: Permission[] = ["org:read", "org:suspend"];
+const ORG_ROW_SELECT = {
+  id: true, name: true, kind: true, cityId: true, legalName: true, tin: true, status: true, createdAt: true, _count: { select: { members: true } },
+} as const;
 
 async function bumpPv(tx: Tx, userId: string): Promise<number> {
   const u = await tx.user.update({ where: { id: userId }, data: { permissionVersion: { increment: 1 } }, select: { permissionVersion: true } });
@@ -189,11 +221,12 @@ export function createIdentityService(deps: IdentityDeps) {
     },
 
     async requestStaffRole(principal: Principal, input: { userId: string; role: string; cityId?: string; reason: string }) {
-      authorize(principal, "role:request");
       const { cityScoped } = staffRole(input.role);
       const role = input.role;
       if (cityScoped && !input.cityId) throw badRequest(`${role} is city-scoped: cityId is required`);
       if (!cityScoped && input.cityId) throw badRequest(`${role} is global: cityId must not be set`);
+      // a city role is requested in its city (a city-scoped role:request covers that city only)
+      authorize(principal, "role:request", cityScoped ? { cityId: input.cityId } : {});
       if (cityScoped) await staffOrgForCity(db, input.cityId!);
       if (input.reason.trim().length < 10) throw badRequest("reason must explain the grant (10+ characters)");
 
@@ -207,7 +240,8 @@ export function createIdentityService(deps: IdentityDeps) {
       const payload = { userId: input.userId, role, cityId: input.cityId ?? null };
       const pending = await db.approvalRequest.findFirst({ where: { action: "role:grant", status: "PENDING", payload: { equals: payload } } });
       if (pending) throw conflict("an identical request is already pending");
-      return db.$transaction((tx) => approvals.create(tx, principal, "role:grant", payload, input.reason));
+      // the city goes on the request: city-scoped approvers see and decide that city's grants only
+      return db.$transaction((tx) => approvals.create(tx, principal, "role:grant", payload, input.reason, input.cityId ?? null));
     },
 
     listStaffRoleRequests: (principal: Principal, status?: string) => approvals.list(principal, { status, action: "role:grant" }),
@@ -295,7 +329,7 @@ export function createIdentityService(deps: IdentityDeps) {
 
     /** Users and staff, searchable (user:read_masked everywhere). Phones are masked without user:read_pii. */
     async listUsers(principal: Principal, q: { q?: string; kind?: "staff" | "rider" | "driver" | "partner" | "guest"; status?: "active" | "suspended"; cursor?: string; limit: number }) {
-      authorize(principal, "user:read_masked");
+      authorizeDirectory(principal);
       const pii = can(principal, "user:read_pii");
       const text = q.q?.trim();
       const digits = text?.replace(/\D/g, "");
@@ -348,8 +382,9 @@ export function createIdentityService(deps: IdentityDeps) {
 
     /** One user: assignments, memberships, sessions. */
     async getUser(principal: Principal, userId: string) {
-      authorize(principal, "user:read_masked");
+      const { everywhere } = authorizeDirectory(principal);
       const pii = can(principal, "user:read_pii");
+      const devices = everywhere || pii; // IP addresses and user agents are personal data too
       const u = await db.user.findUnique({
         where: { id: userId },
         include: {
@@ -376,7 +411,7 @@ export function createIdentityService(deps: IdentityDeps) {
           status: m.organization.status, roles: splitRoles(m.role), since: m.createdAt.toISOString(),
         })),
         sessions: u.sessions.map((s) => ({
-          id: s.id, surface: s.surface, ipAddress: s.ipAddress, userAgent: s.userAgent, createdAt: s.createdAt.toISOString(),
+          id: s.id, surface: s.surface, ipAddress: devices ? s.ipAddress : null, userAgent: devices ? s.userAgent : null, createdAt: s.createdAt.toISOString(),
           lastActiveAt: s.updatedAt.toISOString(), expiresAt: s.expiresAt.toISOString(), active: s.expiresAt > t,
         })),
       };
@@ -418,15 +453,24 @@ export function createIdentityService(deps: IdentityDeps) {
       return { userId, temporaryPassword: r.temporaryPassword };
     },
 
-    /** Aggregates for the admin overview (report:read, no personal data). */
-    async stats(principal: Principal) {
-      authorize(principal, "report:read");
+    /**
+     * Aggregates for the admin overview (no personal data). With `cityId`: `report:read` in that
+     * city; staff counts, staff sessions and partner organisations are that city's, while the
+     * account counts (riders, drivers, guests, sign-ups, suspensions, app sessions) stay
+     * platform-wide because users aren't bound to a city. Without `cityId`: a global `report:read`.
+     */
+    async stats(principal: Principal, cityId?: string) {
+      authorize(principal, "report:read", cityId ? { cityId } : {});
       const t = now();
+      const staffWhere: Prisma.UserWhereInput = {
+        accounts: { some: { providerId: "credential" } },
+        ...(cityId ? { members: { some: { organization: { kind: "STAFF_CITY", cityId } } } } : {}),
+      };
       const day = new Date(t.getTime() - 86_400_000);
       const week = new Date(t.getTime() - 7 * 86_400_000);
       const [users, staff, riders, drivers, guests, suspended, signups24h, signups7d, appSessions, adminSessions, staffNoMfa, partners] = await Promise.all([
         db.user.count(),
-        db.user.count({ where: { accounts: { some: { providerId: "credential" } } } }),
+        db.user.count({ where: staffWhere }),
         db.user.count({ where: { role: { contains: ROLES.RIDER.stored }, accountStatus: { not: "GUEST" } } }),
         db.user.count({ where: { role: { contains: ROLES.DRIVER.stored } } }),
         db.user.count({ where: { accountStatus: "GUEST" } }),
@@ -434,27 +478,48 @@ export function createIdentityService(deps: IdentityDeps) {
         db.user.count({ where: { createdAt: { gte: day } } }),
         db.user.count({ where: { createdAt: { gte: week } } }),
         db.session.count({ where: { surface: "app", expiresAt: { gt: t } } }),
-        db.session.count({ where: { surface: "admin", expiresAt: { gt: t } } }),
-        db.user.count({ where: { accounts: { some: { providerId: "credential" } }, twoFactorEnabled: { not: true } } }),
-        db.organization.groupBy({ by: ["kind", "status"], where: { kind: { in: ["FLEET", "CORPORATE"] } }, _count: true }),
+        db.session.count({ where: { surface: "admin", expiresAt: { gt: t }, ...(cityId ? { user: staffWhere } : {}) } }),
+        db.user.count({ where: { ...staffWhere, twoFactorEnabled: { not: true } } }),
+        db.organization.groupBy({ by: ["kind", "status"], where: { kind: { in: ["FLEET", "CORPORATE"] }, ...(cityId ? { cityId } : {}) }, _count: true }),
       ]);
       return {
+        cityId: cityId ?? null,
         users, staff, riders, drivers, guests, suspended, signups24h, signups7d,
         activeSessions: { app: appSessions, admin: adminSessions }, staffWithoutMfa: staffNoMfa,
         organizations: partners.map((g) => ({ kind: g.kind, status: g.status, count: g._count })),
       };
     },
 
-    /** Onboarding queue: partner organisations of a city, by status (org:read @ CITY). */
-    async listOrganizations(principal: Principal, q: { cityId: string; status?: string }) {
-      authorize(principal, "org:read", { cityId: q.cityId });
+    /**
+     * Partner organisations, by status. Readable with `org:read` OR `org:suspend` in the org's city:
+     * safety and finance officers may suspend companies (org:suspend) without holding org:read, and
+     * they must be able to find the company they act on. With `cityId`: that city (either
+     * permission there). Without: every city where the caller holds either (global holders: all).
+     */
+    async listOrganizations(principal: Principal, q: { cityId?: string; status?: string }) {
+      const cities = citiesWithAny(principal, ORG_READERS);
+      if (q.cityId) {
+        if (!ORG_READERS.some((perm) => can(principal, perm, { cityId: q.cityId }))) authorize(principal, "org:read", { cityId: q.cityId });
+      } else if (cities !== "*" && cities.length === 0) {
+        authorize(principal, "org:read"); // throws the usual 403
+      }
+      const city = q.cityId ? { cityId: q.cityId } : cities === "*" ? {} : { cityId: { in: cities } };
       const orgs = await db.organization.findMany({
-        where: { cityId: q.cityId, kind: { in: ["FLEET", "CORPORATE"] }, ...(q.status ? { status: q.status } : {}) },
+        where: { ...city, kind: { in: ["FLEET", "CORPORATE"] }, ...(q.status ? { status: q.status } : {}) },
         orderBy: { createdAt: "asc" },
         take: 200,
-        select: { id: true, name: true, kind: true, cityId: true, legalName: true, tin: true, status: true, createdAt: true, _count: { select: { members: true } } },
+        select: ORG_ROW_SELECT,
       });
       return orgs.map(({ _count, ...o }) => ({ ...o, members: _count.members }));
+    },
+
+    /** One partner organisation (org:read OR org:suspend in its city). 404 for unknown and staff orgs. */
+    async getOrganization(principal: Principal, orgId: string) {
+      const org = await db.organization.findUnique({ where: { id: orgId }, select: ORG_ROW_SELECT });
+      if (!org || (org.kind !== "FLEET" && org.kind !== "CORPORATE")) throw notFound("organization");
+      if (!ORG_READERS.some((perm) => can(principal, perm, { cityId: org.cityId }))) authorize(principal, "org:read", { cityId: org.cityId });
+      const { _count, ...o } = org;
+      return { ...o, members: _count.members };
     },
 
     async verifyOrganization(principal: Principal, orgId: string) {
@@ -477,13 +542,22 @@ export function createIdentityService(deps: IdentityDeps) {
       return { orgId, status: "VERIFIED" };
     },
 
+    /**
+     * Suspend a partner organisation (org:suspend in its city). Its roles stop counting at once
+     * (members' permission versions move). What it changed, the status before, is kept in
+     * `organization_suspension` so reinstatement restores it.
+     */
     async suspendOrganization(principal: Principal, orgId: string, reason: string) {
       const org = await db.organization.findUnique({ where: { id: orgId } });
       if (!org || (org.kind !== "FLEET" && org.kind !== "CORPORATE")) throw notFound("organization");
       authorize(principal, "org:suspend", { cityId: org.cityId });
+      if (org.status === "SUSPENDED") throw conflict("the organization is already suspended", "already_suspended");
       const members = await db.member.findMany({ where: { organizationId: orgId }, select: { userId: true } });
       const pvs = await db.$transaction(async (tx) => {
-        await tx.organization.update({ where: { id: orgId }, data: { status: "SUSPENDED" } });
+        // only from the status we read: a concurrent suspension loses here
+        const { count } = await tx.organization.updateMany({ where: { id: orgId, status: org.status }, data: { status: "SUSPENDED" } });
+        if (count === 0) throw conflict("the organization changed meanwhile; reload", "state_changed");
+        await tx.organizationSuspension.create({ data: { organizationId: orgId, previousStatus: org.status, reason: reason.trim(), suspendedBy: principal.userId, suspendedAt: now() } });
         const out: [string, number][] = [];
         for (const m of members) out.push([m.userId, await bumpPv(tx, m.userId)]);
         await writeOutbox(tx,
@@ -494,6 +568,71 @@ export function createIdentityService(deps: IdentityDeps) {
       });
       for (const [userId, pv] of pvs) await signals.permissionVersion(userId, pv);
       return { orgId, status: "SUSPENDED" };
+    },
+
+    /**
+     * Lift a suspension (workflow 16, org:suspend in its city: the same people who may suspend).
+     * Restores the status from before (VERIFIED, or PENDING when it was suspended while waiting),
+     * moves the members' permission versions so their roles count again, and records who and why.
+     */
+    async reinstateOrganization(principal: Principal, orgId: string, reason: string) {
+      const org = await db.organization.findUnique({ where: { id: orgId } });
+      if (!org || (org.kind !== "FLEET" && org.kind !== "CORPORATE")) throw notFound("organization");
+      authorize(principal, "org:suspend", { cityId: org.cityId });
+      if (org.status !== "SUSPENDED") throw conflict("the organization isn't suspended", "not_suspended");
+      if (reason.trim().length < 10) throw badRequest("a reason is required (10+ characters)");
+      const members = await db.member.findMany({ where: { organizationId: orgId }, select: { userId: true } });
+      const result = await db.$transaction(async (tx) => {
+        const open = await tx.organizationSuspension.findFirst({ where: { organizationId: orgId, reinstatedAt: null }, orderBy: { suspendedAt: "desc" } });
+        // suspensions from before this table existed: they were all of verified companies in practice
+        const restored = open?.previousStatus ?? "VERIFIED";
+        const { count } = await tx.organization.updateMany({ where: { id: orgId, status: "SUSPENDED" }, data: { status: restored } });
+        if (count === 0) throw conflict("the organization changed meanwhile; reload", "state_changed");
+        if (open) await tx.organizationSuspension.update({ where: { id: open.id }, data: { reinstatedBy: principal.userId, reinstatedAt: now(), reinstateReason: reason.trim() } });
+        const pvs: [string, number][] = [];
+        for (const m of members) pvs.push([m.userId, await bumpPv(tx, m.userId)]);
+        await writeOutbox(tx,
+          { topic: "org.reinstated", key: orgId, payload: { orgId, kind: org.kind, cityId: org.cityId, status: restored, byUserId: principal.userId } },
+          audit({ actorId: principal.userId, action: "org:reinstate", resource: { type: "organization", id: orgId }, outcome: "EXECUTED", reason }),
+        );
+        return { pvs, restored };
+      });
+      for (const [userId, pv] of result.pvs) await signals.permissionVersion(userId, pv);
+      return { orgId, status: result.restored };
+    },
+
+    /**
+     * A partner organisation's members for staff (org:read OR org:suspend in its city): names,
+     * organisation roles, masked phones, whether the account is suspended, and the suspension history.
+     */
+    async organizationMembers(principal: Principal, orgId: string) {
+      const org = await db.organization.findUnique({ where: { id: orgId }, select: { id: true, kind: true, cityId: true, status: true } });
+      if (!org || (org.kind !== "FLEET" && org.kind !== "CORPORATE")) throw notFound("organization");
+      if (!ORG_READERS.some((perm) => can(principal, perm, { cityId: org.cityId }))) authorize(principal, "org:read", { cityId: org.cityId });
+      const [members, invitations, suspensions] = await Promise.all([
+        db.member.findMany({
+          where: { organizationId: orgId },
+          orderBy: { createdAt: "asc" },
+          take: 500,
+          select: { userId: true, role: true, createdAt: true, validUntil: true, user: { select: { name: true, phoneNumber: true, email: true, banned: true } } },
+        }),
+        db.invitation.count({ where: { organizationId: orgId, status: "pending" } }),
+        db.organizationSuspension.findMany({ where: { organizationId: orgId }, orderBy: { suspendedAt: "desc" }, take: 20 }),
+      ]);
+      return {
+        orgId, status: org.status, pendingInvitations: invitations,
+        members: members.map((m) => ({
+          // phone sign-ups are named after their number until they set a name: mask that too
+          userId: m.userId, name: /^\+?\d[\d\s]{7,}$/.test(m.user.name) ? maskPhone(m.user.name.replace(/\s/g, "")) : m.user.name,
+          phone: maskPhone(m.user.phoneNumber ?? emailToPhone(m.user.email) ?? null),
+          roles: splitRoles(m.role), since: m.createdAt.toISOString(), validUntil: m.validUntil?.toISOString() ?? null,
+          suspended: !!m.user.banned,
+        })),
+        suspensions: suspensions.map((x) => ({
+          id: x.id, previousStatus: x.previousStatus, reason: x.reason, suspendedBy: x.suspendedBy, suspendedAt: x.suspendedAt.toISOString(),
+          reinstatedBy: x.reinstatedBy, reinstatedAt: x.reinstatedAt?.toISOString() ?? null, reinstateReason: x.reinstateReason,
+        })),
+      };
     },
 
     /** Called by fleet-service when a driver is activated / suspended (workflow 02). */
@@ -524,6 +663,17 @@ export function createIdentityService(deps: IdentityDeps) {
       const u = await db.user.findUnique({ where: { id }, select: { id: true, name: true, image: true } });
       if (!u) throw notFound("user");
       return u;
+    },
+
+    /**
+     * notification-service campaigns (src/campaigns/contacts.ts): where to reach a user.
+     * `phoneNumber` is E.164 or null (no number on file); `email` is null for phone-only users,
+     * whose stored email is a placeholder. 404 unknown. Unmasked: internal callers only.
+     */
+    async contactForService(id: string) {
+      const u = await db.user.findUnique({ where: { id }, select: { id: true, phoneNumber: true, email: true } });
+      if (!u) throw notFound("user");
+      return { userId: u.id, phoneNumber: u.phoneNumber ?? null, email: emailToPhone(u.email) ? null : u.email };
     },
 
     async organizationForService(id: string) {

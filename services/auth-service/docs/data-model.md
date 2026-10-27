@@ -193,6 +193,7 @@ Index `ix_outbox_unpublished (created_at) WHERE published_at IS NULL` (partial i
 | `20261025120000_better_auth_identity` | Creates every Better Auth table and `city`, `approval_request`, `outbox`, with indexes and FKs. Copies `"User"` rows into `app_user` (role `RIDER → rider`, `DRIVER → driver`, `ADMIN → super_admin`; phone kept only if it matches the Ethiopian pattern; `permission_version = 1`) and their password hashes into `account` (`provider_id = 'credential'`). Drops `"User"` and `Role`. Adds the check constraints and partial unique indexes listed above and makes `ix_outbox_unpublished` partial. Seeds `addis-ababa` and its staff organisation |
 | `20261025130000_phone_email_verified` | Sets `email_verified = true` for users whose phone is verified and whose email is the placeholder derived from it |
 | `20261027150000_authz_registry` | Creates `role_definition`, `role_permission`, `authz_version` (with its row) and their checks; widens `ck_approval_status` with `CANCELLED` and `FAILED`; adds `ix_approval_action_status` |
+| `20261027180000_org_reinstate_city_approvals` | Adds `approval_request.city_id` (+ `ix_approval_city`, backfilled for `role:grant`) and the `organization_suspension` table (see *Phase 2D additions*) |
 
 New migration: edit `schema.prisma`, then `pnpm prisma migrate dev --name <change>` (the root Makefile's `db-migrate` uses `migrate deploy`). Check constraints and partial indexes live only in the SQL files.
 
@@ -206,3 +207,15 @@ New migration: edit `schema.prisma`, then `pnpm prisma migrate dev --name <chang
 | channel `authz:changed` | pub/sub | — | Message = new matrix version | `src/authz/service.ts`, `libs/shared-authz/src/sync.ts` |
 
 All Redis use is optional outside production (`REDIS_URL` unset → in-memory rate limits, no signals, no pub/sub).
+
+## Phase 2D additions
+
+### `approval_request.city_id`
+
+Nullable `TEXT`. The city the request acts in: city-scoped request/approve holders see and decide only their cities' requests; `NULL` = platform-wide (global holders only). Filled for `role:grant` of city-scoped roles (also backfilled from `payload->>'cityId'` by the migration). Partial index `ix_approval_city (city_id, status) WHERE city_id IS NOT NULL`.
+
+### `organization_suspension` (model `OrganizationSuspension`)
+
+One row per organisation suspension: `id` (uuidv7), `organization_id` (FK → organization, cascade), `previous_status` (`PENDING` | `VERIFIED`, CHECK `ck_org_suspension_previous`: restored on reinstatement), `reason`, `suspended_by`, `suspended_at`, `reinstated_by`, `reinstated_at`, `reinstate_reason`. Index `(organization_id, suspended_at DESC)`; unique partial `ux_org_suspension_open (organization_id) WHERE reinstated_at IS NULL` (one open suspension). Kept out of `organization` so Better Auth's organisation endpoints never return the reason to partners.
+
+Migration `20261027180000_org_reinstate_city_approvals` adds both.

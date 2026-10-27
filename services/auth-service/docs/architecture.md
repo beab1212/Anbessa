@@ -191,7 +191,7 @@ Staff sign-in: email + password (argon2id, 12–128 characters, sign-up disabled
 
 ### Authorization
 
-Every identity operation calls `authorize(principal, permission, resource?)` from `libs/shared-authz` against the live matrix. Scope letters: `S` self, `O` organisation, `C` city, `G` global. A `C` grant covers a resource only when the call passes a matching `cityId`, or when the role is held `GLOBAL`. Several operations call `authorize` **without** a city (directory, stats, approvals inbox), so in practice they need a `G` grant or a globally held role. The per-route permissions are in [api.md](api.md).
+Every identity operation calls `authorize(principal, permission, resource?)` from `libs/shared-authz` against the live matrix. Scope letters: `S` self, `O` organisation, `C` city, `G` global. A `C` grant covers a resource only when the call passes a matching `cityId`, or when the role is held `GLOBAL`. The user directory (`GET /users`, `GET /users/:id`) accepts `user:read_masked` held in **any** city (`authorizeDirectory`: users aren't bound to a city); unmasked phones still need a global `user:read_pii`, and session IPs/devices are shown only to global readers or PII holders. Stats take an optional `cityId` (`report:read` there; staff and organisation counts narrow to the city). Organisations are listed and read with `org:read` or `org:suspend` in their city (`citiesWithAny`). The approvals inbox still checks without a city, so it needs a `G` grant or a globally held role. The per-route permissions are in [api.md](api.md).
 
 Additional rules in code:
 

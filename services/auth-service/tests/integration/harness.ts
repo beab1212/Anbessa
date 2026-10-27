@@ -1,8 +1,13 @@
 // Test harness: the real app (Better Auth + identity API) on a test database,
 // driven through Fastify's inject. OTP codes are captured from the console sender,
 // and deny/pv signals live in memory instead of Redis.
+//
+// Each test file gets its own copy of the freshly migrated database (CREATE DATABASE …
+// TEMPLATE), so rows one file leaves behind (extra super admins, matrix changes, cities)
+// can't change what another file sees. Several assertions count platform-wide rows,
+// e.g. "at least two super admins must remain".
 
-import { createHmac } from "node:crypto";
+import { createHmac, randomBytes, randomInt } from "node:crypto";
 import { v7 as uuidv7 } from "uuid";
 import pino from "pino";
 import { decodeJwt } from "jose";
@@ -13,6 +18,7 @@ import { createContainer, type Container } from "../../src/container.js";
 import { passwordHasher } from "../../src/auth/password.js";
 import { ensureAuthzSeeded } from "../../src/authz/store.js";
 import type { SecuritySignals } from "../../src/lib/signals.js";
+import { createDb } from "../../src/db.js";
 import { TEST_DATABASE_URL } from "./global-setup.js";
 
 export const INTERNAL_TOKEN = "t".repeat(48);
@@ -40,10 +46,39 @@ export interface Harness {
   close(): Promise<void>;
 }
 
+/** A private copy of the migrated template database; `drop()` removes it. */
+async function cloneTestDatabase() {
+  const template = new URL(TEST_DATABASE_URL);
+  const templateName = template.pathname.slice(1);
+  const name = `${templateName}_${randomBytes(4).toString("hex")}`;
+  const maintenance = new URL(TEST_DATABASE_URL);
+  maintenance.pathname = "/postgres";
+  const admin = createDb(maintenance.toString());
+  try {
+    await admin.$executeRawUnsafe(`CREATE DATABASE "${name}" TEMPLATE "${templateName}"`);
+  } finally {
+    await admin.$disconnect();
+  }
+  const url = new URL(TEST_DATABASE_URL);
+  url.pathname = `/${name}`;
+  return {
+    url: url.toString(),
+    async drop() {
+      const db = createDb(maintenance.toString());
+      try {
+        await db.$executeRawUnsafe(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`);
+      } finally {
+        await db.$disconnect();
+      }
+    },
+  };
+}
+
 export async function createHarness(): Promise<Harness> {
+  const database = await cloneTestDatabase();
   const config = loadConfig({
     NODE_ENV: "test",
-    DATABASE_URL: TEST_DATABASE_URL,
+    DATABASE_URL: database.url,
     BETTER_AUTH_SECRET: "s".repeat(64),
     AUTH_BASE_URL: "http://localhost:3001",
     APP_TRUSTED_ORIGINS: APP_ORIGIN,
@@ -62,7 +97,7 @@ export async function createHarness(): Promise<Harness> {
   await c.authzSync.refresh("test");
   const app = await buildApp(c);
   await app.ready();
-  return { app, c, mem, otps, close: async () => { await app.close(); await c.close(); } };
+  return { app, c, mem, otps, close: async () => { await app.close(); await c.close(); await database.drop(); } };
 }
 
 type Json = Record<string, unknown>;
@@ -170,6 +205,7 @@ export async function createStaff(h: Harness, opts: { role?: string; email?: str
 
 export const claimsOf = (token: string) => decodeJwt(token) as { sub: string; aud: string; roles: Json[]; pv: number; amr: string[] };
 
-let n = 0;
+// Random start, then sequential: unique within a file without depending on the clock.
+let n = randomInt(1e8);
 /** A fresh valid Ethiopian mobile number per call. */
-export const phone = () => `+2519${String(Date.now() % 1e4).padStart(4, "0")}${String(n++ % 1e4).padStart(4, "0")}`;
+export const phone = () => `+2519${String(n++ % 1e8).padStart(8, "0")}`;

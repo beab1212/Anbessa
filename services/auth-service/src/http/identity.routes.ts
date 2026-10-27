@@ -136,7 +136,10 @@ export function registerIdentityRoutes(
     const { id } = z.object({ id: uuid }).parse(req.params);
     return reply.header("cache-control", "no-store").send(await identity.resetMfa(await staff(req), id, z.object({ reason }).parse(req.body).reason));
   });
-  app.get("/api/identity/stats", async (req) => identity.stats(await staff(req)));
+  app.get("/api/identity/stats", async (req) => {
+    const q = z.object({ cityId: cityId.optional() }).parse(req.query);
+    return identity.stats(await staff(req), q.cityId);
+  });
 
   // ── safety ──────────────────────────────────────────────────────────────────
   app.post("/api/identity/users/:id/suspend", async (req) => {
@@ -153,8 +156,13 @@ export function registerIdentityRoutes(
 
   // ── partner organisations ───────────────────────────────────────────────────
   app.get("/api/identity/organizations", async (req) => {
-    const q = z.object({ cityId, status: z.enum(["PENDING", "VERIFIED", "SUSPENDED"]).optional() }).parse(req.query);
+    const q = z.object({ cityId: cityId.optional(), status: z.enum(["PENDING", "VERIFIED", "SUSPENDED"]).optional() }).parse(req.query);
     return identity.listOrganizations(await staff(req), q);
+  });
+
+  app.get("/api/identity/organizations/:id", async (req) => {
+    const { id } = z.object({ id: uuid }).parse(req.params);
+    return identity.getOrganization(await staff(req), id);
   });
 
   app.post("/api/identity/organizations/:id/verify", async (req) => {
@@ -166,6 +174,17 @@ export function registerIdentityRoutes(
     const { id } = z.object({ id: uuid }).parse(req.params);
     const body = z.object({ reason }).parse(req.body);
     return identity.suspendOrganization(await staff(req), id, body.reason);
+  });
+
+  app.post("/api/identity/organizations/:id/reinstate", async (req) => {
+    const { id } = z.object({ id: uuid }).parse(req.params);
+    const body = z.object({ reason }).parse(req.body);
+    return identity.reinstateOrganization(await staff(req), id, body.reason);
+  });
+
+  app.get("/api/identity/organizations/:id/members", async (req, reply) => {
+    const { id } = z.object({ id: uuid }).parse(req.params);
+    return reply.header("cache-control", "no-store").send(await identity.organizationMembers(await staff(req), id));
   });
 
   // ── internal (service-to-service) ───────────────────────────────────────────
@@ -213,6 +232,13 @@ export function registerIdentityRoutes(
     internal(req);
     const { id } = z.object({ id: uuid }).parse(req.params);
     return identity.publicNameForService(id);
+  });
+
+  // notification-service (SMS campaigns): the unmasked phone number; never cached by proxies
+  app.get("/internal/users/:id/contact", async (req, reply) => {
+    internal(req);
+    const { id } = z.object({ id: uuid }).parse(req.params);
+    return reply.header("cache-control", "no-store").send(await identity.contactForService(id));
   });
 
   app.get("/internal/organizations/:id", async (req) => {

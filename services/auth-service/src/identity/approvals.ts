@@ -1,8 +1,12 @@
 // Maker–checker for every sensitive identity action (Role.md §11): one person asks, a different
 // person approves, and the action runs in the approving transaction. Requests expire after 7 days
 // (an hourly sweep records it), and the maker may withdraw a pending request.
+//
+// City-aware (Role.md §9): a request may carry the city it acts in (`city_id`). Holders of the
+// request/approve permission in a city see and decide that city's requests; global holders see
+// every request; requests without a city are platform-wide and need a global grant.
 
-import { authorize, can, type Permission, type Principal } from "@ride-app/shared-authz";
+import { authorize, citiesWith, type Permission, type Principal } from "@ride-app/shared-authz";
 import type { Db } from "../db.js";
 import type { Prisma } from "../generated/prisma/client.js";
 import { conflict, forbidden, notFound } from "../lib/errors.js";
@@ -30,25 +34,44 @@ export function createApprovals(deps: { db: Db; now: () => Date; executors: Reco
     return e;
   };
 
-  /** Called by the owning operation after its own checks. */
-  async function create(tx: Tx, maker: Principal, action: string, payload: Prisma.InputJsonValue, reason: string) {
-    authorize(maker, executor(action).requestPermission);
+  /** The scope a request is checked against: its city, or platform-wide. */
+  const scopeOf = (req: Pick<ApprovalRow, "cityId">) => (req.cityId ? { cityId: req.cityId } : {});
+
+  /** Called by the owning operation after its own checks. `cityId`: the city the action applies to. */
+  async function create(tx: Tx, maker: Principal, action: string, payload: Prisma.InputJsonValue, reason: string, cityId?: string | null) {
+    authorize(maker, executor(action).requestPermission, cityId ? { cityId } : {});
     const req = await tx.approvalRequest.create({
-      data: { action, payload, reason: reason.trim(), makerId: maker.userId, expiresAt: new Date(now().getTime() + APPROVAL_TTL_MS) },
+      data: { action, payload, reason: reason.trim(), makerId: maker.userId, expiresAt: new Date(now().getTime() + APPROVAL_TTL_MS), cityId: cityId ?? null },
     });
     await writeOutbox(tx, audit({ actorId: maker.userId, action: `${action}:request`, resource: { type: "approval_request", id: req.id }, outcome: "PENDING_APPROVAL", reason }));
     return req;
   }
 
-  /** Actions this person may see: ones they may request or approve. */
+  /** Where this person may see an action's requests: everywhere ("*"), or these cities (city requests only). */
+  function reach(p: Principal, e: ApprovalExecutor): "*" | string[] {
+    const out = new Set<string>();
+    for (const perm of [e.requestPermission, e.approvePermission]) {
+      const c = citiesWith(p, perm);
+      if (c === "*") return "*";
+      for (const id of c) out.add(id);
+    }
+    return [...out];
+  }
+
+  /** Actions this person may see: ones they may request or approve, somewhere. */
   const visibleActions = (p: Principal) =>
-    Object.entries(executors).filter(([, e]) => can(p, e.requestPermission) || can(p, e.approvePermission)).map(([a]) => a);
+    Object.entries(executors).filter(([, e]) => { const r = reach(p, e); return r === "*" || r.length > 0; }).map(([a]) => a);
 
   async function list(p: Principal, q: { status?: string; action?: string; limit?: number }) {
     const actions = visibleActions(p).filter((a) => !q.action || a === q.action);
     if (actions.length === 0) throw forbidden("not allowed to view approvals");
+    // per action: every request (global holders) or the requests of the cities they hold it in
+    const scopes: Prisma.ApprovalRequestWhereInput[] = actions.map((action) => {
+      const r = reach(p, executor(action));
+      return r === "*" ? { action } : { action, cityId: { in: r } };
+    });
     return db.approvalRequest.findMany({
-      where: { action: { in: actions }, ...(q.status ? { status: q.status } : {}) },
+      where: { OR: scopes, ...(q.status ? { status: q.status } : {}) },
       orderBy: { createdAt: "desc" },
       take: q.limit ?? 100,
     });
@@ -66,7 +89,7 @@ export function createApprovals(deps: { db: Db; now: () => Date; executors: Reco
     const { result, after } = await db.$transaction(async (tx) => {
       const req = await lockPending(tx, id);
       const e = executor(req.action);
-      authorize(p, e.approvePermission);
+      authorize(p, e.approvePermission, scopeOf(req));
       if (req.expiresAt <= now()) throw conflict("request expired", "expired");
       if (req.makerId === p.userId) throw forbidden("maker and checker must be different people", "maker_is_checker");
       const out = await e.execute(tx, req, p);
@@ -81,7 +104,7 @@ export function createApprovals(deps: { db: Db; now: () => Date; executors: Reco
   async function reject(p: Principal, id: string, decisionReason: string) {
     return db.$transaction(async (tx) => {
       const req = await lockPending(tx, id);
-      authorize(p, executor(req.action).approvePermission);
+      authorize(p, executor(req.action).approvePermission, scopeOf(req));
       if (req.makerId === p.userId) throw forbidden("maker and checker must be different people", "maker_is_checker");
       if (req.expiresAt <= now()) throw conflict("request expired", "expired");
       await tx.approvalRequest.update({ where: { id }, data: { status: "REJECTED", checkerId: p.userId, decidedAt: now(), decisionReason } });

@@ -110,6 +110,7 @@ Instance `createAdminAuth`. Client: the staff dashboard (cookies, origin in `ADM
 | POST | `/revoke-session` | |
 | POST | `/revoke-other-sessions` | |
 | POST | `/change-password` | The first change clears `mustChangePassword` |
+| POST | `/update-user` | "My account" in the staff dashboard. Only `input: true` fields (`name`, `image`); `image` is checked by the shared user hook (as on the app surface) |
 | GET | `/token` | Admin JWT (ES256, 10 min, `aud=ride-admin`) → `{ token }`. Roles only if 2FA is enabled and the password was changed; otherwise `roles: []` and `setup: { twoFactor, changePassword }`. **403** for app sessions and banned users |
 | POST | `/two-factor/enable` | Returns `totpURI` (and backup codes) |
 | POST | `/two-factor/get-totp-uri` | |
@@ -206,12 +207,12 @@ Actions: `role:grant` (request `role:request`, approve `role:approve`), `staff:r
 
 | Method + path | Caller | Request | Response |
 |---|---|---|---|
-| `GET /approvals` | sees the actions they may request or approve; 403 if none | query `status?` (as above), `action?` (≤ 40 chars), `limit` 1–200, default 100 | `{ approvals: ApprovalRow[] }` newest first |
-| `POST /approvals/:id/approve` | the action's approve permission; not the maker | body `{ reason?: ≤ 500 }` | the executor's result: `role:grant` as above; `staff:reset_mfa` → `{ userId, temporaryPassword }`; `authz:change` → `{ roleCode, version }` |
-| `POST /approvals/:id/reject` | approve permission; not the maker | body `{ reason }` | `{ id, status: "REJECTED" }` |
+| `GET /approvals` | sees the actions they may request or approve somewhere; 403 if none. Per action: global holders see every request; city-scoped holders see only requests whose `cityId` is one of their cities (requests without a city are platform-wide and need a global grant) | query `status?` (as above), `action?` (≤ 40 chars), `limit` 1–200, default 100 | `{ approvals: ApprovalRow[] }` newest first |
+| `POST /approvals/:id/approve` | the action's approve permission **in the request's city** (`cityId`; none = a global grant); not the maker | body `{ reason?: ≤ 500 }` | the executor's result: `role:grant` as above; `staff:reset_mfa` → `{ userId, temporaryPassword }`; `authz:change` → `{ roleCode, version }` |
+| `POST /approvals/:id/reject` | approve permission in the request's city; not the maker | body `{ reason }` | `{ id, status: "REJECTED" }` |
 | `POST /approvals/:id/cancel` | only the maker | — | `{ id, status: "CANCELLED" }` |
 
-Errors as for staff-role approvals. `can()` is called without a city, so city-scoped holders of these permissions see nothing.
+Errors as for staff-role approvals. **City-aware (phase 2D):** each request may carry `cityId` (`approval_request.city_id`): a `role:grant` of a city-scoped role carries that city, and `POST /staff-role-requests` checks `role:request` in that city (global roles: a global grant). So a city-scoped holder (e.g. a custom city role holding `role:request`/`role:approve` at C) asks, sees and decides only its own city's requests; maker ≠ checker still holds. `staff:reset_mfa` and `authz:change` have no city (global holders only). `ApprovalRow` gains `cityId`.
 
 ### Permission matrix
 
@@ -247,7 +248,7 @@ On approval the executor writes the rows, bumps `authz_version`, audits `authz:c
 
 ### Directory, sessions, MFA
 
-**`GET /users`** — `user:read_masked` (called without a city, so effectively a `G` grant or a globally held role: SUPER_ADMIN, FINANCE_OFFICER, FINANCE_MANAGER by default). Phones are unmasked with `user:read_pii`.
+**`GET /users`** — `user:read_masked` in **any** city (`authorizeDirectory` in `src/identity/service.ts`: users aren't bound to a city, so a city-scoped grant opens the masked directory; dispatchers, onboarding, support, operations, marketing and analysts hold it city-scoped). Phones are unmasked only with `user:read_pii` held globally (no city is passed).
 
 | Query | Type | Meaning |
 |---|---|---|
@@ -259,7 +260,7 @@ On approval the executor writes the rows, bumps `authz_version`, audits `authz:c
 
 Response `{ users: [{ id, name, staff, email (staff only, else null), phone (masked unless PII), roles: [{ role, scope, orgId?, cityId?, label }], status ("SUSPENDED" or account_status), twoFactorEnabled, createdAt, lastSignInAt }], next }`. Ordered by `createdAt desc, id desc`. `next` is the last id when the page is full, else `null`.
 
-**`GET /users/:id`** — `user:read_masked`. `cache-control: no-store`. Response: as above plus `banReason`, `banExpires`, `mustChangePassword`, `permissionVersion`, `memberships: [{ organizationId, organizationName, kind, cityId, status, roles, since }]`, `sessions` (latest 50: `{ id, surface, ipAddress, userAgent, createdAt, lastActiveAt, expiresAt, active }`). 404 if unknown.
+**`GET /users/:id`** — `user:read_masked` in any city (as `GET /users`). `cache-control: no-store`. Response: as above plus `banReason`, `banExpires`, `mustChangePassword`, `permissionVersion`, `memberships: [{ organizationId, organizationName, kind, cityId, status, roles, since }]`, `sessions` (latest 50: `{ id, surface, ipAddress, userAgent, createdAt, lastActiveAt, expiresAt, active }`). `ipAddress` and `userAgent` are `null` unless the caller reads the directory globally or holds `user:read_pii`. Writes (suspend, reinstate, sign out, MFA reset) keep their own scopes. 404 if unknown.
 
 **`POST /users/:id/sessions/revoke`** — `session:revoke` (SUPER_ADMIN). Body `{ reason }`. Bumps `pv`, deletes every session, sets `pv:{userId}`. → `{ userId, revoked: true }`. Audit `session:revoke`.
 
@@ -267,7 +268,7 @@ Response `{ users: [{ id, name, staff, email (staff only, else null), phone (mas
 - Target is a super admin: creates a `staff:reset_mfa` approval → `{ userId, pendingApproval: <approvalId> }`.
 - Otherwise at once: new temporary password, 2FA removed, `mustChangePassword = true`, `pv` bump, sessions deleted → `{ userId, temporaryPassword }`. Audit `staff:reset_mfa`.
 
-**`GET /stats`** — `report:read` (no city passed). Response `{ users, staff, riders, drivers, guests, suspended, signups24h, signups7d, activeSessions: { app, admin }, staffWithoutMfa, organizations: [{ kind, status, count }] }`.
+**`GET /stats?cityId=`** — without `cityId`: a global `report:read`; with `cityId`: `report:read @ C(cityId)`. With a city, `staff`, `staffWithoutMfa`, `activeSessions.admin` and `organizations` count only that city (staff = members of that city's `STAFF_CITY` org); the account counts (`users`, `riders`, `drivers`, `guests`, `suspended`, sign-ups, `activeSessions.app`) stay platform-wide because users aren't bound to a city. Response `{ cityId (or null), users, staff, riders, drivers, guests, suspended, signups24h, signups7d, activeSessions: { app, admin }, staffWithoutMfa, organizations: [{ kind, status, count }] }`.
 
 ### Safety
 
@@ -285,11 +286,17 @@ Authorization: staff target → `staff:manage`; anyone else → `user:suspend @ 
 
 ### Partner organisations
 
-**`GET /organizations?cityId=&status=`** — `org:read @ C(cityId)` (ONBOARDING_OFFICER). `cityId` required; `status` ∈ `PENDING, VERIFIED, SUSPENDED`. FLEET and CORPORATE only, oldest first, at most 200. → `[{ id, name, kind, cityId, legalName, tin, status, createdAt, members }]`.
+**`GET /organizations?cityId=&status=`** — `org:read` **or** `org:suspend` (safety and finance officers may suspend a company without holding `org:read`, so they can find it). `cityId` optional: with it, either permission in that city; without it, every city where the caller holds either (a global holder sees all). `status` ∈ `PENDING, VERIFIED, SUSPENDED`. FLEET and CORPORATE only, oldest first, at most 200. → `[{ id, name, kind, cityId, legalName, tin, status, createdAt, members }]`.
+
+**`GET /organizations/:id`** — `org:read` or `org:suspend @ C(org.cityId)`. 404 for unknown ids and staff orgs. → `{ id, name, kind, cityId, legalName, tin, status, createdAt, members }`.
 
 **`POST /organizations/:id/verify`** — `org:verify @ C(org.cityId)` (ONBOARDING_OFFICER). 404 if not a partner org; 409 unless `PENDING`. Sets `VERIFIED`, bumps `pv` of every member, events `org.verified` + audit; after commit `pv` per member. → `{ orgId, status: "VERIFIED" }`.
 
-**`POST /organizations/:id/suspend`** — `org:suspend @ C(org.cityId)` (SAFETY_OFFICER @ C, FINANCE_OFFICER @ G). Body `{ reason }`. Any current status. Sets `SUSPENDED`, bumps `pv` of every member, events `org.suspended` + audit. → `{ orgId, status: "SUSPENDED" }`. There is no un-suspend route.
+**`POST /organizations/:id/suspend`** — `org:suspend @ C(org.cityId)` (SAFETY_OFFICER @ C, FINANCE_OFFICER @ G). Body `{ reason }`. From `PENDING` or `VERIFIED` (409 `already_suspended` if suspended). Sets `SUSPENDED`, records the status before in `organization_suspension` (with the reason and who), bumps `pv` of every member, events `org.suspended` + audit. → `{ orgId, status: "SUSPENDED" }`.
+
+**`POST /organizations/:id/reinstate`** (phase 2D) — `org:suspend @ C(org.cityId)`: whoever may suspend may lift it (SAFETY_OFFICER @ C, FINANCE_OFFICER @ G; the matrix has no `org:reinstate`). Body `{ reason }` (10–500). 404 if not a partner org; 409 `not_suspended`; 409 `state_changed` on a race. Restores the status from before the suspension (`VERIFIED`, or `PENDING` if it was suspended while waiting; `VERIFIED` for suspensions older than the table), closes the open `organization_suspension` row (who, when, reason), bumps `pv` of every member (their organisation roles count again), events `org.reinstated` + audit `org:reinstate`; after commit `pv` per member. → `{ orgId, status }`. Cars suspended separately in fleet-service stay suspended.
+
+**`GET /organizations/:id/members`** (phase 2D) — `org:read` or `org:suspend @ C(org.cityId)`. 404 for unknown ids and staff orgs. `cache-control: no-store`. → `{ orgId, status, pendingInvitations, members: [{ userId, name, phone (always masked: "+25191 ••• ••44"; a name that is the phone number is masked too), roles: ["fleet_owner" | "fleet_driver" | …], since, validUntil, suspended }], suspensions: [{ id, previousStatus, reason, suspendedBy, suspendedAt, reinstatedBy, reinstatedAt, reinstateReason }] }` (up to 500 members, 20 suspensions, newest first).
 
 ---
 
@@ -304,6 +311,7 @@ Service-to-service only; never routed by Kong. Every route needs `Authorization:
 | `PUT /internal/cities/:id` | platform-service (`src/lib/identity.ts`) | params `id` matching `^[a-z0-9-]{1,40}$`; body `{ name: 2–80, timezone: 3–60 }` | the `city` row `{ id, name, timezone }` | Upsert; creates the city's `STAFF_CITY` org (`Anbessa Staff — <name>`, slug `staff-<id>`, `VERIFIED`) if missing. The org name is not updated on rename |
 | `GET /internal/ops/outbox` | platform-service system page (`src/system/health.ts`) | — | `{ pending: number, oldestAt: ISO string \| null }` | Unpublished outbox rows |
 | `GET /internal/users/:id` | trip-service (`GET /api/trips/:id/parties`) | params `id: uuid` | `{ id, name, image }` | `image` is the profile photo data URL or null. 404 unknown |
+| `GET /internal/users/:id/contact` | notification-service (`src/campaigns/contacts.ts`, SMS campaigns) | params `id: uuid` | `{ userId, phoneNumber: string \| null, email: string \| null }` | Unmasked, `cache-control: no-store`. `phoneNumber` is E.164 or null (no number on file); `email` is null for phone-only users (their stored email is the `phone.anbessa.invalid` placeholder). No locale or marketing opt-out is stored here. 404 unknown (notification-service skips the recipient as `no_phone`) |
 | `GET /internal/organizations/:id` | fleet-service | params `id: uuid` | `{ id, name, kind, cityId, legalName, status }` | Any kind, including staff orgs. 404 unknown |
 | `GET /internal/organizations/:id/members/:userId` | fleet-service | params `id, userId: uuid` | `{ organizationId, userId, roles: string[] (stored names), name, phoneNumber, banned }` | 404 when not a member or `valid_until` has passed. Returns the unmasked phone number |
 

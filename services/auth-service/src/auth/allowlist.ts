@@ -48,6 +48,7 @@ const ADMIN: readonly Rule[] = [
   ["POST", "/revoke-session"],
   ["POST", "/revoke-other-sessions"],
   ["POST", "/change-password"],
+  ["POST", "/update-user"], // "My account": only input:true fields (name, image); image is checked by the shared user hook
   ["GET", "/token"],
   // two-factor enrolment and verification; disabling 2FA is not allowed for staff
   ["POST", "/two-factor/enable"],

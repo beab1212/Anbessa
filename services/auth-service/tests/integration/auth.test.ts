@@ -192,6 +192,8 @@ describe("maker–checker staff role grants", () => {
   });
 
   it("refuses to revoke a super admin when fewer than two would remain", async () => {
+    // the rule counts every super admin on the platform: this file's database holds exactly superA and superB
+    expect(await h.c.db.user.count({ where: { role: { contains: "super_admin" } } })).toBe(2);
     const res = await superA.identity("POST", "/api/identity/staff-roles/revoke", { userId: superB.id, role: "SUPER_ADMIN", reason: "trying to lock others out" });
     expect(res.statusCode).toBe(409);
   });
@@ -358,5 +360,33 @@ describe("driver role (internal)", () => {
     expect(claimsOf(await u.accessToken()).roles).toEqual(expect.arrayContaining([{ r: "DRIVER" }, { r: "RIDER" }]));
     await h.app.inject({ method: "POST", url: `/internal/drivers/${user.id}/role`, headers, payload: { active: false } });
     expect(claimsOf(await u.accessToken()).roles).toEqual([{ r: "RIDER" }]);
+  });
+});
+
+describe("contact lookup (internal)", () => {
+  const headers = { authorization: `Bearer ${INTERNAL_TOKEN}`, "x-service-name": "notification-service" };
+
+  it("returns a rider's phone number for SMS campaigns, without the placeholder email", async () => {
+    const u = new AppUser(h, phone());
+    const { user } = await u.signIn();
+    const res = await h.app.inject({ method: "GET", url: `/internal/users/${user.id}/contact`, headers });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.headers["cache-control"]).toBe("no-store");
+    expect(res.json()).toEqual({ userId: user.id, phoneNumber: u.phone, email: null });
+  });
+
+  it("a user without a phone number gets phoneNumber null and their real email", async () => {
+    const res = await h.app.inject({ method: "GET", url: `/internal/users/${superA.id}/contact`, headers });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json()).toEqual({ userId: superA.id, phoneNumber: null, email: superA.email });
+  });
+
+  it("404 for an unknown user, 400 for a malformed id, 401 without the service token", async () => {
+    const unknown = await h.app.inject({ method: "GET", url: `/internal/users/${crypto.randomUUID()}/contact`, headers });
+    expect(unknown.statusCode).toBe(404);
+    expect((await h.app.inject({ method: "GET", url: "/internal/users/not-a-uuid/contact", headers })).statusCode).toBe(400);
+    const noToken = await h.app.inject({ method: "GET", url: `/internal/users/${superA.id}/contact`, headers: { authorization: "Bearer nope" } });
+    expect(noToken.statusCode).toBe(401);
+    expect(noToken.body).not.toContain("@");
   });
 });

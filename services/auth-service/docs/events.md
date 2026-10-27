@@ -77,3 +77,11 @@ notification-service leaves the offset uncommitted on handler errors so kafkajs 
 | Keys | `ba:*` | Better Auth secondary storage | Better Auth | Sessions and rate-limit counters (see [data-model.md](data-model.md#redis-keys)) |
 
 Signal writes are best effort: Redis errors are logged (`security signal unavailable`) and never fail the request. Kafka events are the durable record.
+
+## Phase 2D additions
+
+| Topic | Key | Payload (besides the envelope) | Written when |
+|---|---|---|---|
+| `org.reinstated` | org id | `orgId`, `kind`, `cityId`, `status` (the restored one: `VERIFIED` or `PENDING`), `byUserId` | `reinstateOrganization` (`POST /api/identity/organizations/:id/reinstate`) |
+
+New `audit.recorded` action: `org:reinstate` (resource `organization`, reason = the staff member's reason). `org:suspend` is now refused (409) for an already suspended organisation, so it is written once per suspension. No service consumes `org.reinstated` yet (fleet-service doesn't react to `org.suspended` either).
