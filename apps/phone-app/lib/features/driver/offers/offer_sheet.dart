@@ -1,10 +1,11 @@
-// The offer sheet (workflow 05 D16–18): where to, how long the trip is, the fare, how the rider
-// pays, a 15-second ring, slide to accept or Decline. Shown over the driver's home, which also
-// draws the offer's pickup and drop-off on the map.
-
-import 'dart:async';
+// The offer sheet (workflow 05 D16–18): the fare big, the car class, where to and how long the
+// trip is, how the rider pays, a 15-second ring, slide to accept or Decline. It springs up over
+// the driver's home, whose map draws the offer's route (pickup leg dotted, the trip solid).
+//
+// Only the ring animates (its own controller); the sheet rebuilds once when time runs out.
 
 import 'package:flutter/material.dart';
+import 'package:flutter/physics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:ride_app_core/ride_app_core.dart';
 import '../../../core/l10n/l10n.dart';
@@ -21,44 +22,45 @@ final offerRouteProvider = FutureProvider.autoDispose.family<RouteSteps?, TripOf
   }
 });
 
+/// How long a driver has to answer.
+const offerWindow = Duration(seconds: 15);
+
 class OfferSheet extends ConsumerStatefulWidget {
-  const OfferSheet({super.key, required this.state});
+  const OfferSheet({super.key, required this.state, this.now = DateTime.now});
   final OfferState state;
+  /// the clock (tests pass their own)
+  final DateTime Function() now;
   @override
   ConsumerState<OfferSheet> createState() => _OfferSheetState();
 }
 
 class _OfferSheetState extends ConsumerState<OfferSheet> {
-  Timer? _tick;
-  DateTime _now = DateTime.now().toUtc();
-  @override
-  void initState() {
-    super.initState();
-    _tick = Timer.periodic(const Duration(milliseconds: 250), (_) => setState(() => _now = DateTime.now().toUtc()));
-  }
+  bool _expired = false;
+  String? _offerId;
 
-  @override
-  void dispose() {
-    _tick?.cancel();
-    super.dispose();
+  void _sync() {
+    final o = widget.state.offer;
+    if (o?.offerId == _offerId) return;
+    _offerId = o?.offerId;
+    _expired = o == null || o.remaining(widget.now().toUtc()) <= Duration.zero;
   }
 
   @override
   Widget build(BuildContext context) {
+    _sync();
     final l = context.l10n;
     final c = context.colors;
     final o = widget.state.offer;
     final cfg = ref.watch(configProvider);
     final route = o == null ? null : ref.watch(offerRouteProvider(o)).value;
     final vehicleName = o == null ? '' : (cfg.vehicleTypes.where((v) => v.code == o.vehicleType).firstOrNull?.name ?? o.vehicleType);
-    final remaining = o?.remaining(_now) ?? Duration.zero;
+    final cash = o?.paymentMethod == PaymentMethod.cash;
     return Positioned.fill(
       child: Container(
-        color: const Color(0x66000000),
+        color: const Color(0x55000000),
         alignment: Alignment.bottomCenter,
-        child: FadeSlideIn(
+        child: SpringSlideIn(
           key: ValueKey(o?.offerId ?? widget.state.notice),
-          offset: 0.2,
           child: Container(
             width: double.infinity,
             decoration: BoxDecoration(color: c.surface, borderRadius: const BorderRadius.vertical(top: Radius.circular(AnbessaRadius.sheet)), boxShadow: AnbessaElevation.sheet(c.brightness)),
@@ -67,52 +69,81 @@ class _OfferSheetState extends ConsumerState<OfferSheet> {
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(20, 18, 20, 16),
                 child: o == null
-                    ? Text(widget.state.notice == 'cancelled' ? l.offerCancelled : l.offerExpired, style: AnbessaType.body.copyWith(color: c.text))
+                    ? Row(
+                        children: [
+                          Icon(widget.state.notice == 'cancelled' ? Icons.cancel_outlined : Icons.timer_off_outlined, color: c.muted),
+                          const SizedBox(width: 10),
+                          Expanded(child: Text(widget.state.notice == 'cancelled' ? l.offerCancelled : l.offerExpired, style: AnbessaType.body.copyWith(color: c.text))),
+                        ],
+                      )
                     : Column(
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
+                          // the fare, the class and the ring
                           Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Expanded(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(l.newTrip, style: AnbessaType.h2.copyWith(color: c.text)),
-                                    const SizedBox(height: 4),
-                                    Row(
-                                      children: [
-                                        if (o.etaToPickupSeconds != null) ...[EtaBadge(seconds: o.etaToPickupSeconds, minuteLabel: (m) => l.pickupIn(m), icon: Icons.near_me_outlined), const SizedBox(width: 6)],
-                                        Flexible(
-                                          child: route == null
-                                              ? const Skeleton.line(width: 90, height: 12)
-                                              : Text(l.tripOf(km(route.distanceMeters), minutesOf(route.durationSeconds)), style: AnbessaType.caption.copyWith(color: c.muted, fontFeatures: AnbessaType.tabular), maxLines: 1, overflow: TextOverflow.ellipsis),
-                                        ),
-                                      ],
-                                    ),
+                                    Text(l.newTrip, style: AnbessaType.label.copyWith(color: c.muted)),
+                                    const SizedBox(height: 2),
+                                    FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft, child: AnimatedMoney(o.fareEstimateMinor, locale: context.localeTag, style: AnbessaType.display.copyWith(fontSize: 34, color: c.text))),
                                   ],
                                 ),
                               ),
-                              CountdownRing(remaining: remaining, total: const Duration(seconds: 15), size: 60),
+                              const SizedBox(width: 12),
+                              OfferRing(
+                                key: ValueKey(o.offerId),
+                                expiresAt: o.expiresAt,
+                                now: widget.now,
+                                onDone: () {
+                                  if (mounted && !_expired) setState(() => _expired = true);
+                                },
+                              ),
                             ],
+                          ),
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            children: [
+                              StatusPill(paymentMethodLabel(l, o.paymentMethod), tone: cash ? Tone.amber : Tone.blue, icon: cash ? Icons.payments_outlined : Icons.phone_iphone_rounded),
+                              if (o.etaToPickupSeconds != null) EtaBadge(seconds: o.etaToPickupSeconds, minuteLabel: (m) => l.pickupIn(m), icon: Icons.near_me_outlined),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          // the car class and the trip's length
+                          Container(
+                            padding: const EdgeInsets.fromLTRB(12, 8, 14, 8),
+                            decoration: BoxDecoration(color: c.surface2, borderRadius: BorderRadius.circular(AnbessaRadius.md)),
+                            child: Row(
+                              children: [
+                                VehicleArt(o.vehicleType, width: 76),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(vehicleName, maxLines: 1, overflow: TextOverflow.ellipsis, style: AnbessaType.title.copyWith(color: c.text)),
+                                      route == null
+                                          ? const Padding(padding: EdgeInsets.only(top: 4), child: Skeleton.line(width: 90, height: 12))
+                                          : Text(l.tripOf(km(route.distanceMeters), minutesOf(route.durationSeconds)), style: AnbessaType.caption.copyWith(color: c.muted, fontFeatures: AnbessaType.tabular), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                           const SizedBox(height: 14),
                           _Place(color: c.accent, text: o.pickup.address ?? l.pickupLabel),
                           Padding(padding: const EdgeInsets.only(left: 7), child: Container(width: 2, height: 10, color: c.border)),
                           _Place(square: true, color: c.text, text: o.dropoff.address ?? l.dropoffLabel),
-                          const SizedBox(height: 14),
-                          Row(
-                            children: [
-                              StatusPill(paymentMethodLabel(l, o.paymentMethod), tone: o.paymentMethod == PaymentMethod.cash ? Tone.amber : Tone.blue, icon: o.paymentMethod == PaymentMethod.cash ? Icons.payments_outlined : Icons.phone_iphone),
-                              const SizedBox(width: 8),
-                              Flexible(child: StatusPill(vehicleName, tone: Tone.grey, icon: vehicleIcon(o.vehicleType))),
-                              const Spacer(),
-                              AnimatedMoney(o.fareEstimateMinor, locale: context.localeTag, style: AnbessaType.h1.copyWith(color: c.text)),
-                            ],
-                          ),
-                          const SizedBox(height: 14),
+                          const SizedBox(height: 16),
                           Problem(widget.state.error, describe: (e) => describeError(l, e)),
-                          SwipeToConfirm(label: l.slideToAccept, icon: Icons.check_rounded, busy: widget.state.busy, enabled: remaining > Duration.zero, onConfirmed: () => ref.read(offerProvider.notifier).accept()),
+                          SwipeToConfirm(label: l.slideToAccept, icon: Icons.check_rounded, busy: widget.state.busy, enabled: !_expired, onConfirmed: () => ref.read(offerProvider.notifier).accept()),
                           const SizedBox(height: 4),
                           TextButton(onPressed: widget.state.busy ? null : () => ref.read(offerProvider.notifier).decline(), child: Text(l.decline)),
                         ],
@@ -126,6 +157,131 @@ class _OfferSheetState extends ConsumerState<OfferSheet> {
   }
 }
 
+/// The offer's time left on a ring that runs down smoothly, with the seconds inside; only the
+/// ring repaints. [onDone] once at zero.
+class OfferRing extends StatefulWidget {
+  const OfferRing({super.key, required this.expiresAt, this.total = offerWindow, this.size = 64, this.now = DateTime.now, this.onDone});
+  final DateTime expiresAt;
+  final Duration total;
+  final double size;
+  final DateTime Function() now;
+  final VoidCallback? onDone;
+  @override
+  State<OfferRing> createState() => _OfferRingState();
+}
+
+class _OfferRingState extends State<OfferRing> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(vsync: this, duration: widget.total);
+
+  @override
+  void initState() {
+    super.initState();
+    _run();
+    // reported after the frame: the sheet around it rebuilds once to disable the slide
+    _c.addStatusListener((s) {
+      if (s != AnimationStatus.dismissed) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) widget.onDone?.call();
+      });
+    });
+  }
+
+  @override
+  void didUpdateWidget(OfferRing old) {
+    super.didUpdateWidget(old);
+    if (old.expiresAt != widget.expiresAt) _run();
+  }
+
+  void _run() {
+    final left = widget.expiresAt.difference(widget.now().toUtc());
+    final total = widget.total.inMilliseconds;
+    final frac = total == 0 ? 0.0 : (left.inMilliseconds / total).clamp(0.0, 1.0);
+    // reverse from the fraction left: it reaches zero (dismissed) exactly at the deadline
+    if (frac > 0) {
+      _c.reverse(from: frac);
+    } else {
+      _c.value = 0;
+    }
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final size = widget.size;
+    return Semantics(
+      label: context.l10n.drvOfferExpiresIn((_c.value * widget.total.inSeconds).ceil()),
+      child: RepaintBoundary(
+        child: AnimatedBuilder(
+          animation: _c,
+          builder: (context, _) {
+            final v = _c.value;
+            final secs = (v * widget.total.inMilliseconds / 1000).ceil();
+            final urgent = v < 0.3;
+            return SizedBox(
+              width: size,
+              height: size,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  SizedBox(width: size, height: size, child: CircularProgressIndicator(value: v, strokeWidth: 5, strokeCap: StrokeCap.round, color: urgent ? c.danger : c.accent, backgroundColor: c.border)),
+                  Text('$secs', textScaler: TextScaler.noScaling, style: TextStyle(fontSize: size * 0.32, fontWeight: FontWeight.w800, color: urgent ? c.danger : c.text, fontFeatures: AnbessaType.tabular)),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+/// Slides its child up from below with a spring (a plain fade when motion is reduced).
+class SpringSlideIn extends StatefulWidget {
+  const SpringSlideIn({super.key, required this.child});
+  final Widget child;
+  @override
+  State<SpringSlideIn> createState() => _SpringSlideInState();
+}
+
+class _SpringSlideInState extends State<SpringSlideIn> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController.unbounded(vsync: this);
+  bool _started = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_started) return;
+    _started = true;
+    if (AnbessaMotion.reduced(context)) {
+      _c.value = 1;
+    } else {
+      _c.animateWith(SpringSimulation(AnbessaMotion.springDescription, 0, 1, 0));
+    }
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+        animation: _c,
+        child: widget.child,
+        builder: (context, child) => FractionalTranslation(
+          translation: Offset(0, (1 - _c.value) * 0.6),
+          child: Opacity(opacity: _c.value.clamp(0.0, 1.0), child: child),
+        ),
+      );
+}
+
 class _Place extends StatelessWidget {
   const _Place({required this.color, required this.text, this.square = false});
   final Color color;
@@ -135,5 +291,7 @@ class _Place extends StatelessWidget {
   Widget build(BuildContext context) => Row(children: [
         // the same plain dot / square the map uses for pickup and drop-off
         SizedBox(width: 16, child: Center(child: Container(width: 10, height: 10, decoration: BoxDecoration(color: color, shape: square ? BoxShape.rectangle : BoxShape.circle)))),
-        const SizedBox(width: 10), Expanded(child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: AnbessaType.body.copyWith(fontWeight: FontWeight.w500)))]);
+        const SizedBox(width: 10),
+        Expanded(child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: AnbessaType.body.copyWith(fontWeight: FontWeight.w500)))
+      ]);
 }

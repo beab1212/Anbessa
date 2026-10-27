@@ -42,6 +42,7 @@ dependencies:
   sensors_plus: ^7.1.0              # compass heading when the car is still
   confetti: ^0.8.0
   wakelock_plus: '>=1.7.0 <1.8.1'   # keep the screen on while navigating (1.8.1+ wants a dbus geolocator_linux can't use)
+  flutter_tts: ^4.2.5               # spoken turn-by-turn guidance for drivers
 
 dev_dependencies:
   flutter_test:

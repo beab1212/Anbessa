@@ -1,5 +1,6 @@
-// The driver's home (offline and online) and trip screen (waiting at the pickup, with the PIN
-// sheet), in light and dark, with large text.
+// The driver's home (offline and online), trip screen (guidance from the location stream
+// without a rebuild loop, waiting at the pickup with the PIN sheet) and the offer sheet, in light
+// and dark, at 360 dp with 1.3x text.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -18,7 +19,11 @@ import 'package:phone_app/features/driver/earnings/earnings_summary_controller.d
 import 'package:phone_app/features/driver/shift/driver_home_screen.dart';
 import 'package:phone_app/features/driver/shift/shift_controller.dart';
 import 'package:phone_app/features/driver/trip/driver_trip_screen.dart';
+import 'package:phone_app/features/driver/offers/offer_controller.dart';
+import 'package:phone_app/features/driver/offers/offer_sheet.dart';
 import 'package:phone_app/features/maps/nav/navigation_controller.dart';
+import 'package:phone_app/features/maps/nav/turn_banner.dart';
+import 'package:phone_app/features/maps/nav/voice_guide.dart';
 import 'package:phone_app/features/rider/trip/active_trip_controller.dart';
 import 'package:ride_app_core/ride_app_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -115,6 +120,28 @@ Trip driverTrip(String status) {
   return Trip.fromJson(j);
 }
 
+class SilentTts implements TtsEngine {
+  final spoken = <String>[];
+  @override
+  Future<bool> setLanguage(String languageTag) async => languageTag == 'en-US';
+  @override
+  Future<void> speak(String text) async => spoken.add(text);
+  @override
+  Future<void> stop() async {}
+}
+
+TripOffer offer({Duration left = const Duration(seconds: 12)}) => TripOffer.fromJson({
+      'tripId': 't1',
+      'offerId': 'o1',
+      'expiresAt': DateTime.now().toUtc().add(left).toIso8601String(),
+      'etaToPickupSeconds': 240,
+      'pickup': {'lat': 9.0107, 'lng': 38.7613, 'address': 'Meskel Square'},
+      'dropoff': {'lat': 8.9806, 'lng': 38.7578, 'address': 'Bole Airport'},
+      'vehicleType': 'economy',
+      'fare': {'estimateMinor': 25000, 'currency': 'ETB'},
+      'paymentMethod': 'CASH',
+    });
+
 void main() {
   testWidgets('offline home: the car, today\'s numbers and the slide to go online', (tester) async {
     await pumpDriver(tester, const DriverHomeScreen());
@@ -166,6 +193,91 @@ void main() {
     expect(find.textContaining(birr(11000)), findsWidgets);
     expect(find.textContaining(birr(14000)).evaluate().any((e) => ((e.widget as Text).data ?? '').contains('Collect')), isFalse);
     expect(find.textContaining(birr(11000)).evaluate().any((e) => ((e.widget as Text).data ?? '').contains('Collect')), isTrue);
+    expect(tester.takeException(), isNull);
+  });
+
+  for (final b in Brightness.values) {
+    testWidgets('trip guidance follows the location stream without rebuilding the screen (${b.name})', (tester) async {
+      final t = driverTrip('matched'); // on the way to the pickup (Bole)
+      final tts = SilentTts();
+      await pumpDriver(tester, DriverTripScreen(tripId: t.id), trip: t, brightness: b, overrides: [ttsEngineProvider.overrideWithValue(tts)]);
+      final c = ProviderScope.containerOf(tester.element(find.byType(DriverTripScreen)));
+      final pos = c.read(lastPositionProvider.notifier);
+      // ~1.2 km north of the pickup, driving south towards it
+      var lat = 8.9916;
+      pos.set(DevicePosition(lat: lat, lng: 38.7578, heading: 180, speed: 12, at: DateTime.now()));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(milliseconds: 100));
+      final before = DriverTripScreen.debugBuilds;
+      // a fix every 4 s for 40 s, frames in between
+      for (var i = 0; i < 10; i++) {
+        lat -= 0.0004; // ~44 m
+        pos.set(DevicePosition(lat: lat, lng: 38.7578, heading: 180, speed: 11, at: DateTime.now()));
+        for (var f = 0; f < 8; f++) {
+          await tester.pump(const Duration(milliseconds: 500));
+        }
+      }
+      // nothing in the screen depends on each fix: the banner, the car and the map update alone
+      expect(DriverTripScreen.debugBuilds - before, lessThanOrEqualTo(1));
+      // and with no new fix, frames don't build it at all
+      final idle = DriverTripScreen.debugBuilds;
+      for (var f = 0; f < 20; f++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      expect(DriverTripScreen.debugBuilds, idle);
+      final nav = c.read(navigationProvider(NavTarget(lat: t.pickup.lat, lng: t.pickup.lng)));
+      expect(nav.hasRoute, isTrue);
+      expect(nav.fixSeq, greaterThanOrEqualTo(10));
+      expect(find.byType(TurnBanner), findsOneWidget);
+      expect(find.text('Slide: on my way'), findsOneWidget);
+      expect(find.byTooltip('Mute voice guidance'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets('trip: arriving within 40 m says so and speaks it once', (tester) async {
+    final t = driverTrip('matched');
+    final tts = SilentTts();
+    await pumpDriver(tester, DriverTripScreen(tripId: t.id), trip: t, overrides: [ttsEngineProvider.overrideWithValue(tts)]);
+    final c = ProviderScope.containerOf(tester.element(find.byType(DriverTripScreen)));
+    final pos = c.read(lastPositionProvider.notifier);
+    pos.set(DevicePosition(lat: 8.9830, lng: 38.7578, heading: 180, speed: 8, at: DateTime.now()));
+    await tester.pump(const Duration(milliseconds: 300));
+    pos.set(DevicePosition(lat: 8.9808, lng: 38.7578, heading: 180, speed: 2, at: DateTime.now()));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('You have arrived'), findsWidgets);
+    expect(tts.spoken.where((s) => s == 'You have arrived at the pickup'), hasLength(1));
+    // muting from the map
+    await tester.tap(find.byTooltip('Mute voice guidance'));
+    await tester.pump();
+    expect(find.byTooltip('Turn on voice guidance'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  for (final b in Brightness.values) {
+    testWidgets('offer sheet: fare, class, ring and swipe to accept (${b.name})', (tester) async {
+      final o = offer();
+      await pumpDriver(tester, Scaffold(body: Stack(children: [OfferSheet(state: OfferState(offer: o))])), brightness: b);
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(find.textContaining('250'), findsWidgets); // 250 ETB
+      expect(find.text('Slide to accept'), findsOneWidget);
+      expect(find.byType(VehicleArt), findsOneWidget);
+      expect(find.byType(OfferRing), findsOneWidget);
+      expect(find.text('Meskel Square'), findsOneWidget);
+      // time runs out: the slide is disabled
+      await tester.pump(const Duration(seconds: 13));
+      await tester.pump();
+      final swipe = tester.widget<SwipeToConfirm>(find.byType(SwipeToConfirm));
+      expect(swipe.enabled, isFalse);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets('offer sheet: an expired offer shows the notice', (tester) async {
+    await pumpDriver(tester, const Scaffold(body: Stack(children: [OfferSheet(state: OfferState(notice: 'expired'))])));
+    expect(find.byType(SwipeToConfirm), findsNothing);
     expect(tester.takeException(), isNull);
   });
 }

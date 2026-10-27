@@ -18,6 +18,7 @@ abstract final class PrefsKeys {
   static const navBearing = 'nav_bearing';
   static const navApp = 'nav_app';
   static const keepAwake = 'keep_awake';
+  static const navVoice = 'nav_voice';
   static const lastVehicleId = 'last_vehicle_id';
   static const clientConfig = 'client_config';
   static const mapMode = 'map_mode';

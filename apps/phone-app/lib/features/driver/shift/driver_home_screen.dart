@@ -61,14 +61,15 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> with Single
     final shift = ref.watch(shiftProvider);
     final offer = ref.watch(offerProvider);
     final balance = ref.watch(balanceProvider).value;
-    final me = ref.watch(lastPositionProvider);
+    final o = offer.offer;
+    // the raw fix only matters while an offer is drawn (the car itself is animated without rebuilds)
+    final me = o == null ? null : ref.watch(lastPositionProvider);
     final rt = ref.watch(realtimeStateProvider).value ?? RealtimeState.offline;
     final bannerH = ref.watch(bannerHeightProvider);
     final today = ref.watch(earningsSummaryProvider('today')).value;
     final vehicles = ref.watch(drivableVehiclesProvider).value ?? home.value?.allVehicles ?? const <Vehicle>[];
     final chosenId = _vehicleId ?? ref.read(shiftProvider.notifier).lastVehicleId;
     final chosen = vehicles.where((v) => v.id == chosenId).firstOrNull ?? vehicles.where((v) => v.canDrive ?? true).firstOrNull;
-    final o = offer.offer;
     final top = MediaQuery.paddingOf(context).top + bannerH;
     final balanceBanner = balance != null && balance.state != BalanceState.ok && balance.state != BalanceState.unknown;
 
@@ -86,7 +87,8 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> with Single
             dropoff: o == null ? null : LatLng(o.dropoff.lat, o.dropoff.lng),
             routes: [
               if (o != null) ...[
-                if (me != null) RouteLine.straight(LatLng(me.lat, me.lng), LatLng(o.pickup.lat, o.pickup.lng)),
+                // the way to the pickup dashed, the trip itself solid
+                if (me != null) RouteLine([LatLng(me.lat, me.lng), LatLng(o.pickup.lat, o.pickup.lng)], kind: RouteKind.secondary),
                 ...() {
                   final r = ref.watch(offerRouteProvider(o)).value;
                   return [if (r != null && r.polyline6.isNotEmpty) RouteLine.fromPolyline6(r.polyline6) else RouteLine(const [], kind: RouteKind.primary)];
@@ -97,7 +99,7 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> with Single
             onRecenter: () => setState(() => _following = true),
             topInset: top + 56,
             sheetHeight: o == null ? _sheetHeight : null,
-            bottomInset: o == null ? 0 : 320,
+            bottomInset: o == null ? 0 : 420,
           ),
           // status and health
           Positioned(
@@ -111,7 +113,7 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> with Single
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     MapChip(
-                      icon: shift.online ? null : Icons.power_settings_new,
+                      icon: shift.online ? Icons.wifi_tethering_rounded : Icons.power_settings_new_rounded,
                       label: shift.online ? l.online : l.youAreOffline,
                       tone: shift.online ? c.success : c.muted,
                       pulse: shift.online,
@@ -124,6 +126,13 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> with Single
                         spacing: 6,
                         runSpacing: 6,
                         children: [
+                          if (balance != null)
+                            MapChip(
+                              icon: Icons.account_balance_wallet_rounded,
+                              label: birr(balance.balanceMinor, locale: context.localeTag),
+                              tone: switch (balance.state) { BalanceState.ok || BalanceState.unknown => c.text2, BalanceState.warning => c.warning, _ => c.danger },
+                              onTap: () => context.go(Routes.driverTopUp),
+                            ),
                           if (shift.online) MapChip(icon: shift.gpsPoor ? Icons.gps_off : Icons.gps_fixed, label: shift.gpsPoor ? l.gpsPoor : l.gpsGood, tone: shift.gpsPoor ? c.danger : c.success),
                           if (shift.online && rt != RealtimeState.connected) MapChip(icon: Icons.wifi_off, label: l.reconnecting, tone: c.warning),
                           if (Env.fakeLocationOn) MapChip(icon: Icons.bug_report_outlined, label: l.devTools, onTap: () => setState(() => _devOpen = !_devOpen)),
@@ -178,16 +187,17 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> with Single
       padding: const EdgeInsets.only(bottom: 14),
       child: StatRow(
         children: [
-          StatTile(label: l.earningsToday, icon: Icons.account_balance_wallet_outlined, value: AnimatedMoney(today.netMinor, locale: loc)),
-          StatTile(label: l.tripsToday, icon: Icons.route_outlined, value: AnimatedCounter(value: today.trips, format: (v) => v.round().toString())),
-          if (since != null) StatTile(label: l.timeOnline, icon: Icons.schedule, value: Text(since_(since))),
+          StatTile(label: l.earningsToday, icon: Icons.payments_rounded, value: AnimatedMoney(today.netMinor, locale: loc)),
+          StatTile(label: l.tripsToday, icon: Icons.route_rounded, value: AnimatedCounter(value: today.trips, format: (v) => v.round().toString())),
+          // ticks on its own, once a minute is enough
+          if (since != null) StatTile(label: l.timeOnline, icon: Icons.schedule_rounded, value: TickingBuilder(interval: const Duration(seconds: 30), builder: (_, now) => Text(onlineFor(now.toUtc().difference(since.toUtc()))))),
         ],
       ),
     );
   }
 
-  String since_(DateTime start) {
-    final d = DateTime.now().toUtc().difference(start.toUtc());
+  static String onlineFor(Duration d) {
+    if (d.isNegative) d = Duration.zero;
     final h = d.inHours, m = d.inMinutes % 60;
     return h > 0 ? '${h}h ${m}m' : '${m}m';
   }
@@ -229,7 +239,8 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> with Single
             Padding(padding: const EdgeInsets.only(bottom: 10), child: Problem(error, describe: (e) => describeError(l, e))),
           SwipeToConfirm(
             label: l.slideToGoOnline,
-            icon: Icons.power_settings_new,
+            icon: Icons.power_settings_new_rounded,
+            tone: Tone.amber,
             busy: shift.busy,
             enabled: chosen != null && chosen.canDrive != false,
             onConfirmed: () async {
