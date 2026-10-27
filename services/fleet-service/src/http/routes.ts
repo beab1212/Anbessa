@@ -130,6 +130,47 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
     return fleet.revokeDriver(await principal(req), id, driverUserId);
   });
 
+  // manual suspension (driver:suspend / driver:reinstate in the vehicle's city)
+  app.post("/api/fleet/vehicles/:id/suspend", async (req) => {
+    const { id } = idParam.parse(req.params);
+    const body = z.object({ reason: z.string().trim().min(10).max(500), category: z.enum(["SAFETY", "ONBOARDING"]).default("SAFETY") }).parse(req.body);
+    return fleet.suspendVehicle(await principal(req), id, body);
+  });
+  app.post("/api/fleet/vehicles/:id/reinstate", async (req) => {
+    const { id } = idParam.parse(req.params);
+    return fleet.reinstateVehicle(await principal(req), id, z.object({ reason: z.string().trim().min(10).max(500) }).parse(req.body).reason);
+  });
+
+  // ── ownership transfers (rule V9, maker–checker) ────────────────────────────
+  const TRANSFER_STATUSES = ["REQUESTED", "PENDING", "EXECUTED", "REJECTED", "CANCELLED", "EXPIRED"] as const;
+  app.post("/api/fleet/vehicles/:id/transfers", async (req, reply) => {
+    const { id } = idParam.parse(req.params);
+    const body = z.object({ toOwnerType: z.enum(["INDIVIDUAL", "ORGANIZATION"]), toOwnerId: uuid, reason: z.string().trim().min(10).max(500) }).parse(req.body);
+    return reply.status(201).send(await fleet.requestTransfer(await principal(req), id, body));
+  });
+  app.get("/api/fleet/vehicles/:id/transfers", async (req) => {
+    const { id } = idParam.parse(req.params);
+    return { transfers: await fleet.listTransfers(await principal(req), { vehicleId: id, limit: 50 }) };
+  });
+  app.get("/api/fleet/transfers", async (req) => {
+    const q = z.object({ cityId: cityId.optional(), ownerOrgId: uuid.optional(), status: z.enum(TRANSFER_STATUSES).optional(), limit: z.coerce.number().int().min(1).max(200).default(100) }).parse(req.query);
+    return { transfers: await fleet.listTransfers(await principal(req), q) };
+  });
+  const note = z.object({ note: z.string().trim().max(500).optional() });
+  app.post("/api/fleet/transfers/:id/endorse", async (req) => {
+    const { id } = idParam.parse(req.params);
+    return fleet.endorseTransfer(await principal(req), id, note.parse(req.body ?? {}).note);
+  });
+  app.post("/api/fleet/transfers/:id/approve", async (req) => {
+    const { id } = idParam.parse(req.params);
+    return fleet.approveTransfer(await principal(req), id, note.parse(req.body ?? {}).note);
+  });
+  app.post("/api/fleet/transfers/:id/reject", async (req) => {
+    const { id } = idParam.parse(req.params);
+    return fleet.rejectTransfer(await principal(req), id, z.object({ reason: z.string().trim().min(10).max(500) }).parse(req.body).reason);
+  });
+  app.post("/api/fleet/transfers/:id/cancel", async (req) => fleet.cancelTransfer(await principal(req), idParam.parse(req.params).id));
+
   // ── fleet portal ────────────────────────────────────────────────────────────
   app.get("/api/fleet/organizations/:id/overview", async (req) => {
     const { id } = idParam.parse(req.params);
@@ -137,6 +178,13 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
     const ids = members.split(",").map((s) => s.trim()).filter(Boolean);
     if (ids.some((m) => !uuid.safeParse(m).success)) throw badRequest("members: comma-separated user ids");
     return fleet.fleetOverview(await principal(req), id, ids);
+  });
+
+  // staff: a fleet's documents that expired or expire soon (document:read in the company's city)
+  app.get("/api/fleet/organizations/:id/expiring-documents", async (req) => {
+    const { id } = idParam.parse(req.params);
+    const { days } = z.object({ days: z.coerce.number().int().min(1).max(120).default(30) }).parse(req.query);
+    return fleet.fleetExpiringDocuments(await principal(req), id, days);
   });
 
   // ── documents ───────────────────────────────────────────────────────────────

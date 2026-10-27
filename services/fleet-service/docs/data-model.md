@@ -159,11 +159,18 @@ Transactional outbox, published by the relay ([events.md](events.md)).
 
 Index: `ix_outbox_unpublished (created_at) WHERE published_at IS NULL`. Published rows are not cleaned up (not found in code).
 
+## `vehicle_transfer` (`VehicleTransfer`) — phase 2D
+
+Ownership transfer requests (rule V9, maker–checker). `id` uuidv7, `vehicle_id` (FK → vehicle), `city_id` (the vehicle's when asked: the officers' scope), `from_owner_type`/`from_owner_id`, `to_owner_type`/`to_owner_id` (`INDIVIDUAL` | `ORGANIZATION`), `status` (`REQUESTED` | `PENDING` | `EXECUTED` | `REJECTED` | `CANCELLED` | `EXPIRED`), `reason`, `requested_by` (owner who asked), `maker_id` (proposing officer), `checker_id` (approving/rejecting officer), `decision_note`, `expires_at` (+7 days), `decided_at`, `created_at`. Indexes `(city_id, status)`, `(vehicle_id, created_at DESC)`; CHECKs `ck_transfer_status`, `ck_transfer_owner_types`, `ck_transfer_new_owner` (not to the same owner), `ck_transfer_maker_checker` (checker ≠ maker); unique partial `ux_transfer_vehicle_open (vehicle_id) WHERE status IN ('REQUESTED','PENDING')`.
+
+`vehicle.status_reason` also takes `ONBOARDING` (manual suspension for documents) and `TRANSFERRED` (status `DRAFT` after an approved transfer).
+
 ## Migrations
 
 | Order | Folder | What it does |
 |---|---|---|
 | 1 | `prisma/migrations/20261027120000_init/` | Creates the seven tables, the Prisma-generated unique and plain indexes and the two foreign keys, then (hand-written) the CHECK constraints `ck_driver_status`, `ck_vehicle_status`, `ck_vehicle_seats`, `ck_vehicle_single_owner`, `ck_authorization_status`, `ck_document_subject`, `ck_document_status`, `ck_idempotency_status`, and the partial indexes `ix_vehicle_owner_user`, `ix_vehicle_owner_org`, `ux_session_vehicle_active`, `ux_session_driver_active`, `ix_document_review`, `ix_document_expiring`, `ix_outbox_unpublished` |
+| 2 | `prisma/migrations/20261027180000_vehicle_transfer/` | Creates `vehicle_transfer` with its FK, indexes, CHECKs and `ux_transfer_vehicle_open` |
 
 `migration_lock.toml` pins the provider to PostgreSQL. `prisma.config.ts` reads `DATABASE_URL` (via `dotenv`) and points at `prisma/migrations`. Apply with `pnpm exec prisma migrate deploy` (what `make db-migrate` runs) or `pnpm prisma migrate dev` while developing.
 

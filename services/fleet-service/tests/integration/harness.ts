@@ -93,7 +93,9 @@ export async function createHarness() {
   }
 
   const future = (days = 365) => new Date(clock.now + days * 86_400_000).toISOString().slice(0, 10);
-  let licence = 100000;
+  // test files share one database: start each harness's licences and plates somewhere else
+  const base = Number(String(Date.now()).slice(-8));
+  let licence = base;
 
   /** An applicant with all three driver documents uploaded. */
   async function applicant(roles: object[] = [{ r: "RIDER" }]) {
@@ -123,7 +125,7 @@ export async function createHarness() {
     return who;
   }
 
-  let plate = 10000;
+  let plate = base;
   const nextPlate = () => `3-A${plate++}`;
   const car = (extra: object = {}) => ({ plateNumber: nextPlate(), vehicleType: "economy", make: "Toyota", model: "Vitz", year: 2018, color: "White", seats: 4, ...extra });
 

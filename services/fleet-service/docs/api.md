@@ -219,10 +219,10 @@ Request bodies are parsed before the token is checked on most routes, so an inva
 
 | | |
 |---|---|
-| Who | With `ownerOrgId`: `vehicle:read @ ORG`. Else with `cityId`: `vehicle:read @ CITY`. Else: the caller's own cars, no permission |
+| Who | With `ownerOrgId`: `vehicle:read @ ORG`, or, when `cityId` is also given and the caller has no org grant, `vehicle:read @ CITY` of `cityId` (city staff such as onboarding officers looking at a company: only the company's cars in that city). Else with `cityId`: `vehicle:read @ CITY`. Else: the caller's own cars, no permission |
 | Query | `ownerOrgId` uuid · `cityId` 1–40 · `status` vehicle status · `limit` 1–200, default 100 |
 | 200 | `{ vehicles: Vehicle[] }`, newest first |
-| Notes | `ownerOrgId` wins over `cityId`. "Mine" includes retired cars unless `status` filters them out |
+| Notes | With an org grant, `ownerOrgId` wins over `cityId` (all the company's cars). "Mine" includes retired cars unless `status` filters them out |
 
 ### `GET /api/fleet/vehicles/:id`
 
@@ -379,6 +379,56 @@ Request bodies are parsed before the token is checked on most routes, so an inva
 | Who | Any signed-in user (their own session) |
 | 200 | `{ session: Session \| null }` (the ended session with `endReason: "DRIVER"`, or null if not online) |
 | Events | `driver.offline` (`DRIVER`) |
+
+## Phase 2D: vehicle suspension, ownership transfers, a fleet's expiring documents
+
+### `POST /api/fleet/vehicles/:id/suspend`
+
+| | |
+|---|---|
+| Who | `driver:suspend @ CITY(vehicle)` (onboarding or safety officer). The matrix has no `vehicle:suspend`; taking a car off the road uses the driver permission |
+| Body | `reason` string 10–500, `category?` `SAFETY` (default) \| `ONBOARDING` |
+| 200 | Vehicle, status `SUSPENDED`, `statusReason` = category, `reviewNote` = reason. Already suspended → current vehicle, nothing written |
+| Errors | 404 · 403 · 409 `invalid_state` (only `VERIFIED` cars are suspended) |
+| Events | `driver.offline` (`VEHICLE_UNAVAILABLE`, if a session was open: it ends now), `vehicle.suspended` (`byUserId` = staff), `audit.recorded` (`vehicle:suspend`) |
+
+### `POST /api/fleet/vehicles/:id/reinstate`
+
+| | |
+|---|---|
+| Who | `driver:reinstate @ CITY(vehicle)` |
+| Body | `reason` string 10–500 |
+| 200 | Vehicle, status `VERIFIED` |
+| Errors | 404 · 403 · 409 `invalid_state` (not suspended) · 409 `documents_not_approved` (every document approved and in date) · 409 `org_not_verified` (fleet car whose company isn't verified or is suspended) · 503 (auth-service down, fleet cars) |
+| Events | `vehicle.reinstated`, `audit.recorded` (`vehicle:reinstate`) |
+| Notes | Works for any suspension reason, including `DOCUMENT_EXPIRED` once the renewed documents are approved |
+
+### Ownership transfers (rule V9, maker–checker)
+
+States: `REQUESTED` (the current owner asked) → `PENDING` (an onboarding officer proposed it: the maker) → `EXECUTED` (a **different** officer approved: the checker). Staff may start at `PENDING`. Open transfers may be `REJECTED` by an officer (not the maker) or `CANCELLED` by whoever opened them; after 7 days they're `EXPIRED` (hourly job, and refused on use). One open transfer per vehicle (`ux_transfer_vehicle_open`). The approval runs in fleet-service (the resource's owner), not in auth-service's approvals inbox; both halves use `vehicle:transfer @ CITY` (Role.md §11: "a second onboarding officer").
+
+`Transfer` = `{ id, vehicleId, cityId, status, from: { type, id, name }, to: { type, id, name }, reason, requestedBy, makerId, checkerId, decisionNote, expiresAt, decidedAt, createdAt, vehicle?: { plateNumber, make, model, color, status } }` (`name` = the driver's full name for `INDIVIDUAL`, null for companies; an open transfer past `expiresAt` reads `EXPIRED`).
+
+| Method + path | Who | Body / query | Result |
+|---|---|---|---|
+| `POST /api/fleet/vehicles/:id/transfers` | the current owner (owner-driver with `vehicle:retire @ SELF`; fleet with `vehicle:retire @ ORG`) → `REQUESTED`; or `vehicle:transfer @ CITY` → `PENDING` with the caller as maker | `toOwnerType` `INDIVIDUAL`\|`ORGANIZATION`, `toOwnerId` uuid, `reason` 10–500 | 201 Transfer. 400 `same_owner` · 400 `not_a_fleet` · 409 `org_not_verified` (receiving fleet must be `VERIFIED`) · 400 `not_a_driver` (a new owner-driver must have a driver profile) · 409 `invalid_state` (retired) · 409 `transfer_pending`. Audit `vehicle:transfer:request` (`PENDING_APPROVAL`) |
+| `GET /api/fleet/vehicles/:id/transfers` | anyone who may read the vehicle (owner, fleet `vehicle:read @ ORG`, staff `vehicle:read`/`vehicle:transfer @ CITY`) | — | `{ transfers }` newest first (50) |
+| `GET /api/fleet/transfers` | `cityId`: `vehicle:transfer` or `vehicle:read @ CITY`; `ownerOrgId`: `vehicle:read @ ORG` (transfers out of **and into** the fleet); neither: the caller's own (as owner-driver, either way) | `cityId?`, `ownerOrgId?`, `status?`, `limit` 1–200 (100) | `{ transfers }` |
+| `POST /api/fleet/transfers/:id/endorse` | `vehicle:transfer @ CITY(transfer)` | `note?` ≤ 500 | `REQUESTED → PENDING`, caller = maker. 409 `not_requested` · `expired` · `not_open` · `state_changed`. Audit `vehicle:transfer:propose` |
+| `POST /api/fleet/transfers/:id/approve` | `vehicle:transfer @ CITY`, not the maker (403 `maker_is_checker`) | `note?` | Executes (below). 409 `not_proposed` (still `REQUESTED`) · `expired` · `not_open` · `owner_changed` · `invalid_state` (retired) · `org_not_verified` |
+| `POST /api/fleet/transfers/:id/reject` | `vehicle:transfer @ CITY`, not the maker | `reason` 10–500 | `REJECTED`. Audit `vehicle:transfer:reject` |
+| `POST /api/fleet/transfers/:id/cancel` | whoever opened it (`requestedBy` or `makerId`) | — | `CANCELLED`. Audit `vehicle:transfer:cancel` |
+
+**What approval does (one transaction):** the open driving session ends (`driver.offline VEHICLE_UNAVAILABLE`); every active `vehicle_authorization` is revoked; the current `REGISTRATION` document is `SUPERSEDED` (it names the old owner) and other approved documents go back to `PENDING` (checked again); the vehicle's owner fields switch (single-owner CHECK holds), `city_id` becomes the new owner's city (documents too), status `DRAFT` with `statusReason: "TRANSFERRED"`, `verifiedAt`/`submittedAt` cleared, `version + 1`. The new owner uploads a registration naming them and submits as usual (`POST /vehicles/:id/submit`). Events `vehicle.transferred` + audit `vehicle:transfer` (`EXECUTED`). Past trips keep their snapshot (Role.md §6).
+
+### `GET /api/fleet/organizations/:id/expiring-documents`
+
+| | |
+|---|---|
+| Who | `document:read @ CITY(org)` (onboarding officers). Documents of other cities are left out unless the caller reads them too |
+| Query | `days` 1–120 (default 30) |
+| 200 | `{ orgId, days, until, documents: [Document + { daysLeft, vehicle: { id, plateNumber, status } \| null }] }`, soonest first (up to 500): the company's own documents and those of its non-retired cars that are `EXPIRED` (and not yet replaced) or `APPROVED` with `expiresAt` ≤ today + `days` |
+| Errors | 404 (unknown id or not a fleet, via auth-service) · 403 · 503 |
 
 ## Local file storage (`STORAGE=local` only)
 

@@ -63,6 +63,7 @@ model Vehicle {
 
   authorizations VehicleAuthorization[]
   sessions       DrivingSession[]
+  transfers      VehicleTransfer[]
 
   @@index([cityId, status])
   @@map("vehicle")
@@ -128,6 +129,40 @@ model Document {
 
   @@index([subjectType, subjectId])
   @@map("document")
+}
+
+/// Ownership transfer (rule V9), maker–checker (Role.md §11): the current owner may ask (REQUESTED),
+/// an onboarding officer proposes (PENDING, the maker), a second officer approves (EXECUTED).
+/// At most one open transfer per vehicle (partial unique index in the migration).
+model VehicleTransfer {
+  id            String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  vehicleId     String    @map("vehicle_id") @db.Uuid
+  /// city of the vehicle when asked (the officers' scope)
+  cityId        String    @map("city_id")
+  fromOwnerType String    @map("from_owner_type")
+  fromOwnerId   String    @map("from_owner_id") @db.Uuid
+  /// INDIVIDUAL (an owner-driver) | ORGANIZATION (a fleet company)
+  toOwnerType   String    @map("to_owner_type")
+  toOwnerId     String    @map("to_owner_id") @db.Uuid
+  /// REQUESTED | PENDING | EXECUTED | REJECTED | CANCELLED | EXPIRED
+  status        String
+  reason        String
+  /// the owner who asked (null when staff started it)
+  requestedBy   String?   @map("requested_by") @db.Uuid
+  /// the officer who proposed it (maker)
+  makerId       String?   @map("maker_id") @db.Uuid
+  /// the second officer who approved or rejected it (checker), or who rejected a request
+  checkerId     String?   @map("checker_id") @db.Uuid
+  decisionNote  String?   @map("decision_note")
+  expiresAt     DateTime  @map("expires_at") @db.Timestamptz
+  decidedAt     DateTime? @map("decided_at") @db.Timestamptz
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id])
+
+  @@index([cityId, status])
+  @@index([vehicleId, createdAt(sort: Desc)])
+  @@map("vehicle_transfer")
 }
 
 /// HTTP idempotency keys (Database.md §9): POST /api/fleet/sessions.

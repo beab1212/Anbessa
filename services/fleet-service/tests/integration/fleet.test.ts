@@ -145,6 +145,12 @@ describe("vehicles and sessions (workflow 04)", () => {
     expect((await h.req("POST", "/api/fleet/vehicles", stranger, h.car({ ownerType: "ORGANIZATION", ownerOrgId: org }))).statusCode).toBe(403);
 
     const v = await h.verifiedVehicle(owner, { ownerType: "ORGANIZATION", ownerOrgId: org });
+    // city staff see a company's cars in their city (the staff Companies page); not without the city
+    const off = await h.officer();
+    const listed = await h.ok<{ vehicles: { id: string }[] }>(h.req("GET", `/api/fleet/vehicles?ownerOrgId=${org}&cityId=addis-ababa`, off));
+    expect(listed.vehicles.map((x) => x.id)).toContain(v.id);
+    expect((await h.req("GET", `/api/fleet/vehicles?ownerOrgId=${org}`, off)).statusCode).toBe(403);
+    expect((await h.req("GET", `/api/fleet/vehicles?ownerOrgId=${org}&cityId=addis-ababa`, await h.officer("dire-dawa"))).statusCode).toBe(403);
     const driver = await h.activeDriver([{ r: "RIDER" }, { r: "DRIVER" }, { r: "FLEET_DRIVER", org }]);
 
     expect((await h.req("POST", `/api/fleet/vehicles/${v.id}/authorizations`, owner, { driverUserId: driver.id })).json()).toMatchObject({ error: "not_a_fleet_driver" });

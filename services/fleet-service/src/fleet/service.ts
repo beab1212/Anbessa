@@ -3,7 +3,7 @@
 // shared matrix before touching data.
 
 import { v7 as uuidv7 } from "uuid";
-import { authorize, can, type Permission, type Principal } from "@ride-app/shared-authz";
+import { authorize, can, citiesWith, type Permission, type Principal } from "@ride-app/shared-authz";
 import { CITIES } from "@ride-app/shared-location";
 import type { SettingsReader } from "@ride-app/shared-settings";
 import type { Logger } from "@ride-app/shared-utils";
@@ -24,6 +24,12 @@ type DriverRow = Prisma.DriverProfileGetPayload<object>;
 type VehicleRow = Prisma.VehicleGetPayload<object>;
 type DocumentRow = Prisma.DocumentGetPayload<object>;
 type SessionRow = Prisma.DrivingSessionGetPayload<object>;
+type TransferRow = Prisma.VehicleTransferGetPayload<object>;
+
+export type OwnerType = "INDIVIDUAL" | "ORGANIZATION";
+/** Transfers waiting this long without a decision expire (Role.md §11). */
+export const TRANSFER_TTL_MS = 7 * 86_400_000;
+const OPEN_TRANSFER = ["REQUESTED", "PENDING"];
 
 export type EndReason = "DRIVER" | "CONNECTION_LOST" | "SUSPENDED" | "VEHICLE_UNAVAILABLE" | "FLEET_SUSPENDED" | "BALANCE_BLOCKED";
 
@@ -281,7 +287,12 @@ export function createFleetService(deps: FleetDeps) {
 
   async function listVehicles(p: Principal, q: { ownerOrgId?: string; cityId?: string; status?: string; limit: number }) {
     let where: Prisma.VehicleWhereInput;
-    if (q.ownerOrgId) {
+    if (q.ownerOrgId && q.cityId && !can(p, "vehicle:read", { orgId: q.ownerOrgId })) {
+      // city staff (onboarding officers) looking at a company: their city grant covers the company's
+      // cars in that city
+      authorize(p, "vehicle:read", { cityId: q.cityId });
+      where = { ownerType: "ORGANIZATION", ownerOrgId: q.ownerOrgId, cityId: q.cityId };
+    } else if (q.ownerOrgId) {
       authorize(p, "vehicle:read", { orgId: q.ownerOrgId });
       where = { ownerType: "ORGANIZATION", ownerOrgId: q.ownerOrgId };
     } else if (q.cityId) {
@@ -754,6 +765,291 @@ export function createFleetService(deps: FleetDeps) {
     });
   }
 
+  // ── manual vehicle suspension (Role.md §6 lifecycle: "safety action") ──────
+  // The matrix has no vehicle:suspend: taking a car off the road uses the same permission as taking
+  // a driver off the road (driver:suspend / driver:reinstate: onboarding officers for documents,
+  // safety officers), in the vehicle's city.
+
+  async function suspendVehicle(p: Principal, id: string, input: { reason: string; category: "SAFETY" | "ONBOARDING" }) {
+    const v = await loadVehicle(id);
+    authorize(p, "driver:suspend", { cityId: v.cityId });
+    return db.$transaction(async (tx) => {
+      const cur = await tx.vehicle.findUniqueOrThrow({ where: { id } });
+      if (cur.status === "SUSPENDED") return vehicleView(cur);
+      if (cur.status !== "VERIFIED") throw conflict(`only a verified vehicle can be suspended; this one is ${cur.status.toLowerCase()}`, "invalid_state");
+      const row = await tx.vehicle.update({ where: { id }, data: { status: "SUSPENDED", statusReason: input.category, reviewNote: input.reason, version: { increment: 1 } } });
+      // off the road now: the open session ends (workflow 04: VEHICLE_UNAVAILABLE)
+      const s = await openSessionOfVehicle(tx, id);
+      if (s) await endSessionTx(tx, s, "VEHICLE_UNAVAILABLE");
+      await writeOutbox(tx,
+        { topic: "vehicle.suspended", key: id, payload: { vehicleId: id, cityId: v.cityId, reason: input.reason, byUserId: p.userId } },
+        audit({ actorId: p.userId, action: "vehicle:suspend", resource: { type: "vehicle", id }, outcome: "EXECUTED", reason: input.reason }),
+      );
+      return vehicleView(row);
+    });
+  }
+
+  async function reinstateVehicle(p: Principal, id: string, reason: string) {
+    const v = await loadVehicle(id);
+    authorize(p, "driver:reinstate", { cityId: v.cityId });
+    if (v.status !== "SUSPENDED") throw conflict("the vehicle isn't suspended", "invalid_state");
+    if (v.ownerType === "ORGANIZATION") {
+      const org = await verifiedFleet(v.ownerOrgId!);
+      if (org.status !== "VERIFIED") throw conflict("the company isn't verified (or is suspended); lift that first", "org_not_verified");
+    }
+    return db.$transaction(async (tx) => {
+      const cur = await tx.vehicle.findUniqueOrThrow({ where: { id } });
+      if (cur.status !== "SUSPENDED") throw conflict("the vehicle isn't suspended", "invalid_state");
+      const missing = missingForApproval("VEHICLE", await docsOf(tx, "VEHICLE", id), now());
+      if (missing.length) throw conflict(`these documents aren't valid: ${missing.join(", ")}. The owner uploads them and resubmits`, "documents_not_approved");
+      const row = await tx.vehicle.update({ where: { id }, data: { status: "VERIFIED", statusReason: null, reviewNote: null, version: { increment: 1 } } });
+      await writeOutbox(tx,
+        { topic: "vehicle.reinstated", key: id, payload: { vehicleId: id, cityId: v.cityId, reason, byUserId: p.userId } },
+        audit({ actorId: p.userId, action: "vehicle:reinstate", resource: { type: "vehicle", id }, outcome: "EXECUTED", reason }),
+      );
+      return vehicleView(row);
+    });
+  }
+
+  // ── ownership transfer (rule V9, maker–checker, Role.md §11) ───────────────
+  // REQUESTED (the current owner asked) → PENDING (an onboarding officer proposes it: the maker) →
+  // EXECUTED (a second officer approves: the checker). Staff may also start at PENDING. Either open
+  // state may be rejected by an officer or withdrawn by whoever opened it; 7 days → EXPIRED.
+
+  const ownerIdOf = (v: Pick<VehicleRow, "ownerUserId" | "ownerOrgId">) => (v.ownerUserId ?? v.ownerOrgId)!;
+
+  async function transferView(t: TransferRow & { vehicle?: VehicleRow }) {
+    const people = [t.fromOwnerType === "INDIVIDUAL" ? t.fromOwnerId : null, t.toOwnerType === "INDIVIDUAL" ? t.toOwnerId : null].filter((x): x is string => !!x);
+    const names = people.length ? await db.driverProfile.findMany({ where: { userId: { in: people } }, select: { userId: true, fullName: true } }) : [];
+    const name = (type: string, id: string) => (type === "INDIVIDUAL" ? names.find((n) => n.userId === id)?.fullName ?? null : null);
+    const expired = OPEN_TRANSFER.includes(t.status) && t.expiresAt <= now();
+    return {
+      id: t.id, vehicleId: t.vehicleId, cityId: t.cityId, status: expired ? "EXPIRED" : t.status,
+      from: { type: t.fromOwnerType, id: t.fromOwnerId, name: name(t.fromOwnerType, t.fromOwnerId) },
+      to: { type: t.toOwnerType, id: t.toOwnerId, name: name(t.toOwnerType, t.toOwnerId) },
+      reason: t.reason, requestedBy: t.requestedBy, makerId: t.makerId, checkerId: t.checkerId, decisionNote: t.decisionNote,
+      expiresAt: t.expiresAt.toISOString(), decidedAt: t.decidedAt?.toISOString() ?? null, createdAt: t.createdAt.toISOString(),
+      ...(t.vehicle ? { vehicle: { plateNumber: t.vehicle.plateNumber, make: t.vehicle.make, model: t.vehicle.model, color: t.vehicle.color, status: t.vehicle.status } } : {}),
+    };
+  }
+
+  /** The current owner asking for their own car: the owner-driver, or the fleet (vehicle:retire @ ORG: who may dispose of it). */
+  function isOwnerAsking(p: Principal, v: VehicleRow) {
+    if (v.ownerType === "INDIVIDUAL") return v.ownerUserId === p.userId && can(p, "vehicle:retire", self(p));
+    return can(p, "vehicle:retire", { orgId: v.ownerOrgId });
+  }
+
+  /** The new owner must be able to own a car: a verified fleet company, or someone who applied to drive. Returns their city. */
+  async function checkNewOwner(type: OwnerType, ownerId: string): Promise<string> {
+    if (type === "ORGANIZATION") {
+      const org = await auth.organization(ownerId);
+      if (!org || org.kind !== "FLEET") throw badRequest("the new owner isn't a fleet company", "not_a_fleet");
+      if (org.status !== "VERIFIED") throw conflict("the receiving company must be verified", "org_not_verified");
+      return org.cityId;
+    }
+    const d = await db.driverProfile.findUnique({ where: { userId: ownerId } });
+    if (!d) throw badRequest("the new owner must have applied as a driver (owner-drivers drive their own car)", "not_a_driver");
+    return d.cityId;
+  }
+
+  async function loadTransfer(tx: Tx | Db, id: string) {
+    const t = await tx.vehicleTransfer.findUnique({ where: { id } });
+    if (!t) throw notFound("transfer");
+    return t;
+  }
+
+  /** Moves an open transfer on, only from the state read (races: the loser gets 409). */
+  async function moveTransfer(tx: Tx, t: TransferRow, data: Prisma.VehicleTransferUpdateManyMutationInput) {
+    const { count } = await tx.vehicleTransfer.updateMany({ where: { id: t.id, status: t.status }, data });
+    if (count === 0) throw conflict("the transfer changed meanwhile; reload", "state_changed");
+  }
+
+  async function refuseIfExpired(t: TransferRow) {
+    if (OPEN_TRANSFER.includes(t.status) && t.expiresAt <= now()) {
+      await db.vehicleTransfer.updateMany({ where: { id: t.id, status: t.status }, data: { status: "EXPIRED", decidedAt: now() } });
+      throw conflict("this transfer expired (7 days without a decision); start a new one", "expired");
+    }
+    if (!OPEN_TRANSFER.includes(t.status)) throw conflict(`this transfer is ${t.status.toLowerCase()}`, "not_open");
+  }
+
+  async function requestTransfer(p: Principal, vehicleId: string, input: { toOwnerType: OwnerType; toOwnerId: string; reason: string }) {
+    const v = await loadVehicle(vehicleId);
+    const byOwner = isOwnerAsking(p, v);
+    if (!byOwner) authorize(p, "vehicle:transfer", { cityId: v.cityId });
+    if (v.status === "RETIRED") throw conflict("this vehicle is retired", "invalid_state");
+    if (input.toOwnerType === v.ownerType && input.toOwnerId === ownerIdOf(v)) throw badRequest("that's the current owner", "same_owner");
+    await checkNewOwner(input.toOwnerType, input.toOwnerId);
+    try {
+      const t = await db.$transaction(async (tx) => {
+        const row = await tx.vehicleTransfer.create({
+          data: {
+            vehicleId, cityId: v.cityId, fromOwnerType: v.ownerType, fromOwnerId: ownerIdOf(v), toOwnerType: input.toOwnerType, toOwnerId: input.toOwnerId,
+            status: byOwner ? "REQUESTED" : "PENDING", reason: input.reason, requestedBy: byOwner ? p.userId : null, makerId: byOwner ? null : p.userId,
+            expiresAt: new Date(now().getTime() + TRANSFER_TTL_MS),
+          },
+        });
+        await writeOutbox(tx, audit({ actorId: p.userId, action: "vehicle:transfer:request", resource: { type: "vehicle", id: vehicleId }, outcome: "PENDING_APPROVAL", reason: input.reason }));
+        return row;
+      });
+      return transferView(t);
+    } catch (err) {
+      if (isUnique(err)) throw conflict("this vehicle already has a transfer waiting; decide or withdraw it first", "transfer_pending");
+      throw err;
+    }
+  }
+
+  /** An officer takes up an owner's request: they become the maker; a second officer approves. */
+  async function endorseTransfer(p: Principal, id: string, note?: string) {
+    const t = await loadTransfer(db, id);
+    authorize(p, "vehicle:transfer", { cityId: t.cityId });
+    await refuseIfExpired(t);
+    if (t.status !== "REQUESTED") throw conflict("only an owner's request is endorsed; this one is already proposed", "not_requested");
+    const row = await db.$transaction(async (tx) => {
+      await moveTransfer(tx, t, { status: "PENDING", makerId: p.userId, ...(note ? { decisionNote: note } : {}) });
+      await writeOutbox(tx, audit({ actorId: p.userId, action: "vehicle:transfer:propose", resource: { type: "vehicle_transfer", id }, outcome: "PENDING_APPROVAL", reason: note }));
+      return loadTransfer(tx, id);
+    });
+    return transferView(row);
+  }
+
+  /** The checker approves: sessions and authorisations close, documents are checked again under the new owner (V9). */
+  async function approveTransfer(p: Principal, id: string, note?: string) {
+    const t = await loadTransfer(db, id);
+    authorize(p, "vehicle:transfer", { cityId: t.cityId });
+    await refuseIfExpired(t);
+    if (t.status !== "PENDING") throw conflict("an officer must propose the owner's request first", "not_proposed");
+    if (t.makerId === p.userId) throw forbidden("maker and checker must be different people", "maker_is_checker");
+    const newCity = await checkNewOwner(t.toOwnerType as OwnerType, t.toOwnerId);
+    const row = await db.$transaction(async (tx) => {
+      const v = await tx.vehicle.findUniqueOrThrow({ where: { id: t.vehicleId } });
+      if (v.status === "RETIRED") throw conflict("the vehicle was retired meanwhile", "invalid_state");
+      if (v.ownerType !== t.fromOwnerType || ownerIdOf(v) !== t.fromOwnerId) throw conflict("the vehicle's owner changed since this was asked", "owner_changed");
+      await moveTransfer(tx, t, { status: "EXECUTED", checkerId: p.userId, decidedAt: now(), ...(note ? { decisionNote: note } : {}) });
+      const s = await openSessionOfVehicle(tx, v.id);
+      if (s) await endSessionTx(tx, s, "VEHICLE_UNAVAILABLE");
+      await tx.vehicleAuthorization.updateMany({ where: { vehicleId: v.id, status: "ACTIVE" }, data: { status: "REVOKED", revokedAt: now() } });
+      // the registration names the old owner: a new one is needed. Everything else is checked again.
+      const current = [...currentDocuments(await docsOf(tx, "VEHICLE", v.id)).values()];
+      const registration = current.filter((d) => d.kind === "REGISTRATION").map((d) => d.id);
+      const recheck = current.filter((d) => d.kind !== "REGISTRATION" && d.status === "APPROVED").map((d) => d.id);
+      if (registration.length) await tx.document.updateMany({ where: { id: { in: registration } }, data: { status: "SUPERSEDED" } });
+      if (recheck.length) await tx.document.updateMany({ where: { id: { in: recheck } }, data: { status: "PENDING", reviewedBy: null, reviewedAt: null } });
+      await tx.document.updateMany({ where: { subjectType: "VEHICLE", subjectId: v.id }, data: { cityId: newCity } });
+      const individual = t.toOwnerType === "INDIVIDUAL";
+      await tx.vehicle.update({
+        where: { id: v.id },
+        data: {
+          ownerType: t.toOwnerType, ownerUserId: individual ? t.toOwnerId : null, ownerOrgId: individual ? null : t.toOwnerId, cityId: newCity,
+          status: "DRAFT", statusReason: "TRANSFERRED", reviewNote: null, submittedAt: null, verifiedAt: null, version: { increment: 1 },
+        },
+      });
+      await writeOutbox(tx,
+        {
+          topic: "vehicle.transferred", key: v.id,
+          payload: {
+            vehicleId: v.id, transferId: t.id, cityId: newCity, fromOwnerType: t.fromOwnerType as OwnerType, fromOwnerId: t.fromOwnerId,
+            toOwnerType: t.toOwnerType as OwnerType, toOwnerId: t.toOwnerId, requestedBy: t.requestedBy, makerId: t.makerId!, byUserId: p.userId,
+          },
+        },
+        audit({ actorId: p.userId, action: "vehicle:transfer", resource: { type: "vehicle", id: v.id }, outcome: "EXECUTED", reason: note ?? t.reason }),
+      );
+      return loadTransfer(tx, id);
+    });
+    return transferView(row);
+  }
+
+  async function rejectTransfer(p: Principal, id: string, reason: string) {
+    const t = await loadTransfer(db, id);
+    authorize(p, "vehicle:transfer", { cityId: t.cityId });
+    await refuseIfExpired(t);
+    // the maker withdraws instead
+    if (t.makerId === p.userId) throw forbidden("maker and checker must be different people; withdraw it instead", "maker_is_checker");
+    const row = await db.$transaction(async (tx) => {
+      await moveTransfer(tx, t, { status: "REJECTED", checkerId: p.userId, decidedAt: now(), decisionNote: reason });
+      await writeOutbox(tx, audit({ actorId: p.userId, action: "vehicle:transfer:reject", resource: { type: "vehicle_transfer", id }, outcome: "EXECUTED", reason }));
+      return loadTransfer(tx, id);
+    });
+    return transferView(row);
+  }
+
+  /** Whoever opened it (the owner who asked, or the officer who proposed it) withdraws it. */
+  async function cancelTransfer(p: Principal, id: string) {
+    const t = await loadTransfer(db, id);
+    if (t.requestedBy !== p.userId && t.makerId !== p.userId) throw forbidden("only whoever asked can withdraw a transfer");
+    await refuseIfExpired(t);
+    const row = await db.$transaction(async (tx) => {
+      await moveTransfer(tx, t, { status: "CANCELLED", decidedAt: now() });
+      await writeOutbox(tx, audit({ actorId: p.userId, action: "vehicle:transfer:cancel", resource: { type: "vehicle_transfer", id }, outcome: "EXECUTED" }));
+      return loadTransfer(tx, id);
+    });
+    return transferView(row);
+  }
+
+  /** Staff: a city's transfers. Fleet: transfers out of and into the company. Or one vehicle's history. */
+  async function listTransfers(p: Principal, q: { cityId?: string; ownerOrgId?: string; vehicleId?: string; status?: string; limit: number }) {
+    let where: Prisma.VehicleTransferWhereInput;
+    if (q.vehicleId) {
+      const v = await loadVehicle(q.vehicleId);
+      if (!vehicleAccess(p, v, "vehicle:read", "vehicle:read") && !can(p, "vehicle:transfer", { cityId: v.cityId })) authorize(p, "vehicle:read", { cityId: v.cityId });
+      where = { vehicleId: v.id };
+    } else if (q.ownerOrgId) {
+      authorize(p, "vehicle:read", { orgId: q.ownerOrgId });
+      where = { OR: [{ fromOwnerId: q.ownerOrgId, fromOwnerType: "ORGANIZATION" }, { toOwnerId: q.ownerOrgId, toOwnerType: "ORGANIZATION" }] };
+    } else if (q.cityId) {
+      if (!can(p, "vehicle:transfer", { cityId: q.cityId })) authorize(p, "vehicle:read", { cityId: q.cityId });
+      where = { cityId: q.cityId };
+    } else {
+      // an owner-driver: their own car's transfers, either way
+      where = { OR: [{ fromOwnerId: p.userId, fromOwnerType: "INDIVIDUAL" }, { toOwnerId: p.userId, toOwnerType: "INDIVIDUAL" }] };
+    }
+    const open = q.status === "REQUESTED" || q.status === "PENDING";
+    const status: Prisma.VehicleTransferWhereInput = !q.status ? {}
+      : open ? { status: q.status, expiresAt: { gt: now() } }
+      : q.status === "EXPIRED" ? { OR: [{ status: "EXPIRED" }, { status: { in: OPEN_TRANSFER }, expiresAt: { lte: now() } }] }
+      : { status: q.status };
+    const rows = await db.vehicleTransfer.findMany({ where: { AND: [where, status] }, include: { vehicle: true }, orderBy: { createdAt: "desc" }, take: q.limit });
+    return Promise.all(rows.map(transferView));
+  }
+
+  /** Hourly: record transfers nobody decided within 7 days. */
+  async function expireTransfers() {
+    const { count } = await db.vehicleTransfer.updateMany({ where: { status: { in: OPEN_TRANSFER }, expiresAt: { lte: now() } }, data: { status: "EXPIRED", decidedAt: now() } });
+    return count;
+  }
+
+  // ── a fleet's expiring documents, for staff (document:read in the company's city) ──
+
+  async function fleetExpiringDocuments(p: Principal, orgId: string, days: number) {
+    const org = await auth.organization(orgId);
+    if (!org || org.kind !== "FLEET") throw notFound("organization");
+    authorize(p, "document:read", { cityId: org.cityId });
+    const cities = citiesWith(p, "document:read");
+    const vehicles = await db.vehicle.findMany({ where: { ownerType: "ORGANIZATION", ownerOrgId: orgId, status: { not: "RETIRED" } } });
+    const until = new Date(dayOf(now()).getTime() + days * 86_400_000);
+    const docs = await db.document.findMany({
+      where: {
+        OR: [{ subjectType: "ORGANIZATION", subjectId: orgId }, { subjectType: "VEHICLE", subjectId: { in: vehicles.map((v) => v.id) } }],
+        ...(cities === "*" ? {} : { cityId: { in: cities } }),
+        // EXPIRED and not replaced (an upload supersedes the old one), or approved and lapsing soon
+        AND: [{ OR: [{ status: "EXPIRED" }, { status: "APPROVED", expiresAt: { lte: until } }] }],
+      },
+      orderBy: { expiresAt: "asc" },
+      take: 500,
+    });
+    const today = dayOf(now()).getTime();
+    return {
+      orgId, days, until: isoDay(until),
+      documents: docs.map((d) => {
+        const v = d.subjectType === "VEHICLE" ? vehicles.find((x) => x.id === d.subjectId) : undefined;
+        return {
+          ...documentView(d, now(), warningDays()),
+          daysLeft: d.expiresAt ? Math.round((d.expiresAt.getTime() - today) / 86_400_000) : null,
+          vehicle: v ? { id: v.id, plateNumber: v.plateNumber, status: v.status } : null,
+        };
+      }),
+    };
+  }
+
   // ── document expiry (workflow 02, part C; rule V10) ─────────────────────────
 
   async function expireDocuments() {
@@ -827,6 +1123,9 @@ export function createFleetService(deps: FleetDeps) {
     queue, listDrivers, getDriver, approveDriver, requestChanges, suspendDriver, reinstateDriver,
     drivableVehicles, startSession, currentSession, endSession,
     expireDocuments, remindExpiring,
+    suspendVehicle, reinstateVehicle,
+    requestTransfer, endorseTransfer, approveTransfer, rejectTransfer, cancelTransfer, listTransfers, expireTransfers,
+    fleetExpiringDocuments,
   };
 }
 

@@ -1,5 +1,5 @@
 // Document expiry (workflow 02 part C, rule V10): hourly, expired documents suspend their
-// vehicle or driver; once a day, reminders go out 30, 7 and 1 days ahead.
+// vehicle or driver, and undecided ownership transfers expire after 7 days; once a day, reminders go out 30, 7 and 1 days ahead.
 
 import type { Logger } from "@ride-app/shared-utils";
 import type { FleetService } from "../fleet/service.js";
@@ -9,6 +9,7 @@ export function startExpiryJob(fleet: FleetService, logger: Logger, everyMs = 3_
   const run = async () => {
     try {
       await fleet.expireDocuments();
+      await fleet.expireTransfers();
       const today = new Date().toISOString().slice(0, 10);
       if (today !== lastReminderDay) {
         lastReminderDay = today;

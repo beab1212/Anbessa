@@ -106,3 +106,13 @@ fleet-service only **reads** Redis; it never writes keys.
 | `settings:changed` | pub/sub channel | platform-service | Re-fetch live settings (`libs/shared-settings/src/client.ts`) |
 
 Both subscriptions use a duplicated ioredis connection; both also poll every 30 s, so a lost message only delays a change.
+
+## Phase 2D additions
+
+| Topic | Key | Payload (besides the envelope) | Written when |
+|---|---|---|---|
+| `vehicle.suspended` (new producer) | vehicle id | `vehicleId`, `cityId`, `reason` (the staff member's), `byUserId` (staff) | `suspendVehicle` (`POST /vehicles/:id/suspend`) |
+| `vehicle.reinstated` | vehicle id | `vehicleId`, `cityId`, `reason`, `byUserId` | `reinstateVehicle` |
+| `vehicle.transferred` | vehicle id | `vehicleId`, `transferId`, `cityId` (the new owner's), `fromOwnerType`, `fromOwnerId`, `toOwnerType`, `toOwnerId`, `requestedBy` (owner who asked, or null), `makerId`, `byUserId` (the approving officer) | `approveTransfer` (`VehicleTransferredEvent` in `libs/shared-types`) |
+
+`driver.offline` with `VEHICLE_UNAVAILABLE` is also written when a manual suspension or an approved transfer ends a session. New audit actions (`resource.type` `vehicle` unless noted): `vehicle:suspend`, `vehicle:reinstate`, `vehicle:transfer:request` (`PENDING_APPROVAL`), `vehicle:transfer:propose` (`vehicle_transfer`, `PENDING_APPROVAL`), `vehicle:transfer` (`EXECUTED`), `vehicle:transfer:reject` and `vehicle:transfer:cancel` (`vehicle_transfer`). The audit `outcome` union gains `PENDING_APPROVAL`. Nothing consumes `vehicle.transferred` / `vehicle.reinstated` yet (trip and payment snapshot the owner at match time).
