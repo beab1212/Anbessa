@@ -7,7 +7,7 @@
 #     fleet-service's PII_ENCRYPTION_KEY, PII_BLIND_INDEX_KEY and UPLOAD_SIGNING_KEY with fresh
 #     random values when blank, payment-service's provider webhook secrets too, and copies
 #     INTERNAL_SERVICE_TOKEN to notification, location, mapping, trip, pricing, payment, fleet,
-#     platform and audit services and realtime-gateway
+#     platform, audit and support services and realtime-gateway
 #
 # Staging and production secrets come from the secrets manager (docs/production/README.md).
 set -euo pipefail
@@ -64,7 +64,7 @@ sync_keys "$AUTH_ENV"
 FLEET_ENV=services/fleet-service/.env
 PAYMENT_ENV=services/payment-service/.env
 TOKEN_ENVS=("$NOTIF_ENV" services/location-service/.env services/mapping-service/.env services/trip-service/.env "$FLEET_ENV" \
-  services/pricing-service/.env "$PAYMENT_ENV" services/platform-service/.env services/audit-service/.env services/realtime-gateway/.env)
+  services/pricing-service/.env "$PAYMENT_ENV" services/platform-service/.env services/audit-service/.env services/support-service/.env services/realtime-gateway/.env)
 for f in "${TOKEN_ENVS[@]}"; do
   git check-ignore -q "$f" || { echo "Refusing: $f is not gitignored"; exit 1; }
   sync_keys "$f"

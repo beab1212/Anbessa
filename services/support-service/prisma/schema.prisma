@@ -1,0 +1,413 @@
+// Support database: tickets and their threads, lost items, SOS alerts, incidents
+// (workflows 13 and 14). Snake_case via @map; partial unique indexes and CHECKs are in the migration.
+// SOS alerts and incidents are never deleted (legal hold, workflow 14 §6).
+
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+enum TicketCategory {
+  SAFETY
+  PAYMENT
+  TRIP
+  LOST_ITEM
+  ACCOUNT
+  FEEDBACK
+}
+
+enum Priority {
+  P1
+  P2
+  P3
+  P4
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_REQUESTER
+  RESOLVED
+  CLOSED
+}
+
+enum TicketSource {
+  APP
+  PHONE
+  STAFF
+  SYSTEM
+}
+
+enum RequesterKind {
+  RIDER
+  DRIVER
+  FLEET
+  CORPORATE
+}
+
+enum Resolution {
+  NO_ACTION
+  EXPLAINED
+  REFUND
+  ADJUSTMENT
+  DRIVER_WARNING
+  ESCALATE_SAFETY
+}
+
+enum MessageAuthor {
+  REQUESTER
+  STAFF
+  SYSTEM
+}
+
+enum RefundLinkStatus {
+  REQUESTED
+  SUCCEEDED
+  FAILED
+}
+
+enum LostItemStatus {
+  REPORTED
+  FOUND
+  NOT_FOUND
+  RETURNED
+  CLOSED
+}
+
+enum LostItemAuthor {
+  RIDER
+  DRIVER
+  FLEET
+  STAFF
+}
+
+enum SosStatus {
+  OPEN
+  ACKNOWLEDGED
+  RESOLVED
+}
+
+enum SosOutcome {
+  FALSE_ALARM
+  ASSISTED
+  ESCALATED
+}
+
+enum SosRole {
+  RIDER
+  DRIVER
+}
+
+enum SosSource {
+  APP
+  SYSTEM
+}
+
+enum IncidentCategory {
+  HARASSMENT
+  ASSAULT
+  ACCIDENT
+  DANGEROUS_DRIVING
+  THEFT
+  OTHER
+}
+
+enum IncidentSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum IncidentStatus {
+  OPEN
+  INVESTIGATING
+  RESOLVED
+}
+
+enum IncidentSource {
+  SOS
+  TICKET
+  MANUAL
+}
+
+enum IncidentOutcome {
+  CLEARED
+  WARNING
+  SUSPENDED_TEMPORARY
+  REMOVED_PERMANENTLY
+}
+
+enum IncidentActionKind {
+  WARNING
+  SUSPENDED
+  BANNED
+  REINSTATED
+  PAIR_BLOCK
+}
+
+/// One problem report. Routed to the queue of its city (the trip's city when there is a trip).
+model Ticket {
+  id                 String         @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  /// short human reference ("#1042"), shown to callers
+  ref                Int            @unique @default(autoincrement())
+  cityId             String         @map("city_id")
+  category           TicketCategory
+  priority           Priority
+  status             TicketStatus   @default(OPEN)
+  source             TicketSource
+  subject            String
+  description        String
+  requesterUserId    String         @map("requester_user_id") @db.Uuid
+  requesterKind      RequesterKind  @map("requester_kind")
+  requesterOrgId     String?        @map("requester_org_id") @db.Uuid
+  createdByUserId    String         @map("created_by_user_id") @db.Uuid
+  tripId             String?        @map("trip_id") @db.Uuid
+  assigneeUserId     String?        @map("assignee_user_id") @db.Uuid
+  firstResponseDueAt DateTime       @map("first_response_due_at") @db.Timestamptz
+  firstRespondedAt   DateTime?      @map("first_responded_at") @db.Timestamptz
+  waitingSince       DateTime?      @map("waiting_since") @db.Timestamptz
+  resolution         Resolution?
+  resolutionNote     String?        @map("resolution_note")
+  resolvedAt         DateTime?      @map("resolved_at") @db.Timestamptz
+  resolvedBy         String?        @map("resolved_by") @db.Uuid
+  closedAt           DateTime?      @map("closed_at") @db.Timestamptz
+  reopenCount        Int            @default(0) @map("reopen_count")
+  incidentId         String?        @map("incident_id") @db.Uuid
+  version            Int            @default(0)
+  createdAt          DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  messages TicketMessage[]
+  refunds  TicketRefund[]
+  lostItem LostItem?
+  incident Incident?        @relation(fields: [incidentId], references: [id])
+
+  @@index([cityId, status, createdAt(sort: Desc)])
+  @@index([requesterUserId, createdAt(sort: Desc)])
+  @@index([tripId])
+  @@index([assigneeUserId, status])
+  @@map("ticket")
+}
+
+/// The thread: requester ↔ staff. Internal notes are visible to staff only.
+model TicketMessage {
+  id           String        @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  ticketId     String        @map("ticket_id") @db.Uuid
+  authorUserId String?       @map("author_user_id") @db.Uuid
+  authorKind   MessageAuthor @map("author_kind")
+  internal     Boolean       @default(false)
+  body         String
+  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz
+
+  ticket Ticket @relation(fields: [ticketId], references: [id])
+
+  @@index([ticketId, createdAt])
+  @@map("ticket_message")
+}
+
+/// A refund the agent requested in payment-service for this ticket (the refund itself lives there).
+model TicketRefund {
+  ticketId       String           @map("ticket_id") @db.Uuid
+  refundId       String           @map("refund_id") @db.Uuid
+  amountMinor    BigInt?          @map("amount_minor")
+  status         RefundLinkStatus @default(REQUESTED)
+  note           String?
+  linkedByUserId String           @map("linked_by_user_id") @db.Uuid
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  ticket Ticket @relation(fields: [ticketId], references: [id])
+
+  @@id([ticketId, refundId])
+  @@index([refundId])
+  @@map("ticket_refund")
+}
+
+/// A rider's lost-item report on a trip; the driver (or their fleet) answers. No phone numbers.
+model LostItem {
+  id           String         @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  ticketId     String         @unique @map("ticket_id") @db.Uuid
+  tripId       String         @map("trip_id") @db.Uuid
+  cityId       String         @map("city_id")
+  riderUserId  String         @map("rider_user_id") @db.Uuid
+  driverUserId String?        @map("driver_user_id") @db.Uuid
+  fleetOrgId   String?        @map("fleet_org_id") @db.Uuid
+  description  String
+  status       LostItemStatus @default(REPORTED)
+  /// the driver's (or fleet's) last answer; counted for repeat "not found" reports
+  found        Boolean?
+  driverNote   String?        @map("driver_note")
+  respondedAt  DateTime?      @map("responded_at") @db.Timestamptz
+  returnedAt   DateTime?      @map("returned_at") @db.Timestamptz
+  closedAt     DateTime?      @map("closed_at") @db.Timestamptz
+  version      Int            @default(0)
+  createdAt    DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  ticket   Ticket              @relation(fields: [ticketId], references: [id])
+  messages LostItemMessage[]
+
+  @@index([cityId, status, createdAt(sort: Desc)])
+  @@index([driverUserId, status])
+  @@index([fleetOrgId, status])
+  @@index([riderUserId])
+  @@map("lost_item")
+}
+
+model LostItemMessage {
+  id           String         @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  lostItemId   String         @map("lost_item_id") @db.Uuid
+  authorUserId String         @map("author_user_id") @db.Uuid
+  authorKind   LostItemAuthor @map("author_kind")
+  body         String
+  createdAt    DateTime       @default(now()) @map("created_at") @db.Timestamptz
+
+  lostItem LostItem @relation(fields: [lostItemId], references: [id])
+
+  @@index([lostItemId, createdAt])
+  @@map("lost_item_message")
+}
+
+/// SOS pressed on a trip. One open alert per user and trip (partial unique index).
+model SosAlert {
+  id                 String      @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  cityId             String      @map("city_id")
+  tripId             String      @map("trip_id") @db.Uuid
+  userId             String      @map("user_id") @db.Uuid
+  role               SosRole
+  source             SosSource   @default(APP)
+  status             SosStatus   @default(OPEN)
+  outcome            SosOutcome?
+  lat                Float
+  lng                Float
+  accuracy           Float?
+  locationAt         DateTime    @map("location_at") @db.Timestamptz
+  /// false when trip-service couldn't be reached: accepted anyway (safety first), city from the app
+  tripVerified       Boolean     @default(true) @map("trip_verified")
+  riderUserId        String?     @map("rider_user_id") @db.Uuid
+  driverUserId       String?     @map("driver_user_id") @db.Uuid
+  triggeredAt        DateTime    @default(now()) @map("triggered_at") @db.Timestamptz
+  acknowledgedAt     DateTime?   @map("acknowledged_at") @db.Timestamptz
+  acknowledgedBy     String?     @map("acknowledged_by") @db.Uuid
+  resolvedAt         DateTime?   @map("resolved_at") @db.Timestamptz
+  resolvedBy         String?     @map("resolved_by") @db.Uuid
+  resolutionNote     String?     @map("resolution_note")
+  emergencyReference String?     @map("emergency_reference")
+  incidentId         String?     @map("incident_id") @db.Uuid
+  version            Int         @default(0)
+
+  notes    SosNote[]
+  incident Incident? @relation(fields: [incidentId], references: [id])
+
+  @@index([cityId, status, triggeredAt])
+  @@index([userId, tripId, triggeredAt(sort: Desc)])
+  @@map("sos_alert")
+}
+
+model SosNote {
+  id           String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  alertId      String   @map("alert_id") @db.Uuid
+  authorUserId String   @map("author_user_id") @db.Uuid
+  body         String
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  alert SosAlert @relation(fields: [alertId], references: [id])
+
+  @@index([alertId, createdAt])
+  @@map("sos_note")
+}
+
+/// A safety investigation, opened from an SOS, a SAFETY ticket or by hand.
+model Incident {
+  id             String           @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  ref            Int              @unique @default(autoincrement())
+  cityId         String           @map("city_id")
+  category       IncidentCategory
+  severity       IncidentSeverity
+  status         IncidentStatus   @default(OPEN)
+  summary        String
+  tripId         String?          @map("trip_id") @db.Uuid
+  subjectUserIds String[]         @map("subject_user_ids") @db.Uuid
+  source         IncidentSource
+  ownerUserId    String?          @map("owner_user_id") @db.Uuid
+  openedBy       String?          @map("opened_by") @db.Uuid
+  outcome        IncidentOutcome?
+  outcomeNote    String?          @map("outcome_note")
+  resolvedAt     DateTime?        @map("resolved_at") @db.Timestamptz
+  resolvedBy     String?          @map("resolved_by") @db.Uuid
+  version        Int              @default(0)
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  notes     IncidentNote[]
+  actions   IncidentAction[]
+  sosAlerts SosAlert[]
+  tickets   Ticket[]
+
+  @@index([cityId, status, createdAt(sort: Desc)])
+  @@index([tripId])
+  @@map("incident")
+}
+
+model IncidentNote {
+  id           String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  incidentId   String   @map("incident_id") @db.Uuid
+  authorUserId String   @map("author_user_id") @db.Uuid
+  body         String
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  incident Incident @relation(fields: [incidentId], references: [id])
+
+  @@index([incidentId, createdAt])
+  @@map("incident_note")
+}
+
+/// A decision about a person, carried out elsewhere (suspensions in auth-service) and recorded here.
+model IncidentAction {
+  id         String             @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  incidentId String             @map("incident_id") @db.Uuid
+  userId     String             @map("user_id") @db.Uuid
+  kind       IncidentActionKind
+  until      DateTime?          @db.Timestamptz
+  reference  String?
+  note       String?
+  recordedBy String             @map("recorded_by") @db.Uuid
+  createdAt  DateTime           @default(now()) @map("created_at") @db.Timestamptz
+
+  incident Incident @relation(fields: [incidentId], references: [id])
+
+  @@index([incidentId, createdAt])
+  @@index([userId])
+  @@map("incident_action")
+}
+
+/// HTTP Idempotency-Key results (POST /tickets, /lost-items, /sos), purged after 24 h.
+model IdempotencyKey {
+  userId      String   @map("user_id") @db.Uuid
+  key         String
+  requestHash Bytes    @map("request_hash")
+  status      String   @default("IN_PROGRESS")
+  statusCode  Int?     @map("status_code")
+  response    Json?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@id([userId, key])
+  @@map("idempotency_key")
+}
+
+/// Transactional outbox (Database.md §8). Published to Kafka by the relay.
+model Outbox {
+  id          String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  topic       String
+  key         String
+  payload     Json
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  publishedAt DateTime? @map("published_at") @db.Timestamptz
+
+  @@map("outbox")
+}
