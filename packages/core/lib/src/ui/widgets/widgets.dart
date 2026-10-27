@@ -13,6 +13,7 @@ export 'map_controls.dart';
 export 'motion.dart';
 export 'pill_tabs.dart';
 export 'pin_boxes.dart';
+export 'price_and_progress.dart';
 export 'rating.dart';
 export 'section_group.dart';
 export 'skeleton.dart';

@@ -37,6 +37,14 @@ The readers never throw on a missing or wrongly typed field; they return a fallb
 | `DocumentStatus` | pending, approved, rejected, expired | UPPER (`APPROVED`) | `unknown` |
 | `DocumentKind` | license, nationalId, photo, registration, insurance, inspection, businessLicense, tinCertificate | UPPER_SNAKE (`NATIONAL_ID`) | `unknown` |
 | `PlaceLabel` | home, work, other | the API value lower-cased | `unknown` |
+| `TicketCategory` | safety, payment, trip, lostItem, account, feedback | UPPER_SNAKE (`LOST_ITEM`) | `unknown` |
+| `TicketStatus` | open, inProgress, waitingRequester, resolved, closed | UPPER_SNAKE | `unknown` |
+| `TicketAuthor` | requester, staff, system | UPPER (`authorKind`) | `unknown` |
+| `LostItemStatus` | reported, found, notFound, returned, closed | UPPER_SNAKE | `unknown` |
+| `LostItemRole` | rider, driver, fleet, staff | UPPER (`viewerRole`, `authorKind`) | `unknown` |
+| `SosStatus` | open, acknowledged, resolved | UPPER | `unknown` |
+| `SosOutcome` | falseAlarm, assisted, escalated | UPPER_SNAKE | `unknown` |
+| `ScheduledStatus` | scheduled, dispatching, dispatched, cancelled, failed | UPPER (`DISPATCHING`) | `unknown` |
 
 `Feature` (client config) is not parsed from a string: each member is read by name from the `features` object, see below.
 
@@ -64,6 +72,7 @@ Mirrors `libs/shared-types/src/trip.ts`. Returned by `GET /api/trips/:id`, `GET 
 | `times` | `times` | `TripTimes` |
 | `cancellation` | `cancellation` | `TripCancellation`, null unless cancelled |
 | `pin` | `pin` | only sent to the rider |
+| `purpose` | `purpose` | a company ride's purpose or cost centre; never sent to the driver |
 
 Getters: `isActive` (requested, matched, enRoute or inProgress), `isDigital` (mobile money or card), `hasArrived` (`times.arrivedAt != null`). Equality compares `id`, `status`, `arrivedAt`, driver id and `finalMinor` only.
 
@@ -73,7 +82,7 @@ Getters: `isActive` (requested, matched, enRoute or inProgress), `isDigital` (mo
 |---|---|
 | `TripPlace` | `lat`, `lng`, `address?`. Has `toJson()` and value equality |
 | `TripDriver` | `userId`, `vehicleId?` |
-| `TripFare` | `estimateMinor`, `finalMinor?`, `waitingFeeMinor?`, `currency` (default `ETB`). `chargedMinor` = final, else estimate |
+| `TripFare` | `estimateMinor`, `finalMinor?`, `waitingFeeMinor?`, `currency` (default `ETB`), `promoDiscountMinor` (default 0), `promoCode?`, `payableMinor`. `chargedMinor` = final, else estimate (what the driver's earning is based on); `payableMinor` = the server's `payableMinor`, else `chargedMinor − promoDiscountMinor` (never below 0): what the rider pays and the driver collects in cash |
 | `TripRoute` | `estDistanceMeters`, `estDurationSeconds`, `distanceMeters?`, `durationSeconds?`, `polyline?` (encoded polyline, precision 6; null on older trips) |
 | `TripTimes` | `requestedAt` (epoch if missing), `matchedAt?`, `arrivedAt?`, `startedAt?`, `completedAt?`, `cancelledAt?` |
 | `TripCancellation` | `by` (`CancelledBy`), `reason` (string, e.g. `NO_DRIVER_FOUND`), `feeMinor`, `driverCompensationMinor` |
@@ -112,10 +121,30 @@ The payload of the socket event `trip:offer` (produced by `services/trip-service
 
 | Class | Endpoint | Fields |
 |---|---|---|
-| `Quote` | `POST /api/pricing/estimates`, `quotes[]` | `id`, `cityId`, `vehicleType`, `pickup` / `dropoff` (`TripPlace` built from `pickup` + `pickupAddress`, `dropoff` + `dropoffAddress`), `fareMinor`, `waitingPerMinMinor`, `currency`, `distanceMeters`, `durationSeconds`, `approximate` (routing was down, straight line), `routePolyline6?`, `etaToPickupSeconds?`, `driversNearby`, `breakdown?`, `expiresAt`. `isExpired(now)` |
+| `Quote` | `POST /api/pricing/estimates`, `quotes[]` | `id`, `cityId`, `vehicleType`, `pickup` / `dropoff` (`TripPlace` built from `pickup` + `pickupAddress`, `dropoff` + `dropoffAddress`), `fareMinor`, `waitingPerMinMinor`, `currency`, `distanceMeters`, `durationSeconds`, `approximate` (routing was down, straight line), `routePolyline6?`, `etaToPickupSeconds?`, `driversNearby`, `breakdown?`, `expiresAt`, `discountMinor` (default 0), `payableMinor` (default `fareMinor − discountMinor`), `promo?` (`QuotePromo`). `isExpired(now)`, `discounted` |
+| `QuotePromo` | `Quote.promo` | `promoId`, `code`, `discountMinor`, `fundedBy` |
+| `PromoOutcome` | `Estimates.promo` (only when a `promoCode` was sent) | `code`, `applied`, `discountedQuotes`, `reason?` (a `PromoRejection`), `message?` (the server's English sentence) |
 | `FareBreakdown` | `Quote.breakdown` | `baseMinor`, `distanceMinor`, `timeMinor`, `minimumApplied` |
 | `QuoteRoute` | `POST /api/pricing/estimates`, `route` | `polyline6`, `distanceMeters`, `durationSeconds`, `approximate` |
-| `Estimates` | `POST /api/pricing/estimates` | `quotes`, `route?` |
+| `Estimates` | `POST /api/pricing/estimates` | `quotes`, `route?`, `promo?` |
+
+`PromoRejection` holds the reasons pricing-service gives (`promos/discount.ts`): `unknown_code`, `not_active`, `not_started`, `expired`, `exhausted`, `not_in_city`, `vehicle_type_not_eligible`, `limit_reached`, plus the app's own `invalid_format`. `isValidPromoCode(code)` mirrors pricing-service's format check (3–32 letters, digits, `_` or `-`, trimmed): a malformed code makes the API refuse the whole estimate (`validation_error`), so the app checks first.
+
+## Scheduled rides (`models/scheduled.dart`)
+
+| Class | Endpoint | Fields |
+|---|---|---|
+| `ScheduledTrip` | `GET/POST /api/trips/scheduled`, `GET /api/trips/scheduled/:id`, `POST …/:id/cancel` (`scheduledView`) | `id`, `status` (`ScheduledStatus`), `cityId`, `vehicleType`, `paymentMethod`, `billingType` / `billingOrgId` (`billing.*`), `riderUserId`, `bookedByUserId`, `purpose?`, `pickup` / `dropoff` (`TripPlace`), `fareEstimateMinor` / `currency` (`fare.*`), `estDistanceMeters` / `estDurationSeconds` / `polyline?` (`route.*`), `scheduledFor`, `matchAt` (when matching starts), `tripId?` (once dispatched), `tripStatus?`, `cancelledAt?`, `failReason?`, `editable`. Getters `cancellable` (SCHEDULED: the cancel route answers `invalid_state` after), `upcoming` (SCHEDULED or DISPATCHING) |
+| `ScheduleWindow` | none (trip-service doesn't publish it) | `minAhead` (30 min), `maxAhead` (7 days), mirroring trip-service's `DEFAULT_SCHEDULE`. `earliest(now)`, `latest(now)`, `check(at, now)` → null, `too_soon` or `too_far_ahead`; `suggested(now)`: the next quarter hour at least `minAhead` + 15 min away. `ScheduleWindow.tripService` is the default |
+
+## Company policies, incentives, marketing (`models/corporate.dart`, `incentive.dart`, `marketing.dart`)
+
+| Class | Endpoint | Fields |
+|---|---|---|
+| `CorporatePolicy` | `GET /api/trips/corporate/:orgId/policy` | `orgId`, `allowedVehicleTypes`, `allowedDays` (0 = Sunday, Addis time), `startMinute?` / `endMinute?`, `maxFareMinor?`, `monthlyBudgetMinor?`, `requirePurpose`, `configured`, `spentThisMonthMinor` |
+| `PolicyRule` (constants) | `AppError.rule` of a 422 `policy_violation` | `vehicle_type`, `day`, `hours`, `max_fare`, `monthly_budget`, `purpose` |
+| `Incentive` | `GET /api/payments/incentives/me?cityId=`, `incentives[]` | `id`, `name`, `cityId`, `vehicleType?`, `targetTrips`, `rewardMinor`, `startsAt`, `endsAt`, `status` (APPROVED or CLOSED), `trips` (the driver's settled trips in the window), `awardedMinor`. Getters `closed`, `reached`, `progress` (0–1), `startsLater(now)`, `counting(now)` (window over, not closed yet) |
+| `MarketingPrefs` | `GET`/`PUT /api/notifications/me/marketing` | `push`, `sms` (true = receives campaign messages; default true). `copyWith` |
 | `FareCard` | `GET /api/pricing/fares`, `fares[]` | `vehicleType`, `baseMinor`, `perKmMinor`, `perMinMinor`, `minFareMinor`, `waitingPerMinMinor`. Not used by the app (no caller of `PricingApi.fares`) |
 
 ## Places (`models/place.dart`)
@@ -214,6 +243,31 @@ Built-in values, used before the first successful fetch (`ClientConfig.fallback`
 | `DrivingSession` | `DriverHome.session`, `POST /api/fleet/sessions`, `GET /api/fleet/sessions/current` (`session` key) | `id`, `vehicleId`, `startedAt`, `endedAt?`, `endReason?` (DRIVER, CONNECTION_LOST, BALANCE_BLOCKED, SUSPENDED, VEHICLE_UNAVAILABLE, FLEET_SUSPENDED). `isOpen` |
 
 `canDrive`, `denial` and `message` are only present on `GET /api/fleet/drivers/me/vehicles`; elsewhere `canDrive` is null.
+
+## Support (`models/support.dart`)
+
+support-service's app-facing views (`services/support-service/src/support/views.ts`): the requester view of a ticket, the rider / driver / fleet view of a lost item, the owner view of an SOS alert. Staff-only fields (priority, assignee, incident links, user ids) are never sent to the app. Fixtures: `test/fixtures/ticket.json`, `lost_item.json`, `sos_alert.json`; tests in `test/support_test.dart`.
+
+| Class | Endpoint | Fields |
+|---|---|---|
+| `Ticket` | `POST /api/support/tickets`, `GET /api/support/me/tickets` (`tickets[]`), `GET /api/support/tickets/:id` (`ticket`), `POST .../reopen` | `id`, `ref` (the number shown as "#1042"), `cityId`, `category`, `status`, `subject`, `description`, `tripId?`, `resolution?` (NO_ACTION, EXPLAINED, REFUND, ADJUSTMENT, DRIVER_WARNING, ESCALATE_SAFETY), `resolutionNote?`, `resolvedAt?`, `closedAt?`, `lostItemId?`, `createdAt`, `updatedAt`. `isOpen` (open, in progress, waiting), `canReply` (= `isOpen`), `canReopen(now)` (resolved ≤ 7 days ago) |
+| `TicketMessage` | `GET /api/support/tickets/:id` (`messages[]`), `POST .../messages` (`message`) | `id`, `authorUserId?` (null for staff and system), `author` (`authorKind`), `internal`, `body`, `createdAt` |
+| `TicketThread` | `GET /api/support/tickets/:id` | `ticket`, `messages` (oldest first; `internal` ones are dropped even if sent) |
+| `LostItem` | `POST /api/support/lost-items`, `GET /api/support/me/lost-items` (`lostItems[]`), `GET /api/support/lost-items/:id` (`lostItem`), `POST .../respond`, `POST .../status` | `id`, `ticketId`, `tripId`, `cityId`, `description`, `status`, `driverNote?`, `respondedAt?`, `returnedAt?`, `closedAt?`, `createdAt`, `updatedAt`, `viewerRole`. `isRider`, `isDriverSide` (driver or fleet), `canMessage` (not closed), `canAnswerFound` (driver side, reported or not found), `canAnswerNotFound` (driver side, reported or found), `canConfirmReturned` (rider, found) |
+| `LostItemMessage` | `GET /api/support/lost-items/:id` (`messages[]`), `POST .../messages` (`message`) | `id`, `author` (`authorKind`), `body`, `createdAt` |
+| `LostItemThread` | `GET /api/support/lost-items/:id` | `lostItem`, `messages` |
+| `SosAlert` | `POST /api/support/sos` (`alert`), `GET /api/support/sos/:id` (`alert`), `POST .../location` | `id`, `tripId`, `status`, `outcome?`, `triggeredAt`, `acknowledgedAt?`, `resolvedAt?`. `isLive` (open or acknowledged) |
+| `SosTrigger` | `POST /api/support/sos` | `alert`, `duplicate` (a live alert for the trip, or one pressed in the last 2 min, came back instead of a new one) |
+
+Rules mirrored from `services/support-service/src/support/policy.ts` (`SupportLimits`):
+
+| Helper | Rule |
+|---|---|
+| `sosAvailable(trip, now)` | trip matched, en route or in progress, or completed ≤ 30 min ago (`sos_unavailable` otherwise; a trip still `requested` doesn't qualify) |
+| `lostItemReportable(trip, now)` | trip completed ≤ 7 days ago (`report_window_closed`) |
+| `Ticket.canReopen(now)` | resolved ≤ 7 days ago (`reopen_window_closed`) |
+
+`ticketCategoriesForApp` is the list "Contact support" offers: every category except LOST_ITEM (the route answers `use_lost_items`; lost items have their own route).
 
 ## Routing and positions (`api/service_apis.dart`)
 

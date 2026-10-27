@@ -45,6 +45,14 @@ abstract final class ErrorCodes {
   static const alreadyRated = 'already_rated';
   static const outsideServiceArea = 'outside_service_area';
   static const vehicleTypeUnavailable = 'vehicle_type_unavailable';
+  /// a company ride policy refused a trip billed to it (422; [AppError.rule] names the rule)
+  static const policyViolation = 'policy_violation';
+  // scheduled rides (trip-service scheduled.ts)
+  static const tooSoon = 'too_soon';
+  static const tooFarAhead = 'too_far_ahead';
+  static const tooManyScheduled = 'too_many_scheduled';
+  static const scheduleConflict = 'schedule_conflict';
+  static const quoteUsed = 'quote_used';
   // fleet
   static const licenceRegistered = 'licence_registered';
   static const alreadyApplied = 'already_applied';
@@ -65,6 +73,19 @@ abstract final class ErrorCodes {
   static const amountOutOfRange = 'amount_out_of_range';
   static const unknownProvider = 'unknown_provider';
   static const providerUnavailable = 'provider_unavailable';
+  // support
+  static const useLostItems = 'use_lost_items';
+  static const reopenWindowClosed = 'reopen_window_closed';
+  static const ticketResolved = 'ticket_resolved';
+  static const ticketClosed = 'ticket_closed';
+  static const alreadyReported = 'already_reported';
+  static const reportWindowClosed = 'report_window_closed';
+  static const lostItemClosed = 'lost_item_closed';
+  static const sosUnavailable = 'sos_unavailable';
+  static const sosResolved = 'sos_resolved';
+  static const invalidTransition = 'invalid_transition';
+  static const requestInProgress = 'request_in_progress';
+  static const idempotencyMismatch = 'idempotency_mismatch';
   // dev
   static const noCodeYet = 'no_code_yet';
   static const notADevAccount = 'not_a_dev_account';
@@ -72,7 +93,7 @@ abstract final class ErrorCodes {
 
 @immutable
 class AppError implements Exception {
-  const AppError({required this.status, required this.code, required this.message, this.retryable = false, this.issues = const []});
+  const AppError({required this.status, required this.code, required this.message, this.retryable = false, this.issues = const [], this.rule});
 
   /// HTTP status; 0 when the request never reached a server.
   final int status;
@@ -82,6 +103,9 @@ class AppError implements Exception {
   final bool retryable;
   /// validation_error: field problems from zod
   final List<FieldIssue> issues;
+  /// policy_violation: the company rule that refused the trip (vehicle_type, day, hours,
+  /// max_fare, monthly_budget, purpose)
+  final String? rule;
 
   bool get isNetwork => status == 0;
   bool get isAuth => status == 401 || code == ErrorCodes.sessionEnded;
@@ -90,7 +114,7 @@ class AppError implements Exception {
   bool get isConflict => status == 409;
   bool is_(String code) => this.code == code;
 
-  AppError copyWith({String? message}) => AppError(status: status, code: code, message: message ?? this.message, retryable: retryable, issues: issues);
+  AppError copyWith({String? message}) => AppError(status: status, code: code, message: message ?? this.message, retryable: retryable, issues: issues, rule: rule);
 
   @override
   String toString() => 'AppError($status $code: $message)';

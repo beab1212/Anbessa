@@ -19,12 +19,13 @@ extension ToneColors on Tone {
       };
 }
 
-/// Status pill with a dot, like the web's `.pill`.
+/// A status label with a dot. Small rounded corners, no icons (the [icon] parameter is ignored).
 class StatusPill extends StatelessWidget {
   const StatusPill(this.label, {super.key, this.tone = Tone.grey, this.pulse = false, this.icon});
   final String label;
   final Tone tone;
   final bool pulse;
+  /// kept for older call sites; not drawn
   final IconData? icon;
 
   @override
@@ -34,19 +35,17 @@ class StatusPill extends StatelessWidget {
     return Semantics(
       label: label,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-        decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(AnbessaRadius.pill)),
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+        decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(6)),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (icon != null)
-              Icon(icon, size: 14, color: fg)
-            else if (pulse)
+            if (pulse)
               PulsingDot(color: fg)
             else
               Container(width: 7, height: 7, decoration: BoxDecoration(color: fg, shape: BoxShape.circle)),
             const SizedBox(width: 6),
-            Flexible(child: Text(label, style: AnbessaType.label.copyWith(color: fg), maxLines: 1, overflow: TextOverflow.ellipsis)),
+            Flexible(child: Text(label, style: AnbessaType.label.copyWith(color: tone == Tone.grey ? c.text2 : fg), maxLines: 1, overflow: TextOverflow.ellipsis)),
           ],
         ),
       ),
@@ -145,7 +144,8 @@ extension NoticeToneColors on NoticeTone {
       };
 }
 
-/// A banner with an icon: information, success, a warning, or an error.
+/// A tinted panel for information, success, a warning or an error: the tone colours the border
+/// and the tint; the words stay ink so they read.
 class Notice extends StatelessWidget {
   const Notice(this.text, {super.key, this.tone = NoticeTone.info, this.action});
   final String text;
@@ -154,16 +154,14 @@ class Notice extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    final (fg, bg, icon) = tone.of(c);
+    final (fg, bg, _) = tone.of(c);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(AnbessaRadius.md)),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(AnbessaRadius.md), border: Border.all(color: fg.withValues(alpha: 0.35), width: 1.5)),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Icon(icon, size: 20, color: fg),
-          const SizedBox(width: 10),
-          Expanded(child: Text(text, style: AnbessaType.body2.copyWith(color: fg))),
+          Expanded(child: Text(text, style: AnbessaType.body2.copyWith(color: c.text, fontWeight: FontWeight.w500))),
           if (action != null) ...[const SizedBox(width: 8), action!],
         ],
       ),
@@ -219,10 +217,12 @@ class CountdownRing extends StatelessWidget {
   }
 }
 
+/// Nothing here yet: a heading, a line and an action. No pictures.
 class EmptyState extends StatelessWidget {
   const EmptyState({super.key, required this.title, this.body, this.icon = Icons.inbox_outlined, this.action});
   final String title;
   final String? body;
+  /// kept for older call sites; not drawn
   final IconData icon;
   final Widget? action;
   @override
@@ -234,15 +234,8 @@ class EmptyState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 72,
-              height: 72,
-              decoration: BoxDecoration(color: c.surface2, shape: BoxShape.circle),
-              child: Icon(icon, size: 34, color: c.muted),
-            ),
-            const SizedBox(height: 16),
-            Text(title, textAlign: TextAlign.center, style: Theme.of(context).textTheme.titleMedium),
-            if (body != null) ...[const SizedBox(height: 6), Text(body!, textAlign: TextAlign.center, style: TextStyle(color: c.muted))],
+            Text(title, textAlign: TextAlign.center, style: AnbessaType.h2.copyWith(color: c.text)),
+            if (body != null) ...[const SizedBox(height: 8), Text(body!, textAlign: TextAlign.center, style: AnbessaType.body.copyWith(color: c.text2))],
             if (action != null) ...[const SizedBox(height: 16), action!],
           ],
         ),
@@ -251,11 +244,13 @@ class EmptyState extends StatelessWidget {
   }
 }
 
+/// The main action: ink-filled, a word or two, no icon (the [icon] parameter is ignored).
 class PrimaryButton extends StatelessWidget {
   const PrimaryButton({super.key, required this.label, this.onPressed, this.busy = false, this.icon, this.danger = false, this.trailing});
   final String label;
   final VoidCallback? onPressed;
   final bool busy;
+  /// kept for older call sites; not drawn
   final IconData? icon;
   final bool danger;
   /// e.g. the price on the right of a request button
@@ -269,11 +264,7 @@ class PrimaryButton extends StatelessWidget {
       child: Row(
         mainAxisSize: trailing == null ? MainAxisSize.min : MainAxisSize.max,
         children: [
-          if (busy)
-            SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: danger ? Colors.white : c.onAccent))
-          else if (icon != null)
-            Icon(icon, size: 20),
-          if (busy || icon != null) const SizedBox(width: 8),
+          if (busy) ...[SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: danger ? Colors.white : c.onAccent)), const SizedBox(width: 10)],
           Flexible(child: Text(label, overflow: TextOverflow.ellipsis)),
           if (trailing != null) ...[const Spacer(), Text(trailing!, style: const TextStyle(fontFeatures: AnbessaType.tabular))],
         ],

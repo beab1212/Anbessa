@@ -1,11 +1,12 @@
 // Socket.io events from realtime-gateway, parsed into one sealed type so features switch on
-// classes, not strings. Producers: trip-service (trip:*), payment-service (payment:*, balance:*),
-// the gateway itself (driver:location).
+// classes, not strings. Producers: trip-service (trip:*, scheduled:*), payment-service
+// (payment:*, balance:*), the gateway itself (driver:location).
 
 import 'package:meta/meta.dart';
 import '../models/balance.dart';
 import '../models/json.dart';
 import '../models/payment.dart';
+import '../models/scheduled.dart';
 import '../models/trip.dart';
 import '../models/trip_offer.dart';
 
@@ -15,6 +16,8 @@ const realtimeEventNames = [
   'trip:offer',
   'trip:offer_expired',
   'trip:offer_cancelled',
+  'trip:reassigned',
+  'scheduled:status',
   'driver:location',
   'payment:action_required',
   'payment:captured',
@@ -35,6 +38,11 @@ sealed class RealtimeEvent {
         'trip:offer' => OfferEvent(TripOffer.fromJson(j)),
         'trip:offer_expired' => OfferExpiredEvent(tripId: str(j, 'tripId'), offerId: str(j, 'offerId')),
         'trip:offer_cancelled' => OfferCancelledEvent(tripId: str(j, 'tripId')),
+        'trip:reassigned' => TripReassignedEvent(tripId: str(j, 'tripId'), reason: strOrNull(j, 'reason')),
+        'scheduled:status' => ScheduledStatusEvent(
+            scheduledTripId: str(j, 'scheduledTripId'), status: scheduledStatusFromApi(strOrNull(j, 'status')), tripId: strOrNull(j, 'tripId'),
+            scheduledFor: dateOrNull(j, 'scheduledFor'), failReason: strOrNull(j, 'failReason'),
+          ),
         'driver:location' => DriverLocationEvent(
             tripId: str(j, 'tripId'), driverId: str(j, 'driverId'), lat: readDouble(j, 'lat'), lng: readDouble(j, 'lng'), heading: doubleOrNull(j, 'heading'), speed: doubleOrNull(j, 'speed'),
             at: j['at'] is num ? DateTime.fromMillisecondsSinceEpoch(readInt(j, 'at'), isUtc: true) : DateTime.now().toUtc(),
@@ -72,6 +80,25 @@ class OfferExpiredEvent extends RealtimeEvent {
 class OfferCancelledEvent extends RealtimeEvent {
   const OfferCancelledEvent({required this.tripId});
   final String tripId;
+}
+
+/// To the driver a dispatcher took a matched trip from (trip-service `reassign`). The trip isn't
+/// theirs any more; the rider gets a `trip:status` with the new driver (or back to `requested`).
+class TripReassignedEvent extends RealtimeEvent {
+  const TripReassignedEvent({required this.tripId, this.reason});
+  final String tripId;
+  final String? reason;
+}
+
+/// A scheduled ride changed: booked, edited, cancelled, failed, or dispatched (then [tripId] is
+/// the trip that was created and is being matched).
+class ScheduledStatusEvent extends RealtimeEvent {
+  const ScheduledStatusEvent({required this.scheduledTripId, required this.status, this.tripId, this.scheduledFor, this.failReason});
+  final String scheduledTripId;
+  final ScheduledStatus status;
+  final String? tripId;
+  final DateTime? scheduledFor;
+  final String? failReason;
 }
 
 class DriverLocationEvent extends RealtimeEvent {

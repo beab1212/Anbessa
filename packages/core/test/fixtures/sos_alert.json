@@ -1,0 +1,12 @@
+{
+  "alert": {
+    "id": "9a0b1c2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d",
+    "tripId": "01a17852-92d0-7c01-8f2f-301de1969537",
+    "status": "ACKNOWLEDGED",
+    "outcome": null,
+    "triggeredAt": "2026-10-26T13:20:00.000Z",
+    "acknowledgedAt": "2026-10-26T13:20:40.000Z",
+    "resolvedAt": null
+  },
+  "duplicate": false
+}

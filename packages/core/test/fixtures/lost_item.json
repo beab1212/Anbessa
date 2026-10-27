@@ -1,0 +1,31 @@
+{
+  "lostItem": {
+    "id": "3d4e5f60-7182-4a93-8b04-c5d6e7f80912",
+    "ticketId": "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
+    "tripId": "01a17852-92d0-7c01-8f2f-301de1969537",
+    "cityId": "addis-ababa",
+    "description": "A black backpack on the back seat, with a laptop inside.",
+    "status": "FOUND",
+    "driverNote": "It's here, I can bring it to Bole tonight.",
+    "respondedAt": "2026-10-26T16:10:00.000Z",
+    "returnedAt": null,
+    "closedAt": null,
+    "createdAt": "2026-10-26T15:30:00.000Z",
+    "updatedAt": "2026-10-26T16:12:00.000Z",
+    "viewerRole": "RIDER"
+  },
+  "messages": [
+    {
+      "id": "4e5f6071-8293-4aa4-9c15-d6e7f8091a23",
+      "authorKind": "DRIVER",
+      "body": "It's here, I can bring it to Bole tonight.",
+      "createdAt": "2026-10-26T16:10:00.000Z"
+    },
+    {
+      "id": "5f607182-93a4-4bb5-8d26-e7f8091a2b34",
+      "authorKind": "RIDER",
+      "body": "Thank you! I'll be at Edna Mall at 8.",
+      "createdAt": "2026-10-26T16:12:00.000Z"
+    }
+  ]
+}

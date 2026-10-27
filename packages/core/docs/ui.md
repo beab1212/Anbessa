@@ -1,6 +1,6 @@
 # Design system
 
-Source: `packages/core/lib/src/ui/`. The tokens and palettes come from the web app's `apps/web/src/styles/tokens.css` (per the file header of `anbessa_theme.dart`): neutral surfaces, amber for the active thing, red only for what needs a person now. Rider and driver share one palette per brightness.
+Source: `packages/core/lib/src/ui/`. A flat, text-first look: warm paper surfaces, near-black ink for text and for primary actions, one amber for the live thing (the car, the active trip), red only for what needs a person now. Hairline borders instead of shadows; no illustrations and no decorative icons (icons stay only where they help someone act: back, close, tabs, map controls, chevrons, stars). Rider and driver share one palette per brightness.
 
 ## Tokens (`theme/tokens.dart`)
 
@@ -35,20 +35,20 @@ Source: `packages/core/lib/src/ui/`. The tokens and palettes come from the web a
 
 ### Elevation, `AnbessaElevation`
 
-`card(brightness)`, `floating(brightness)`, `sheet(brightness)` return shadow lists (blur 12 / 24 / 28; stronger alpha in dark mode; the sheet shadow points up).
+`card(brightness)` is empty (cards are separated by borders, not shadows). `floating(brightness)` (blur 16) and `sheet(brightness)` (blur 20, pointing up) are kept for what floats over the map.
 
 ### Type, `AnbessaType`
 
 | Style | Size | Weight | Height |
 |---|---|---|---|
-| `display` | 32 | 800 | 1.15, letter spacing −0.5 |
-| `h1` | 24 | 700 | 1.2, −0.3 |
-| `h2` | 20 | 700 | 1.25 |
-| `title` | 17 | 600 | 1.3 |
-| `body` | 15 | 400 | 1.4 |
-| `body2` | 14 | 400 | 1.4 |
-| `label` | 12 | 600 | 1.2 |
-| `caption` | 12 | 400 | 1.3 |
+| `display` | 30 | 800 | 1.2, letter spacing −0.6 |
+| `h1` | 24 | 700 | 1.25, −0.4 |
+| `h2` | 20 | 700 | 1.3, −0.2 |
+| `title` | 17 | 600 | 1.35 |
+| `body` | 16 | 400 | 1.5 |
+| `body2` | 14 | 400 | 1.45 |
+| `label` | 12 | 600 | 1.25 |
+| `caption` | 12.5 | 400 | 1.4 |
 
 `AnbessaType.tabular` is `[FontFeature.tabularFigures()]` for money and ids. `monoFamilyFallback` lists JetBrains Mono, Roboto Mono, DejaVu Sans Mono, Menlo, monospace.
 
@@ -58,24 +58,24 @@ Source: `packages/core/lib/src/ui/`. The tokens and palettes come from the web a
 
 | Token | Light | Dark |
 |---|---|---|
-| `canvas` | #F5F6F8 | #0B1220 |
-| `surface` | #FFFFFF | #111A2B |
-| `surface2` | #F8FAFC | #172238 |
-| `border` | #E4E7EC | #243049 |
-| `borderStrong` | #CBD2DC | #34425E |
-| `text` | #0F172A | #E6EAF2 |
-| `text2` | #475569 | #B4BCCB |
-| `muted` | #64748B | #8A94A6 |
-| `faint` | #94A3B8 | #5E6879 |
-| `accent` | #D97706 | #F59E0B |
-| `accentStrong` | #B45309 | #FBBF24 |
-| `accentSoft` | #FEF3C7 | #F59E0B at 20 % |
-| `success` / `successSoft` | #15803D / #DCFCE7 | #4ADE80 / #22C55E at 16 % |
-| `warning` / `warningSoft` | #B45309 / #FEF3C7 | #FBBF24 / #F59E0B at 16 % |
-| `danger` / `dangerSoft` | #DC2626 / #FEE2E2 | #F87171 / #EF4444 at 16 % |
-| `info` / `infoSoft` | #2563EB / #DBEAFE | #60A5FA / #3B82F6 at 16 % |
+| `canvas` | #F6F5F1 (paper) | #111214 |
+| `surface` | #FFFFFF | #1A1C1F |
+| `surface2` | #FBFAF7 | #222428 |
+| `border` | #D9D6CF | #2F3237 |
+| `borderStrong` | #BDB8AE | #45494F |
+| `text` | #17191D (ink) | #F3F1EC |
+| `text2` | #3B4048 | #CAC7C0 |
+| `muted` | #5C636D | #9E9B93 |
+| `faint` | #8F8B83 | #6E6B65 |
+| `accent` | #FFB300 | #FFB300 |
+| `accentStrong` | #E59E00 | #FFC53D |
+| `accentSoft` | #FFF4D6 | #FFB300 at 18 % |
+| `success` / `successSoft` | #007956 / #E3F2EC | #45C99A / at 15 % |
+| `warning` / `warningSoft` | #A35F00 / #FFF4D6 | #FFC53D / #FFB300 at 15 % |
+| `danger` / `dangerSoft` | #D40013 / #FEF2F2 | #FF6B6B / at 15 % |
+| `info` / `infoSoft` | #1F5FD6 / #E6EEFC | #7AA7FF / at 15 % |
 
-Derived: `isDark` (canvas luminance < 0.2), `brightness`, `primaryFill` (the fill of filled controls: `accentStrong` in light mode so white text reads at 4.5:1, `accent` in dark mode), `onAccent` (white in light, #1A1200 in dark). `lerp` interpolates every colour, so theme changes animate.
+Derived: `isDark` (canvas luminance < 0.2), `brightness`, `primaryFill` (the fill of primary controls: ink, i.e. `text`: near-black in light mode, near-white in dark), `onAccent` (what reads on `primaryFill`: white in light, ink in dark), `onAmber` (ink, for text on `accent`). `lerp` interpolates every colour, so theme changes animate.
 
 `test/theme_test.dart` checks that the text colours reach 4.5:1 on every surface in both palettes.
 
@@ -93,13 +93,14 @@ What it sets:
 - Page transitions: `FadeForwardsPageTransitionsBuilder` on Android, Linux, macOS, Windows; Cupertino on iOS. (Routes that use the app's own `fadeThroughPage` / `slideUpPage` override this.)
 - App bar on `canvas`, no elevation, not centred.
 - Cards: `surface`, no elevation, radius 16, 1 px `border` side.
-- Filled buttons: `primaryFill` on `onAccent`, min size 48×52, radius 16, bold body text. Outlined: 48×52, `borderStrong` side. Text buttons: `accentStrong`, 48×44.
+- Filled buttons: ink (`primaryFill`) with `onAccent` text, 56 tall, radius 12, 17 px semibold label, no icons. Outlined: 56 tall, `surface` fill, 2 px `border` side. Text buttons: ink, 48×44.
 - Icon buttons min 48×48.
-- Inputs: filled with `surface`, radius 12, 2 px `accent` focus border, `danger` error border.
-- Bottom sheets: `surface`, drag handle shown, top radius 28. Dialogs: radius 24.
-- Navigation bar: `surface`, `accentSoft` stadium indicator, height 64, selected icons `accentStrong`.
+- Inputs: filled with `surface`, radius 12, 2 px `border` sides that turn ink when focused, `danger` error border.
+- Bottom sheets: `surface`, drag handle shown, top radius 24. Dialogs: radius 24.
+- Navigation bar: `surface`, no indicator: the selected tab's icon and label are ink and bold, the others muted; height 64.
 - Chips, snack bars (floating), list tiles, progress indicators, switches, radios, checkboxes, sliders, tab bars, badges (`danger`), tooltips.
-- `InkSparkle` splash.
+- Chips: square-ish (radius 8), selected chips ink-filled. Progress, radios, sliders, tab indicators: ink.
+- `InkRipple` splash.
 
 ## Widgets (`ui/widgets/`)
 
@@ -123,6 +124,13 @@ All exported from `widgets.dart`. They take their words as parameters; none of t
 | `PrimaryButton` | the main filled button with a busy state | `label`, `onPressed`, `busy`, `icon`, `danger`, `trailing` (text on the right, e.g. the price) |
 | `KeyValue` | a label/value row | `label`, `value` (widget) |
 | `Stat` | a big number with a label | `label`, `value`, `sub`, `alert` |
+
+### Prices and progress (`price_and_progress.dart`)
+
+| Widget | Purpose | Main parameters |
+|---|---|---|
+| `PriceTag` | what the person pays (animated like `AnimatedMoney`, green when discounted) with the undiscounted fare struck through above it when a promo lowered it; just the amount otherwise | `fareMinor`, `payableMinor`, `style`, `locale = 'en'` |
+| `ProgressMeter` | a thin flat bar from 0 to 1: ink on a hairline track, green once full; semantics value in percent | `value`, `height = 6`, `semanticsLabel` |
 
 ### Sheets and cards (`app_sheet.dart`)
 
@@ -154,7 +162,7 @@ All exported from `widgets.dart`. They take their words as parameters; none of t
 | `AvatarImage` | `avatar_image.dart` | a person's picture from a data URL or an https URL, or amber initials. `AvatarImage.networkBuilder` lets the app install a cached builder (the app does not set it); `decodeDataUrl`, `initialsOf` (skips words that start with a digit or "+") | `src`, `name`, `size = 44`, `ring` |
 | `AnbessaIllustration` (enum) | `illustrated_empty.dart` | noTrips, noConnection, searchEmpty, carWaiting, documents, celebrate, locationOff, wallet → `assets/illustrations/<snake_name>.svg` | |
 | `Illustration` | same | one SVG with the theme's colours substituted | `kind`, `size = 140` |
-| `IllustratedEmpty` | same | empty and error states with an illustration | `illustration`, `title`, `body`, `action`, `compact` |
+| `IllustratedEmpty` | same | empty and error states: heading, line, action. The `illustration` is no longer drawn (text-first design); `Illustration` and the SVGs remain for any future use | `illustration`, `title`, `body`, `action`, `compact` |
 | `VehicleGlyph` / `vehicleIcon(code)` | `vehicle_glyph.dart` | an icon per vehicle code: minivan/van/minibus, comfort/premium/business, bajaj/tuktuk/three_wheeler, moto/motorbike/bike, electric/ev; anything else gets the plain car | `code`, `size = 44`, `selected`, `plain` |
 
 ### Map overlays (`map_controls.dart`, `eta_badge.dart`)

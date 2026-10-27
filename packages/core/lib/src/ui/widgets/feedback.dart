@@ -83,7 +83,7 @@ class _ToastState extends State<_Toast> with SingleTickerProviderStateMixin {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    final (fg, bg, icon) = widget.tone.of(c);
+    final (fg, _, _) = widget.tone.of(c);
     final top = MediaQuery.paddingOf(context).top + 12;
     return Positioned(
       top: top,
@@ -97,11 +97,11 @@ class _ToastState extends State<_Toast> with SingleTickerProviderStateMixin {
             color: Colors.transparent,
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              decoration: BoxDecoration(color: c.surface, borderRadius: BorderRadius.circular(AnbessaRadius.lg), border: Border.all(color: bg), boxShadow: AnbessaElevation.floating(c.brightness)),
+              decoration: BoxDecoration(color: c.surface, borderRadius: BorderRadius.circular(AnbessaRadius.md), border: Border.all(color: c.border), boxShadow: AnbessaElevation.floating(c.brightness)),
               child: Row(
                 children: [
-                  Icon(widget.icon ?? icon, color: fg, size: 22),
-                  const SizedBox(width: 10),
+                  Container(width: 4, height: 24, decoration: BoxDecoration(color: fg, borderRadius: BorderRadius.circular(2))),
+                  const SizedBox(width: 12),
                   Expanded(child: Text(widget.text, style: AnbessaType.body2.copyWith(color: c.text, fontWeight: FontWeight.w500))),
                 ],
               ),

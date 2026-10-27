@@ -56,6 +56,8 @@ class _ThemeColors extends ColorMapper {
   }
 }
 
+/// An empty or finished state: a heading, a line and an action. The [illustration] is kept for
+/// older call sites but no longer drawn (the design is text-first, no pictures).
 class IllustratedEmpty extends StatelessWidget {
   const IllustratedEmpty({super.key, required this.illustration, required this.title, this.body, this.action, this.compact = false});
   final AnbessaIllustration illustration;
@@ -72,11 +74,9 @@ class IllustratedEmpty extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Illustration(illustration, size: compact ? 96 : 150),
-            SizedBox(height: compact ? 12 : 20),
-            Text(title, textAlign: TextAlign.center, style: compact ? AnbessaType.title : AnbessaType.h2),
-            if (body != null) ...[const SizedBox(height: 6), Text(body!, textAlign: TextAlign.center, style: AnbessaType.body2.copyWith(color: c.muted))],
-            if (action != null) ...[const SizedBox(height: 18), action!],
+            Text(title, textAlign: TextAlign.center, style: (compact ? AnbessaType.title : AnbessaType.h2).copyWith(color: c.text)),
+            if (body != null) ...[const SizedBox(height: 8), Text(body!, textAlign: TextAlign.center, style: AnbessaType.body.copyWith(color: c.text2))],
+            if (action != null) ...[const SizedBox(height: 20), action!],
           ],
         ),
       ),

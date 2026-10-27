@@ -1,5 +1,6 @@
-// The design system, from the web app's tokens (apps/web/src/styles/tokens.css): neutral
-// surfaces, amber for the active thing, red only for what needs a person now. One palette per
+// The design system: warm paper surfaces, near-black ink for text and primary actions, amber only
+// for the live thing (the car, the active trip), red only for what needs a person now. Flat: hairline
+// borders instead of shadows. One palette per
 // brightness; rider and driver share it (the shell says which mode you're in).
 
 import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
@@ -53,27 +54,28 @@ class AnbessaColors extends ThemeExtension<AnbessaColors> {
   final Color info;
   final Color infoSoft;
 
+  // Warm paper, near-black ink, one amber (the reference design: client-discovery's admin).
   static const light = AnbessaColors(
-    canvas: Color(0xFFF5F6F8),
+    canvas: Color(0xFFF6F5F1),
     surface: Color(0xFFFFFFFF),
-    surface2: Color(0xFFF8FAFC),
-    border: Color(0xFFE4E7EC),
-    borderStrong: Color(0xFFCBD2DC),
-    text: Color(0xFF0F172A),
-    text2: Color(0xFF475569),
-    muted: Color(0xFF64748B),
-    faint: Color(0xFF94A3B8),
-    accent: Color(0xFFD97706),
-    accentStrong: Color(0xFFB45309),
-    accentSoft: Color(0xFFFEF3C7),
-    success: Color(0xFF15803D),
-    successSoft: Color(0xFFDCFCE7),
-    warning: Color(0xFFB45309),
-    warningSoft: Color(0xFFFEF3C7),
-    danger: Color(0xFFDC2626),
-    dangerSoft: Color(0xFFFEE2E2),
-    info: Color(0xFF2563EB),
-    infoSoft: Color(0xFFDBEAFE),
+    surface2: Color(0xFFFBFAF7),
+    border: Color(0xFFD9D6CF),
+    borderStrong: Color(0xFFBDB8AE),
+    text: Color(0xFF17191D),
+    text2: Color(0xFF3B4048),
+    muted: Color(0xFF5C636D),
+    faint: Color(0xFF8F8B83),
+    accent: Color(0xFFFFB300),
+    accentStrong: Color(0xFFE59E00),
+    accentSoft: Color(0xFFFFF4D6),
+    success: Color(0xFF007956),
+    successSoft: Color(0xFFE3F2EC),
+    warning: Color(0xFFA35F00),
+    warningSoft: Color(0xFFFFF4D6),
+    danger: Color(0xFFD40013),
+    dangerSoft: Color(0xFFFEF2F2),
+    info: Color(0xFF1F5FD6),
+    infoSoft: Color(0xFFE6EEFC),
   );
 
   static const dark = anbessaDark;
@@ -81,12 +83,15 @@ class AnbessaColors extends ThemeExtension<AnbessaColors> {
   bool get isDark => canvas.computeLuminance() < 0.2;
   Brightness get brightness => isDark ? Brightness.dark : Brightness.light;
 
-  /// The amber a filled control is painted with: the darker amber in light mode (white text reads
-  /// on it, 4.5:1), the bright one in dark mode (dark text on it).
-  Color get primaryFill => isDark ? accent : accentStrong;
+  /// What a primary control is filled with: ink (the text colour). Light mode: near-black with
+  /// white text; dark mode: near-white with ink text. Amber stays for what's live on the map.
+  Color get primaryFill => text;
 
   /// The text colour that reads on [primaryFill].
-  Color get onAccent => isDark ? const Color(0xFF1A1200) : Colors.white;
+  Color get onAccent => isDark ? const Color(0xFF17191D) : Colors.white;
+
+  /// The text colour that reads on [accent] (amber): always ink.
+  Color get onAmber => const Color(0xFF17191D);
 
   @override
   AnbessaColors copyWith({
@@ -184,7 +189,7 @@ ThemeData anbessaTheme({Brightness brightness = Brightness.light, String? fontFa
     primary: c.primaryFill,
     onPrimary: c.onAccent,
     primaryContainer: c.accentSoft,
-    onPrimaryContainer: dark ? c.accentStrong : c.accentStrong,
+    onPrimaryContainer: c.text,
     secondary: c.text2,
     surface: c.surface,
     onSurface: c.text,
@@ -223,7 +228,7 @@ ThemeData anbessaTheme({Brightness brightness = Brightness.light, String? fontFa
     canvasColor: c.canvas,
     textTheme: text,
     extensions: [c],
-    splashFactory: InkSparkle.splashFactory,
+    splashFactory: InkRipple.splashFactory,
     pageTransitionsTheme: const PageTransitionsTheme(builders: {
       TargetPlatform.android: FadeForwardsPageTransitionsBuilder(),
       TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
@@ -246,31 +251,35 @@ ThemeData anbessaTheme({Brightness brightness = Brightness.light, String? fontFa
       margin: EdgeInsets.zero,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AnbessaRadius.lg), side: BorderSide(color: c.border)),
     ),
+    // primary: ink-filled, 56 tall, 12 px corners, bold label (no icons needed)
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
         backgroundColor: c.primaryFill,
         foregroundColor: c.onAccent,
-        disabledBackgroundColor: c.surface2,
-        disabledForegroundColor: c.faint,
-        minimumSize: const Size(48, 52),
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AnbessaRadius.lg)),
-        textStyle: AnbessaType.body.copyWith(fontWeight: FontWeight.w700, fontFamily: fontFamily, fontFamilyFallback: fontFamilyFallback),
+        disabledBackgroundColor: c.border,
+        disabledForegroundColor: c.muted,
+        minimumSize: const Size(48, 56),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        shape: RoundedRectangleBorder(borderRadius: radius),
+        elevation: 0,
+        textStyle: AnbessaType.body.copyWith(fontSize: 17, fontWeight: FontWeight.w600, fontFamily: fontFamily, fontFamilyFallback: fontFamilyFallback),
       ),
     ),
+    // secondary: a 2 px ink-grey outline on the surface
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
         foregroundColor: c.text,
-        minimumSize: const Size(48, 52),
-        side: BorderSide(color: c.borderStrong),
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AnbessaRadius.lg)),
-        textStyle: AnbessaType.body.copyWith(fontWeight: FontWeight.w600, fontFamily: fontFamily, fontFamilyFallback: fontFamilyFallback),
+        backgroundColor: c.surface,
+        minimumSize: const Size(48, 56),
+        side: BorderSide(color: c.border, width: 2),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        shape: RoundedRectangleBorder(borderRadius: radius),
+        textStyle: AnbessaType.body.copyWith(fontSize: 17, fontWeight: FontWeight.w600, fontFamily: fontFamily, fontFamilyFallback: fontFamilyFallback),
       ),
     ),
     textButtonTheme: TextButtonThemeData(
       style: TextButton.styleFrom(
-        foregroundColor: c.accentStrong,
+        foregroundColor: c.text,
         minimumSize: const Size(48, 44),
         shape: RoundedRectangleBorder(borderRadius: radius),
         textStyle: AnbessaType.body2.copyWith(fontWeight: FontWeight.w600, fontFamily: fontFamily, fontFamilyFallback: fontFamilyFallback),
@@ -280,13 +289,15 @@ ThemeData anbessaTheme({Brightness brightness = Brightness.light, String? fontFa
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
       fillColor: c.surface,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-      border: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: c.border)),
-      enabledBorder: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: c.border)),
-      focusedBorder: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: c.accent, width: 2)),
-      errorBorder: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: c.danger)),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+      // 2 px borders; ink when focused
+      border: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: c.border, width: 2)),
+      enabledBorder: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: c.border, width: 2)),
+      focusedBorder: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: c.text, width: 2)),
+      errorBorder: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: c.danger, width: 2)),
       focusedErrorBorder: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: c.danger, width: 2)),
-      labelStyle: TextStyle(color: c.text2),
+      labelStyle: TextStyle(color: c.text2, fontWeight: FontWeight.w500),
+      floatingLabelStyle: TextStyle(color: c.text, fontWeight: FontWeight.w600),
       hintStyle: TextStyle(color: c.faint),
       prefixIconColor: c.muted,
       suffixIconColor: c.muted,
@@ -308,21 +319,23 @@ ThemeData anbessaTheme({Brightness brightness = Brightness.light, String? fontFa
     ),
     navigationBarTheme: NavigationBarThemeData(
       backgroundColor: c.surface,
-      indicatorColor: c.accentSoft,
+      // no pill: the selected tab is ink, the others muted; a hairline above (see the shells)
+      indicatorColor: Colors.transparent,
       surfaceTintColor: Colors.transparent,
       height: 64,
       elevation: 0,
-      indicatorShape: const StadiumBorder(),
-      labelTextStyle: WidgetStateProperty.resolveWith((s) => AnbessaType.label.copyWith(color: s.contains(WidgetState.selected) ? c.text : c.muted, fontFamily: fontFamily, fontFamilyFallback: fontFamilyFallback)),
-      iconTheme: WidgetStateProperty.resolveWith((s) => IconThemeData(color: s.contains(WidgetState.selected) ? c.accentStrong : c.muted)),
+      labelTextStyle: WidgetStateProperty.resolveWith((s) => AnbessaType.label.copyWith(color: s.contains(WidgetState.selected) ? c.text : c.muted, fontWeight: s.contains(WidgetState.selected) ? FontWeight.w700 : FontWeight.w500, fontFamily: fontFamily, fontFamilyFallback: fontFamilyFallback)),
+      iconTheme: WidgetStateProperty.resolveWith((s) => IconThemeData(color: s.contains(WidgetState.selected) ? c.text : c.muted, size: 24)),
     ),
     dividerTheme: DividerThemeData(color: c.border, thickness: 1, space: 1),
     chipTheme: ChipThemeData(
       backgroundColor: c.surface,
-      selectedColor: c.accentSoft,
-      side: BorderSide(color: c.border),
-      labelStyle: TextStyle(color: c.text, fontWeight: FontWeight.w500, fontFamily: fontFamily, fontFamilyFallback: fontFamilyFallback),
-      shape: const StadiumBorder(),
+      selectedColor: c.text,
+      secondarySelectedColor: c.text,
+      side: BorderSide(color: c.border, width: 1.5),
+      labelStyle: TextStyle(color: c.text, fontWeight: FontWeight.w600, fontFamily: fontFamily, fontFamilyFallback: fontFamilyFallback),
+      secondaryLabelStyle: TextStyle(color: c.onAccent, fontWeight: FontWeight.w600, fontFamily: fontFamily, fontFamilyFallback: fontFamilyFallback),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AnbessaRadius.sm)),
       showCheckmark: false,
     ),
     snackBarTheme: SnackBarThemeData(
@@ -332,16 +345,16 @@ ThemeData anbessaTheme({Brightness brightness = Brightness.light, String? fontFa
       shape: RoundedRectangleBorder(borderRadius: radius),
     ),
     listTileTheme: ListTileThemeData(iconColor: c.text2, textColor: c.text, minVerticalPadding: 12),
-    progressIndicatorTheme: ProgressIndicatorThemeData(color: c.accent, linearTrackColor: c.border, circularTrackColor: c.border),
+    progressIndicatorTheme: ProgressIndicatorThemeData(color: c.text, linearTrackColor: c.border, circularTrackColor: c.border),
     switchTheme: SwitchThemeData(
       thumbColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? c.onAccent : c.surface),
       trackColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? c.primaryFill : c.borderStrong),
       trackOutlineColor: const WidgetStatePropertyAll(Colors.transparent),
     ),
-    radioTheme: RadioThemeData(fillColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? c.accent : c.borderStrong)),
+    radioTheme: RadioThemeData(fillColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? c.text : c.borderStrong)),
     checkboxTheme: CheckboxThemeData(fillColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? c.primaryFill : Colors.transparent), checkColor: WidgetStatePropertyAll(c.onAccent)),
-    sliderTheme: SliderThemeData(activeTrackColor: c.accent, thumbColor: c.accent, inactiveTrackColor: c.border),
-    tabBarTheme: TabBarThemeData(labelColor: c.text, unselectedLabelColor: c.muted, indicatorColor: c.accent, dividerColor: c.border),
+    sliderTheme: SliderThemeData(activeTrackColor: c.text, thumbColor: c.text, inactiveTrackColor: c.border),
+    tabBarTheme: TabBarThemeData(labelColor: c.text, unselectedLabelColor: c.muted, indicatorColor: c.text, dividerColor: c.border),
     badgeTheme: BadgeThemeData(backgroundColor: c.danger, textColor: Colors.white),
     tooltipTheme: TooltipThemeData(decoration: BoxDecoration(color: c.text, borderRadius: BorderRadius.circular(AnbessaRadius.sm)), textStyle: TextStyle(color: c.canvas)),
   );

@@ -19,7 +19,7 @@ abstract final class AnbessaRadius {
   static const lg = 16.0;
   static const xl = 24.0;
   /// bottom sheets and the floating cards over the map
-  static const sheet = 28.0;
+  static const sheet = 24.0;
   static const pill = 999.0;
 }
 
@@ -37,27 +37,26 @@ abstract final class AnbessaMotion {
   static Duration of(BuildContext context, Duration d) => MediaQuery.disableAnimationsOf(context) ? Duration.zero : d;
 }
 
+/// Flat by design: hairline borders separate things; shadows only lift what floats over the map.
 abstract final class AnbessaElevation {
-  static List<BoxShadow> card(Brightness b) => [
-        BoxShadow(color: b == Brightness.dark ? const Color(0x66000000) : const Color(0x14000000), blurRadius: 12, offset: const Offset(0, 4)),
-      ];
+  static List<BoxShadow> card(Brightness b) => const [];
   static List<BoxShadow> floating(Brightness b) => [
-        BoxShadow(color: b == Brightness.dark ? const Color(0x80000000) : const Color(0x22000000), blurRadius: 24, offset: const Offset(0, 8)),
+        BoxShadow(color: b == Brightness.dark ? const Color(0x59000000) : const Color(0x14000000), blurRadius: 16, offset: const Offset(0, 4)),
       ];
   static List<BoxShadow> sheet(Brightness b) => [
-        BoxShadow(color: b == Brightness.dark ? const Color(0x99000000) : const Color(0x24000000), blurRadius: 28, offset: const Offset(0, -4)),
+        BoxShadow(color: b == Brightness.dark ? const Color(0x66000000) : const Color(0x14000000), blurRadius: 20, offset: const Offset(0, -2)),
       ];
 }
 
 /// The type scale. Money and ids add tabular figures on top.
 abstract final class AnbessaType {
-  static const display = TextStyle(fontSize: 32, fontWeight: FontWeight.w800, height: 1.15, letterSpacing: -0.5);
-  static const h1 = TextStyle(fontSize: 24, fontWeight: FontWeight.w700, height: 1.2, letterSpacing: -0.3);
-  static const h2 = TextStyle(fontSize: 20, fontWeight: FontWeight.w700, height: 1.25);
-  static const title = TextStyle(fontSize: 17, fontWeight: FontWeight.w600, height: 1.3);
-  static const body = TextStyle(fontSize: 15, fontWeight: FontWeight.w400, height: 1.4);
-  static const body2 = TextStyle(fontSize: 14, fontWeight: FontWeight.w400, height: 1.4);
-  static const label = TextStyle(fontSize: 12, fontWeight: FontWeight.w600, height: 1.2);
-  static const caption = TextStyle(fontSize: 12, fontWeight: FontWeight.w400, height: 1.3);
+  static const display = TextStyle(fontSize: 30, fontWeight: FontWeight.w800, height: 1.2, letterSpacing: -0.6);
+  static const h1 = TextStyle(fontSize: 24, fontWeight: FontWeight.w700, height: 1.25, letterSpacing: -0.4);
+  static const h2 = TextStyle(fontSize: 20, fontWeight: FontWeight.w700, height: 1.3, letterSpacing: -0.2);
+  static const title = TextStyle(fontSize: 17, fontWeight: FontWeight.w600, height: 1.35);
+  static const body = TextStyle(fontSize: 16, fontWeight: FontWeight.w400, height: 1.5);
+  static const body2 = TextStyle(fontSize: 14, fontWeight: FontWeight.w400, height: 1.45);
+  static const label = TextStyle(fontSize: 12, fontWeight: FontWeight.w600, height: 1.25);
+  static const caption = TextStyle(fontSize: 12.5, fontWeight: FontWeight.w400, height: 1.4);
   static const tabular = [FontFeature.tabularFigures()];
 }

@@ -24,7 +24,7 @@ class SectionGroup extends StatelessWidget {
             child: Column(
               children: [
                 for (final (i, w) in children.indexed) ...[
-                  if (i > 0) Divider(indent: 56, color: c.border),
+                  if (i > 0) Divider(indent: 16, color: c.border), // rows start at 16 (no icon column)
                   w,
                 ],
               ],
@@ -49,6 +49,7 @@ class SettingsTile extends StatelessWidget {
     this.chevron = true,
     this.badge,
   });
+  /// kept for older call sites; not drawn (no decorative icons)
   final IconData icon;
   final String title;
   final String? subtitle;
@@ -63,29 +64,21 @@ class SettingsTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.colors;
     final fg = destructive ? c.danger : c.text;
-    final tone = iconTone ?? (destructive ? c.danger : c.accentStrong);
     return InkWell(
       onTap: onTap,
       child: ConstrainedBox(
         constraints: const BoxConstraints(minHeight: 56),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           child: LayoutBuilder(builder: (context, box) => Row(
             children: [
-              Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(color: tone.withValues(alpha: c.isDark ? 0.2 : 0.12), borderRadius: BorderRadius.circular(AnbessaRadius.sm)),
-                child: Icon(icon, size: 19, color: tone),
-              ),
-              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
                       children: [
-                        Flexible(child: Text(title, style: AnbessaType.body.copyWith(color: fg, fontWeight: FontWeight.w500))),
+                        Flexible(child: Text(title, style: AnbessaType.body.copyWith(color: fg, fontWeight: FontWeight.w600))),
                         if (badge != null) ...[const SizedBox(width: 8), badge!],
                       ],
                     ),
@@ -138,7 +131,7 @@ class SettingsValueTile extends StatelessWidget {
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(value, style: AnbessaType.body2.copyWith(color: c.muted)),
+          Flexible(child: Text(value, style: AnbessaType.body2.copyWith(color: c.muted), maxLines: 1, overflow: TextOverflow.ellipsis)),
           if (onTap != null) Icon(Icons.chevron_right_rounded, color: c.faint),
         ],
       ),
@@ -160,15 +153,16 @@ class ChoiceRow extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         child: Row(
           children: [
-            if (leading != null) ...[leading!, const SizedBox(width: 12)],
+            // a bare icon is decoration and isn't drawn; other leading widgets (an avatar) are
+            if (leading != null && leading is! Icon) ...[leading!, const SizedBox(width: 12)],
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title, style: AnbessaType.body.copyWith(fontWeight: FontWeight.w500)),
+                  Text(title, style: AnbessaType.body.copyWith(fontWeight: FontWeight.w600, color: c.text)),
                   if (subtitle != null) Text(subtitle!, style: AnbessaType.caption.copyWith(color: c.muted)),
                 ],
               ),

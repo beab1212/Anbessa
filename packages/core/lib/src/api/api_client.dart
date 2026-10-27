@@ -40,6 +40,7 @@ class ApiEndpoints {
     '/api/notifications': 3006,
     '/api/maps': 3007,
     '/api/fleet': 3008,
+    '/api/support': 3009,
     '/api/audit': 3010,
     '/api/platform': 3011,
   };
@@ -216,7 +217,9 @@ class ApiClient {
     final code = _codeOf(body) ?? (status == 401 ? ErrorCodes.unauthorized : status == 403 ? ErrorCodes.forbidden : status == 404 ? ErrorCodes.notFound : status == 429 ? ErrorCodes.rateLimited : 'http_$status');
     String message = 'Request failed ($status)';
     var issues = const <FieldIssue>[];
+    String? rule;
     if (body is Map) {
+      if (body['rule'] is String) rule = body['rule'] as String;
       if (body['message'] is String) message = body['message'] as String;
       if (body['issues'] is List) {
         issues = (body['issues'] as List).whereType<Map>().map((i) => FieldIssue(path: i['path']?.toString() ?? '', message: i['message']?.toString() ?? '')).toList(growable: false);
@@ -225,7 +228,7 @@ class ApiClient {
       message = body;
     }
     if (status == 429) message = 'Too many attempts. Wait a minute and try again.';
-    return AppError(status: status, code: code, message: message, retryable: status == 429 || status == 502 || status == 503 || status == 504, issues: issues);
+    return AppError(status: status, code: code, message: message, retryable: status == 429 || status == 502 || status == 503 || status == 504, issues: issues, rule: rule);
   }
 
   static DioException _mapped(DioException e) => e.error is AppError ? e : e.copyWith(error: toAppError(e));

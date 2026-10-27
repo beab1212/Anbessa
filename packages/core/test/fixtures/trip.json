@@ -28,7 +28,10 @@
     "estimateMinor": 22000,
     "finalMinor": null,
     "waitingFeeMinor": null,
-    "currency": "ETB"
+    "currency": "ETB",
+    "promoDiscountMinor": 0,
+    "promoCode": null,
+    "payableMinor": 22000
   },
   "route": {
     "estDistanceMeters": 6000,

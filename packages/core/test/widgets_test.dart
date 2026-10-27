@@ -108,6 +108,8 @@ void main() {
         const RadarPulse(color: Colors.amber),
         const FadeSlideIn(child: Text('hello')),
         const IllustratedEmpty(illustration: AnbessaIllustration.noTrips, title: 'No trips yet'),
+        const PriceTag(fareMinor: 26000, payableMinor: 21000),
+        const ProgressMeter(value: 0.75),
       ]),
       brightness: Brightness.dark,
     ));
@@ -115,6 +117,16 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(AvatarImage.initialsOf('Sara Getachew'), 'SG');
     expect(AvatarImage.initialsOf('+251900000501'), '');
+  });
+
+  testWidgets('PriceTag strikes the fare through only when discounted', (tester) async {
+    await tester.pumpWidget(host(const Column(children: [PriceTag(fareMinor: 26000, payableMinor: 21000), PriceTag(fareMinor: 34000, payableMinor: 34000)])));
+    await tester.pump(const Duration(seconds: 1));
+    final struck = find.byWidgetPredicate((w) => w is Text && w.style?.decoration == TextDecoration.lineThrough);
+    expect(struck, findsOneWidget);
+    expect((tester.widget(struck) as Text).data, birr(26000));
+    expect(find.text(birr(21000)), findsOneWidget);
+    expect(find.text(birr(34000)), findsOneWidget);
   });
 
   testWidgets('showToast appears and leaves', (tester) async {

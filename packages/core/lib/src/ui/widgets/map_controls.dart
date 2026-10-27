@@ -3,10 +3,11 @@
 import 'package:flutter/material.dart';
 import '../theme/anbessa_theme.dart';
 import '../theme/tokens.dart';
+import 'basics.dart';
 
 class MapControlButton extends StatelessWidget {
-  const MapControlButton({super.key, required this.icon, required this.onTap, required this.tooltip, this.active = false, this.size = 44, this.child});
-  final IconData icon;
+  const MapControlButton({super.key, this.icon, required this.onTap, required this.tooltip, this.active = false, this.size = 44, this.child}) : assert(icon != null || child != null);
+  final IconData? icon;
   final VoidCallback? onTap;
   final String tooltip;
   final bool active;
@@ -16,21 +17,20 @@ class MapControlButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
+    // a flat rounded square with a hairline border: quiet over any map style
+    final shape = RoundedRectangleBorder(borderRadius: BorderRadius.circular(AnbessaRadius.md), side: BorderSide(color: active ? c.text : c.border));
     return Tooltip(
       message: tooltip,
       child: Material(
-        color: active ? c.primaryFill : c.surface,
-        shape: const CircleBorder(),
-        elevation: 0,
-        shadowColor: Colors.transparent,
+        color: active ? c.text : c.surface,
+        shape: shape,
         child: InkWell(
           onTap: onTap,
-          customBorder: const CircleBorder(),
-          child: Container(
+          customBorder: shape,
+          child: SizedBox(
             width: size,
             height: size,
-            decoration: BoxDecoration(shape: BoxShape.circle, boxShadow: AnbessaElevation.card(c.brightness)),
-            child: Semantics(button: true, label: tooltip, child: child ?? Icon(icon, size: 22, color: active ? c.onAccent : c.text)),
+            child: Semantics(button: true, label: tooltip, child: Center(child: child ?? Icon(icon, size: 20, color: active ? c.surface : c.text))),
           ),
         ),
       ),
@@ -55,6 +55,9 @@ class MapControlColumn extends StatelessWidget {
 }
 
 /// A chip over the map with an icon and text ("3 cars nearby · ~4 min", "GPS weak").
+/// A small label over the map ("Online", "GPS weak"): words on the surface with a hairline
+/// border; a tone shows as a dot (pulsing when [pulse]). The [icon] is kept for older call sites
+/// but not drawn.
 class MapChip extends StatelessWidget {
   const MapChip({super.key, required this.label, this.icon, this.tone, this.onTap, this.pulse = false});
   final String label;
@@ -65,21 +68,23 @@ class MapChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    final fg = tone ?? c.text;
+    final shape = RoundedRectangleBorder(borderRadius: BorderRadius.circular(AnbessaRadius.md), side: BorderSide(color: c.border));
     return Material(
       color: c.surface,
-      borderRadius: BorderRadius.circular(AnbessaRadius.pill),
+      shape: shape,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(AnbessaRadius.pill),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(borderRadius: BorderRadius.circular(AnbessaRadius.pill), boxShadow: AnbessaElevation.card(c.brightness)),
+        customBorder: shape,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (icon != null) ...[Icon(icon, size: 16, color: fg), const SizedBox(width: 6)],
-              Flexible(child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: AnbessaType.label.copyWith(color: fg))),
+              if (tone != null) ...[
+                if (pulse) PulsingDot(color: tone!, size: 8) else Container(width: 8, height: 8, decoration: BoxDecoration(color: tone, shape: BoxShape.circle)),
+                const SizedBox(width: 7),
+              ],
+              Flexible(child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: AnbessaType.label.copyWith(color: c.text, fontWeight: FontWeight.w700))),
             ],
           ),
         ),

@@ -1,6 +1,6 @@
 # API client
 
-Source: `packages/core/lib/src/api/` (`api_client.dart`, `app_error.dart`, `auth_api.dart`, `service_apis.dart`).
+Source: `packages/core/lib/src/api/` (`api_client.dart`, `app_error.dart`, `auth_api.dart`, `service_apis.dart`, `support_api.dart`).
 
 Every HTTP call the phone app makes goes through one `ApiClient`, a Dio instance with five interceptors. The typed API classes (`AuthApi`, `TripsApi`, …) are thin, stateless wrappers over it. Core has no Riverpod: the app builds the client and hands in the hooks (`apps/phone-app/lib/core/network/providers.dart`).
 
@@ -36,7 +36,7 @@ The app creates two clients (`apps/phone-app/lib/core/network/providers.dart`):
 | gateway | `ApiEndpoints.gateway(baseUrl)` | every path becomes `baseUrl + path` (Kong, or production) |
 | host | `ApiEndpoints.host(hostBase: 'http://localhost', hostPorts: defaultHostPorts)` | the path's `/api/<prefix>` picks the service's own port on `hostBase` (how `make dev-services` runs, with no Kong) |
 
-`resolve(path)` leaves absolute `http://` / `https://` URLs alone (document uploads use this). In host mode a prefix matches when the path equals it, or continues with `/` or `?`. A path with no matching prefix goes to port 3001.
+`resolve(path)` leaves absolute `http://` / `https://` URLs alone (document uploads use this). In host mode a prefix matches when the path equals it, or continues with `/` or `?`. A path with no matching prefix goes to port 3001. In gateway mode nothing is rewritten, so `/api/support/*` reaches Kong unchanged (`infra/kong/kong.yml` routes `/api/support` to support-service). Test: "host mode sends /api/support to port 3009; gateway mode passes it through" in `test/support_test.dart`.
 
 `defaultHostPorts` (same table as `apps/web/vite.config.ts`, per the code comment):
 
@@ -50,6 +50,7 @@ The app creates two clients (`apps/phone-app/lib/core/network/providers.dart`):
 | `/api/notifications` | 3006 | notification-service |
 | `/api/maps` | 3007 | mapping-service |
 | `/api/fleet` | 3008 | fleet-service |
+| `/api/support` | 3009 | support-service |
 | `/api/audit` | 3010 | audit-service (no API class calls it) |
 | `/api/platform` | 3011 | platform-service |
 
@@ -127,11 +128,11 @@ Every failure becomes an `AppError` (`ApiClient.toAppError`):
 | other failure without a response | 0 | `network` | same | true |
 | HTTP response | the status | body `error` or `code` (a string, or `{code}`), else `unauthorized` (401), `forbidden` (403), `not_found` (404), `rate_limited` (429), else `http_<status>` | body `message`, or a short (< 200 chars) string body, else `Request failed (<status>)`; on 429 always "Too many attempts. Wait a minute and try again." | true for 429, 502, 503, 504 |
 
-`issues` is filled from a body `issues[]` (`path`, `message`), the shape of zod validation errors.
+`issues` is filled from a body `issues[]` (`path`, `message`), the shape of zod validation errors. `rule` is filled from a string body `rule` (trip-service's 422 `policy_violation` names the company rule that refused the trip, see `PolicyRule`).
 
 `AppError` getters: `isNetwork` (status 0), `isAuth` (401 or `session_ended`), `isForbidden` (403), `isNotFound` (404), `isConflict` (409), `is_(code)`.
 
-`ErrorCodes` lists every code the services answer with, grouped as transport, auth, common, trips, fleet, payments and dev. The app turns them into words in `apps/phone-app/lib/core/l10n/l10n.dart` (`describeError`).
+`ErrorCodes` lists every code the services answer with, grouped as transport, auth, common, trips, fleet, payments, support and dev. The trips group now also has `policy_violation`, `too_soon`, `too_far_ahead`, `too_many_scheduled`, `schedule_conflict` and `quote_used` (scheduled rides and company policies). The support group: `use_lost_items`, `reopen_window_closed`, `ticket_resolved`, `ticket_closed`, `already_reported`, `report_window_closed`, `lost_item_closed`, `sos_unavailable`, `sos_resolved`, `invalid_transition`, `request_in_progress`, `idempotency_mismatch`. The app turns them into words in `apps/phone-app/lib/core/l10n/l10n.dart` (`describeError`).
 
 ## Calling
 
@@ -149,7 +150,7 @@ delete(path, {auth})
 
 ## API classes and their paths
 
-`Apis(client)` builds every service class from one client: `platform`, `maps`, `pricing`, `trips`, `locations`, `payments`, `fleet`, `notifications`. `AuthApi`, `IdentityApi` and `OrganizationsApi` are built separately.
+`Apis(client)` builds every service class from one client: `platform`, `maps`, `pricing`, `trips`, `locations`, `payments`, `fleet`, `notifications`, `support`. `AuthApi`, `IdentityApi` and `OrganizationsApi` are built separately.
 
 "Bearer" below: **JWT** (the default), **session** (`sessionBearer: true`) or **none** (`auth: false`).
 
@@ -212,7 +213,7 @@ The app does not use this wrapper; `ClientConfigController` calls `apiClient.get
 | Method | HTTP | Returns |
 |---|---|---|
 | `estimates({pickup, dropoff, vehicleTypes})` | `POST /api/pricing/estimates` `{pickup:{lat,lng}, dropoff:{lat,lng}, vehicleTypes?, pickupAddress, dropoffAddress}` | `List<Quote>`. No caller in the app |
-| `estimatesWithRoute(...)` | same request | `Estimates` (quotes + shared route) |
+| `estimatesWithRoute({pickup, dropoff, vehicleTypes, promoCode})` | same request, plus `promoCode?` (trimmed) | `Estimates` (quotes + shared route + the promo outcome) |
 | `fares(cityId)` | `GET /api/pricing/fares?cityId=` (no bearer) | `List<FareCard>`. No caller in the app |
 
 `pickupAddress` / `dropoffAddress` are sent from `Place.name`.
@@ -221,7 +222,12 @@ The app does not use this wrapper; `ClientConfigController` calls `apiClient.get
 
 | Method | HTTP | Body / key | Returns |
 |---|---|---|---|
-| `request({quoteId, paymentMethod, billingOrgId, idempotencyKey})` | `POST /api/trips` | `{quoteId, paymentMethod, billingOrgId?}`, `Idempotency-Key` | `Trip` |
+| `request({quoteId, paymentMethod, billingOrgId, purpose, idempotencyKey})` | `POST /api/trips` | `{quoteId, paymentMethod, billingOrgId?, purpose?}`, `Idempotency-Key` | `Trip` |
+| `schedule({quoteId, paymentMethod, scheduledFor, billingOrgId, purpose, idempotencyKey})` | `POST /api/trips/scheduled` | `{quoteId, paymentMethod, scheduledFor (UTC ISO), billingOrgId?, purpose?}`, key | `ScheduledTrip` |
+| `scheduled({status = 'upcoming', limit = 50})` | `GET /api/trips/scheduled?status=&limit=` | | `List<ScheduledTrip>` from `scheduled` |
+| `scheduledTrip(id)` | `GET /api/trips/scheduled/:id` | | `ScheduledTrip`. No caller in the app |
+| `cancelScheduled(id)` | `POST /api/trips/scheduled/:id/cancel` | `{}` | `ScheduledTrip` |
+| `corporatePolicy(orgId)` | `GET /api/trips/corporate/:orgId/policy` | | `CorporatePolicy` |
 | `active()` | `GET /api/trips/active` | | `Trip?` from `trip` |
 | `list({as, before, limit = 20})` | `GET /api/trips?as=rider|driver&before=&limit=` | | `(trips, next)` |
 | `get(id)` | `GET /api/trips/:id` | | `Trip` |
@@ -268,6 +274,7 @@ The app does not use this wrapper; `ClientConfigController` calls `apiClient.get
 | `tripPayments(tripId)` | `GET /api/payments/trips/:tripId` | `TripPayments` |
 | `payNow(paymentId, {idempotencyKey})` | `POST /api/payments/payments/:paymentId/pay` | `Payment` |
 | `earnings({period = 'today', from, to})` | `GET /api/payments/earnings/me?period=&from=&to=` | `EarningsSummary` |
+| `myIncentives({cityId})` | `GET /api/payments/incentives/me?cityId=` | `List<Incentive>` from `incentives` |
 | `preference()` | `GET /api/payments/me/preferences` | `mobileMoneyProvider` string or null |
 | `setPreference(provider)` | `PUT /api/payments/me/preferences` `{mobileMoneyProvider}` | |
 
@@ -299,3 +306,26 @@ The app does not use this wrapper; `ClientConfigController` calls `apiClient.get
 |---|---|
 | `registerDevice(token, platform)` | `POST /api/notifications/devices` `{token, platform}` (`android` or `ios`) |
 | `removeDevice(token)` | `POST /api/notifications/devices/remove` `{token}` |
+| `marketing()` | `GET /api/notifications/me/marketing` → `MarketingPrefs` |
+| `setMarketing({push, sms})` | `PUT /api/notifications/me/marketing` `{push?, sms?}` → `MarketingPrefs` |
+
+### SupportApi (support-service, base `/api/support`, `support_api.dart`)
+
+The app's half of `services/support-service/src/http/routes.ts`; staff routes (queues, incidents, acknowledging SOS) are not wrapped. Bodies match the route's zod schemas exactly.
+
+| Method | HTTP | Body / key | Returns |
+|---|---|---|---|
+| `createTicket({category, subject, description, tripId, cityId, as, idempotencyKey})` | `POST /api/support/tickets` | `{category, subject, description, tripId?, cityId?, as?}` (`as`: `RIDER` \| `DRIVER`), `Idempotency-Key` | `Ticket` from `ticket`. 400 `use_lost_items` for LOST_ITEM; 400 without a trip or `cityId` |
+| `myTickets({cursor, limit = 50})` | `GET /api/support/me/tickets?cursor=&limit=` | | `TicketPage` = `(tickets, next)` |
+| `ticket(id)` | `GET /api/support/tickets/:id` | | `TicketThread` (`{ticket, messages}`) |
+| `replyToTicket(id, body)` | `POST /api/support/tickets/:id/messages` | `{body}` | `TicketMessage` from `message`. 409 `ticket_resolved`, `ticket_closed` |
+| `reopenTicket(id, reason)` | `POST /api/support/tickets/:id/reopen` | `{reason}` | `Ticket`. 409 `reopen_window_closed` |
+| `reportLostItem({tripId, description, idempotencyKey})` | `POST /api/support/lost-items` | `{tripId, description}`, key | `LostItem` from `lostItem`. 409 `report_window_closed`, `already_reported` |
+| `myLostItems({cursor, limit = 50})` | `GET /api/support/me/lost-items?cursor=&limit=` | | `LostItemPage` = `(lostItems, next)`: reports made, about trips driven, or about the fleet's cars |
+| `lostItem(id)` | `GET /api/support/lost-items/:id` | | `LostItemThread` (`{lostItem, messages}`) |
+| `replyToLostItem(id, body)` | `POST /api/support/lost-items/:id/messages` | `{body}` | `LostItemMessage`. 409 `lost_item_closed` |
+| `confirmReturned(id, {note})` | `POST /api/support/lost-items/:id/status` | `{status: RETURNED, note?}` | `LostItem` (the rider, from FOUND) |
+| `respondToLostItem(id, {found, note})` | `POST /api/support/lost-items/:id/respond` | `{found, note?}` | `LostItem` (driver or fleet; FOUND / NOT_FOUND) |
+| `triggerSos({tripId, lat, lng, accuracy, cityId, idempotencyKey})` | `POST /api/support/sos` | `{tripId, location: {lat, lng, accuracy?}, cityId?}`, key | `SosTrigger` (`alert`, `duplicate`). 409 `sos_unavailable`; `accuracy` is clamped to 0–100 000 m |
+| `updateSosLocation(id, {lat, lng, accuracy})` | `POST /api/support/sos/:id/location` | `{lat, lng, accuracy?}` | `SosAlert`. 409 `sos_resolved` |
+| `sosAlert(id)` | `GET /api/support/sos/:id` | | `SosAlert` (owner view) |

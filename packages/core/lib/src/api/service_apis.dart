@@ -5,12 +5,17 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import '../models/balance.dart';
 import '../models/client_config.dart';
+import '../models/corporate.dart';
 import '../models/fleet.dart';
+import '../models/incentive.dart';
 import '../models/json.dart';
+import '../models/marketing.dart';
 import '../models/payment.dart';
 import '../models/place.dart';
 import '../models/quote.dart';
+import '../models/scheduled.dart';
 import '../models/trip.dart';
+import 'support_api.dart';
 import '../models/trip_offer.dart';
 import 'api_client.dart';
 
@@ -82,14 +87,17 @@ class PricingApi {
         'dropoffAddress': dropoff.name,
       })
       .then((j) => asJsonList(j['quotes']).map(Quote.fromJson).toList(growable: false));
-  /// The quotes plus the road line they share.
-  Future<Estimates> estimatesWithRoute({required Place pickup, required Place dropoff, List<String>? vehicleTypes}) => _c
+  /// The quotes plus the road line they share. A [promoCode] discounts the quotes it applies to;
+  /// what happened to it comes back as [Estimates.promo] (a code that can't be used never fails
+  /// the estimate, but a malformed one does: check it with [isValidPromoCode] first).
+  Future<Estimates> estimatesWithRoute({required Place pickup, required Place dropoff, List<String>? vehicleTypes, String? promoCode}) => _c
       .postJson('/api/pricing/estimates', body: {
         'pickup': {'lat': pickup.lat, 'lng': pickup.lng},
         'dropoff': {'lat': dropoff.lat, 'lng': dropoff.lng},
         'vehicleTypes': ?vehicleTypes,
         'pickupAddress': pickup.name,
         'dropoffAddress': dropoff.name,
+        'promoCode': ?promoCode?.trim(),
       })
       .then(Estimates.fromJson);
   Future<List<FareCard>> fares(String cityId) => _c.getJson('/api/pricing/fares', query: {'cityId': cityId}, auth: false).then((j) => asJsonList(j['fares']).map(FareCard.fromJson).toList(growable: false));
@@ -100,9 +108,28 @@ class TripsApi {
   final ApiClient _c;
   static const base = '/api/trips';
 
-  Future<Trip> request({required String quoteId, required PaymentMethod paymentMethod, String? billingOrgId, required String idempotencyKey}) => _c
-      .postJson(base, body: {'quoteId': quoteId, 'paymentMethod': paymentMethodToApi(paymentMethod), 'billingOrgId': ?billingOrgId}, idempotencyKey: idempotencyKey)
+  /// [purpose]: the trip purpose or cost centre of a company ride (max 200 characters).
+  Future<Trip> request({required String quoteId, required PaymentMethod paymentMethod, String? billingOrgId, String? purpose, required String idempotencyKey}) => _c
+      .postJson(base, body: {'quoteId': quoteId, 'paymentMethod': paymentMethodToApi(paymentMethod), 'billingOrgId': ?billingOrgId, 'purpose': ?purpose}, idempotencyKey: idempotencyKey)
       .then(Trip.fromJson);
+  // scheduled rides (workflow 12)
+  Future<ScheduledTrip> schedule({required String quoteId, required PaymentMethod paymentMethod, required DateTime scheduledFor, String? billingOrgId, String? purpose, required String idempotencyKey}) => _c
+      .postJson('$base/scheduled', body: {
+        'quoteId': quoteId,
+        'paymentMethod': paymentMethodToApi(paymentMethod),
+        'scheduledFor': scheduledFor.toUtc().toIso8601String(),
+        'billingOrgId': ?billingOrgId,
+        'purpose': ?purpose,
+      }, idempotencyKey: idempotencyKey)
+      .then(ScheduledTrip.fromJson);
+  /// Mine, as rider or booker. [status]: upcoming (default, soonest first) | all (newest first) | a ScheduledStatus in API form.
+  Future<List<ScheduledTrip>> scheduled({String status = 'upcoming', int limit = 50}) =>
+      _c.getJson('$base/scheduled', query: {'status': status, 'limit': limit}).then((j) => asJsonList(j['scheduled']).map(ScheduledTrip.fromJson).toList(growable: false));
+  Future<ScheduledTrip> scheduledTrip(String id) => _c.getJson('$base/scheduled/$id').then(ScheduledTrip.fromJson);
+  /// Free before dispatch; after it, cancel the trip instead (invalid_state).
+  Future<ScheduledTrip> cancelScheduled(String id) => _c.postJson('$base/scheduled/$id/cancel').then(ScheduledTrip.fromJson);
+  /// The rules a company ride is booked under (needs trip:bill_corporate on the company).
+  Future<CorporatePolicy> corporatePolicy(String orgId) => _c.getJson('$base/corporate/$orgId/policy').then(CorporatePolicy.fromJson);
   Future<Trip?> active() => _c.getJson('$base/active').then((j) => j['trip'] is Map ? Trip.fromJson(asJson(j['trip'])) : null);
   Future<({List<Trip> trips, String? next})> list({required String as, String? before, int limit = 20}) =>
       _c.getJson(base, query: {'as': as, 'before': ?before, 'limit': limit}).then((j) => (trips: asJsonList(j['trips']).map(Trip.fromJson).toList(growable: false), next: strOrNull(j, 'next')));
@@ -174,6 +201,9 @@ class PaymentsApi {
   /// What the driver made: period = today | week | month, or custom with from/to (ISO dates).
   Future<EarningsSummary> earnings({String period = 'today', String? from, String? to}) =>
       _c.getJson('$base/earnings/me', query: {'period': period, 'from': ?from, 'to': ?to}).then(EarningsSummary.fromJson);
+  /// The driver's incentive programs in [cityId] with their own progress.
+  Future<List<Incentive>> myIncentives({required String cityId}) =>
+      _c.getJson('$base/incentives/me', query: {'cityId': cityId}).then((j) => asJsonList(j['incentives']).map(Incentive.fromJson).toList(growable: false));
   Future<String?> preference() => _c.getJson('$base/me/preferences').then((j) => strOrNull(j, 'mobileMoneyProvider'));
   Future<void> setPreference(String provider) => _c.putJson('$base/me/preferences', body: {'mobileMoneyProvider': provider});
 }
@@ -239,6 +269,9 @@ class NotificationsApi {
   final ApiClient _c;
   Future<void> registerDevice(String token, String platform) => _c.postJson('/api/notifications/devices', body: {'token': token, 'platform': platform});
   Future<void> removeDevice(String token) => _c.postJson('/api/notifications/devices/remove', body: {'token': token});
+  /// Campaign messages by push / SMS (true = receive).
+  Future<MarketingPrefs> marketing() => _c.getJson('/api/notifications/me/marketing').then(MarketingPrefs.fromJson);
+  Future<MarketingPrefs> setMarketing({bool? push, bool? sms}) => _c.putJson('/api/notifications/me/marketing', body: {'push': ?push, 'sms': ?sms}).then(MarketingPrefs.fromJson);
 }
 
 /// Everything in one place, so the app builds it once from one [ApiClient].
@@ -251,7 +284,8 @@ class Apis {
         locations = LocationsApi(client),
         payments = PaymentsApi(client),
         fleet = FleetApi(client),
-        notifications = NotificationsApi(client);
+        notifications = NotificationsApi(client),
+        support = SupportApi(client);
   final ApiClient client;
   final PlatformApi platform;
   final MapsApi maps;
@@ -261,6 +295,7 @@ class Apis {
   final PaymentsApi payments;
   final FleetApi fleet;
   final NotificationsApi notifications;
+  final SupportApi support;
 }
 
 // keep the offer type reachable from here for consumers that import only the APIs

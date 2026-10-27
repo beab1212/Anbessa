@@ -15,21 +15,19 @@ class StatTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    final (fg, bg) = (tone ?? Tone.grey).colorsOf(c);
+    final (fg, _) = (tone ?? Tone.grey).colorsOf(c);
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: c.surface2, borderRadius: BorderRadius.circular(AnbessaRadius.md)),
+      decoration: BoxDecoration(color: c.surface, borderRadius: BorderRadius.circular(AnbessaRadius.md), border: Border.all(color: c.border)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
+          // the label in words; the tone, if any, is a small bar (no icons)
           Row(
             children: [
-              if (icon != null) ...[
-                Container(width: 22, height: 22, decoration: BoxDecoration(color: tone == null ? c.surface : bg, shape: BoxShape.circle), child: Icon(icon, size: 13, color: tone == null ? c.accentStrong : fg)),
-                const SizedBox(width: 6),
-              ],
-              Expanded(child: Text(label, style: AnbessaType.caption.copyWith(color: c.muted), maxLines: 1, overflow: TextOverflow.ellipsis)),
+              if (tone != null) ...[Container(width: 3, height: 12, decoration: BoxDecoration(color: fg, borderRadius: BorderRadius.circular(2))), const SizedBox(width: 6)],
+              Expanded(child: Text(label, style: AnbessaType.caption.copyWith(color: c.muted, fontWeight: FontWeight.w500), maxLines: 1, overflow: TextOverflow.ellipsis)),
             ],
           ),
           const SizedBox(height: 6),

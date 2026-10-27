@@ -4,7 +4,7 @@ Source: `packages/core/lib/src/realtime/realtime_event.dart`.
 
 The phone app keeps one Socket.io connection to realtime-gateway (Socket.io v4, never behind Kong). Core only knows the event names and how to parse them; the connection, reconnects, token refresh and trip rooms are in the app's `RealtimeHub` (`apps/phone-app/lib/core/realtime/realtime_hub.dart`, described in `apps/phone-app/docs/architecture.md`).
 
-Producers, per the file header: trip-service (`trip:*`), payment-service (`payment:*`, `balance:*`), the gateway itself (`driver:location`).
+Producers, per the file header: trip-service (`trip:*`, `scheduled:*`), payment-service (`payment:*`, `balance:*`), the gateway itself (`driver:location`).
 
 ## Events the app listens to
 
@@ -16,6 +16,8 @@ Producers, per the file header: trip-service (`trip:*`), payment-service (`payme
 | `trip:offer` | `OfferEvent(offer)` | the whole payload as `TripOffer`: `tripId`, `offerId`, `expiresAt`, `etaToPickupSeconds`, `pickup`, `dropoff`, `vehicleType`, `fare.estimateMinor`, `fare.currency`, `paymentMethod` | `OfferController` (driver) |
 | `trip:offer_expired` | `OfferExpiredEvent(tripId, offerId)` | `tripId`, `offerId` | `OfferController` |
 | `trip:offer_cancelled` | `OfferCancelledEvent(tripId)` | `tripId` | `OfferController` |
+| `trip:reassigned` | `TripReassignedEvent(tripId, reason?)` | `tripId`, `reason` | `ActiveTripController` (the driver a dispatcher took the trip from: the trip is dropped). The rider gets a `trip:status` with the new driver, or back to `requested` |
+| `scheduled:status` | `ScheduledStatusEvent(scheduledTripId, status, tripId?, scheduledFor?, failReason?)` | `scheduledTripId`, `status` (`ScheduledStatus`), `tripId` (once dispatched), `scheduledFor`, `failReason` | `ScheduledRidesController` (rider and booker) |
 | `driver:location` | `DriverLocationEvent(tripId, driverId, lat, lng, heading?, speed?, at)` | `tripId`, `driverId`, `lat`, `lng`, `heading`, `speed` (m/s), `at` (unix ms; now if missing) | `driverLiveProvider` (rider trip screen) |
 | `payment:action_required` | `PaymentActionRequiredEvent(payment, instructions?)` | `payment` (`Payment`), `instructions` | `TripPaymentsController` (pay screen) |
 | `payment:captured` | `PaymentCapturedEvent(payment)` | `payment` | `TripPaymentsController` |

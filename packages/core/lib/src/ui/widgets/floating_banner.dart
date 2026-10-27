@@ -20,17 +20,18 @@ class FloatingBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    final (fg, bg, defaultIcon) = tone.of(c);
+    final (fg, bg, _) = tone.of(c);
     return Material(
       color: Colors.transparent,
       child: Container(
         padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
-        decoration: BoxDecoration(color: c.surface, borderRadius: BorderRadius.circular(AnbessaRadius.lg), border: Border.all(color: bg), boxShadow: AnbessaElevation.floating(c.brightness)),
+        decoration: BoxDecoration(color: c.surface, borderRadius: BorderRadius.circular(AnbessaRadius.md), border: Border.all(color: c.border), boxShadow: AnbessaElevation.floating(c.brightness)),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            if (pulse) PulsingDot(color: fg, size: 10) else Icon(icon ?? defaultIcon, size: 20, color: fg),
-            const SizedBox(width: 10),
+            // a coloured bar says the tone; no icon
+            if (pulse) PulsingDot(color: fg, size: 10) else Container(width: 4, height: 32, decoration: BoxDecoration(color: fg, borderRadius: BorderRadius.circular(2))),
+            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -41,7 +42,7 @@ class FloatingBanner extends StatelessWidget {
                 ],
               ),
             ),
-            if (action != null && actionLabel != null) TextButton(onPressed: action, style: TextButton.styleFrom(foregroundColor: fg, visualDensity: VisualDensity.compact), child: Text(actionLabel!)),
+            if (action != null && actionLabel != null) TextButton(onPressed: action, style: TextButton.styleFrom(foregroundColor: c.text, visualDensity: VisualDensity.compact), child: Text(actionLabel!)),
             if (onDismiss != null) IconButton(onPressed: onDismiss, icon: const Icon(Icons.close, size: 18), visualDensity: VisualDensity.compact, tooltip: ''),
           ],
         ),

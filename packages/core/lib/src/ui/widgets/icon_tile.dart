@@ -1,4 +1,4 @@
-// Square shortcut tiles: Home, Work, add a place.
+// Shortcut tiles: Home, Work, add a place. Words only (the [icon] isn't drawn).
 
 import 'package:flutter/material.dart';
 import '../theme/anbessa_theme.dart';
@@ -29,24 +29,17 @@ class IconTile extends StatelessWidget {
         child: AnimatedContainer(
           duration: AnbessaMotion.of(context, AnbessaMotion.base),
           width: width,
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
           decoration: BoxDecoration(
-            color: selected ? c.accentSoft : c.surface2,
-            borderRadius: BorderRadius.circular(AnbessaRadius.lg),
-            border: Border.all(color: selected ? c.accent : (dashed ? c.borderStrong : c.border), style: BorderStyle.solid),
+            color: c.surface,
+            borderRadius: BorderRadius.circular(AnbessaRadius.md),
+            border: Border.all(color: selected ? c.text : c.border, width: selected ? 2 : 1.5),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(color: dashed ? Colors.transparent : c.surface, shape: BoxShape.circle, border: dashed ? Border.all(color: c.borderStrong) : null),
-                child: Icon(icon, size: 18, color: dashed ? c.muted : c.accentStrong),
-              ),
-              const SizedBox(height: 8),
-              Text(label, style: AnbessaType.body2.copyWith(fontWeight: FontWeight.w600, color: c.text), maxLines: 1, overflow: TextOverflow.ellipsis),
+              Text(dashed ? '+ $label' : label, style: AnbessaType.body.copyWith(fontWeight: FontWeight.w700, color: dashed ? c.text2 : c.text), maxLines: 1, overflow: TextOverflow.ellipsis),
               if (sublabel != null) Text(sublabel!, style: AnbessaType.caption.copyWith(color: c.muted), maxLines: 1, overflow: TextOverflow.ellipsis),
             ],
           ),

@@ -52,18 +52,25 @@ class TripDriver {
 
 @immutable
 class TripFare {
-  const TripFare({required this.estimateMinor, this.finalMinor, this.waitingFeeMinor, this.currency = 'ETB'});
+  const TripFare({required this.estimateMinor, this.finalMinor, this.waitingFeeMinor, this.currency = 'ETB', this.promoDiscountMinor = 0, this.promoCode, int? payableMinor}) : _payableMinor = payableMinor; // ignore: prefer_initializing_formals
   /// minor units (santim)
   final int estimateMinor;
   final int? finalMinor;
   final int? waitingFeeMinor;
   final String currency;
+  /// the promo discount booked with the quote (0 = none); the driver earns on the full fare
+  final int promoDiscountMinor;
+  final String? promoCode;
+  final int? _payableMinor;
   factory TripFare.fromJson(Json j) => TripFare(
         estimateMinor: readInt(j, 'estimateMinor'), finalMinor: intOrNull(j, 'finalMinor'),
         waitingFeeMinor: intOrNull(j, 'waitingFeeMinor'), currency: str(j, 'currency', 'ETB'),
+        promoDiscountMinor: readInt(j, 'promoDiscountMinor', 0), promoCode: strOrNull(j, 'promoCode'), payableMinor: intOrNull(j, 'payableMinor'),
       );
-  /// What the rider pays: the final fare once known, else the estimate.
+  /// The fare: the final one once known, else the estimate (what the driver's earning is based on).
   int get chargedMinor => finalMinor ?? estimateMinor;
+  /// What the rider pays: the fare minus the promo discount (the server's `payableMinor`).
+  int get payableMinor => _payableMinor ?? (chargedMinor - promoDiscountMinor).clamp(0, chargedMinor);
 }
 
 @immutable
@@ -130,6 +137,7 @@ class Trip {
     required this.times,
     this.cancellation,
     this.pin,
+    this.purpose,
   });
 
   final String id;
@@ -151,6 +159,8 @@ class Trip {
   final TripCancellation? cancellation;
   /// only sent to the rider: the driver asks for it at pickup
   final String? pin;
+  /// the trip purpose or cost centre of a company ride (never sent to the driver)
+  final String? purpose;
 
   factory Trip.fromJson(Json j) {
     final billing = asJson(j['billing']);
@@ -172,6 +182,7 @@ class Trip {
       times: TripTimes.fromJson(asJson(j['times'])),
       cancellation: j['cancellation'] is Map ? TripCancellation.fromJson(asJson(j['cancellation'])) : null,
       pin: strOrNull(j, 'pin'),
+      purpose: strOrNull(j, 'purpose'),
     );
   }
 

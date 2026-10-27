@@ -1,0 +1,27 @@
+{
+  "quotes": [
+    {
+      "id": "q_0b7c4a10-0000-4000-8000-000000000001", "requestedBy": "u1", "cityId": "addis-ababa", "vehicleType": "economy",
+      "pickup": { "lat": 9.0107, "lng": 38.7613 }, "dropoff": { "lat": 8.9779, "lng": 38.7993 },
+      "pickupAddress": "Meskel Square", "dropoffAddress": "Bole International Airport",
+      "fareMinor": 26000, "waitingPerMinMinor": 200, "currency": "ETB", "distanceMeters": 7400, "durationSeconds": 1080, "approximate": false,
+      "etaToPickupSeconds": 240, "driversNearby": 3,
+      "breakdown": { "baseMinor": 8000, "distanceMinor": 14000, "timeMinor": 4000, "minimumApplied": false },
+      "fareRuleId": null, "zoneIds": [], "discountMinor": 5000, "payableMinor": 21000,
+      "promo": { "promoId": "8e2f0000-0000-4000-8000-000000000001", "code": "WELCOME50", "discountMinor": 5000, "fundedBy": "PLATFORM" },
+      "expiresAt": "2099-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "q_0b7c4a10-0000-4000-8000-000000000002", "requestedBy": "u1", "cityId": "addis-ababa", "vehicleType": "comfort",
+      "pickup": { "lat": 9.0107, "lng": 38.7613 }, "dropoff": { "lat": 8.9779, "lng": 38.7993 },
+      "pickupAddress": "Meskel Square", "dropoffAddress": "Bole International Airport",
+      "fareMinor": 34000, "waitingPerMinMinor": 300, "currency": "ETB", "distanceMeters": 7400, "durationSeconds": 1080, "approximate": false,
+      "etaToPickupSeconds": null, "driversNearby": 0,
+      "breakdown": { "baseMinor": 10000, "distanceMinor": 19000, "timeMinor": 5000, "minimumApplied": false },
+      "fareRuleId": null, "zoneIds": [], "discountMinor": 0, "payableMinor": 34000,
+      "expiresAt": "2099-01-01T00:00:00.000Z"
+    }
+  ],
+  "route": { "polyline6": "", "distanceMeters": 7400, "durationSeconds": 1080, "approximate": false },
+  "promo": { "code": "WELCOME50", "applied": true, "discountedQuotes": 1 }
+}

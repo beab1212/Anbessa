@@ -26,14 +26,13 @@ class EtaBadge extends StatelessWidget {
       padding: EdgeInsets.symmetric(horizontal: large ? 12 : 8, vertical: large ? 6 : 3),
       decoration: BoxDecoration(
         color: onDark ? c.surface : c.surface2,
-        borderRadius: BorderRadius.circular(AnbessaRadius.pill),
+        borderRadius: BorderRadius.circular(6),
         border: onDark ? null : Border.all(color: c.border),
         boxShadow: onDark ? AnbessaElevation.card(c.brightness) : null,
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (icon != null) ...[Icon(icon, size: large ? 16 : 13, color: c.accentStrong), const SizedBox(width: 4)],
           if (mins == null)
             Text('—', style: style)
           else
