@@ -14,20 +14,35 @@ export function kafkaLocationPublisher(brokers: string[], onError: (err: Error) 
   const kafka = new Kafka({ clientId: "realtime-gateway", brokers, logLevel: logLevel.WARN });
   const producer: Producer = kafka.producer({ allowAutoTopicCreation: true });
   let connected = false;
+  let stopping = false;
+  let retry: NodeJS.Timeout | undefined;
   let published = 0;
   let dropped = 0;
 
-  const connect = () =>
+  // Keep trying in the background: at start, and again after any disconnect (a broker restart
+  // used to leave the producer down for good, every later ping counted as dropped).
+  const connect = (): void => {
+    if (stopping || retry) return;
     producer.connect().then(
       () => void (connected = true),
       (err: Error) => {
         onError(err);
-        setTimeout(connect, 5000); // keep trying in the background
+        retry = setTimeout(() => {
+          retry = undefined;
+          connect();
+        }, 5000);
       },
     );
-  void connect();
+  };
+  connect();
   producer.on(producer.events.DISCONNECT, () => {
     connected = false;
+    if (!stopping) {
+      retry = setTimeout(() => {
+        retry = undefined;
+        connect();
+      }, 1000);
+    }
   });
 
   return {
@@ -46,6 +61,8 @@ export function kafkaLocationPublisher(brokers: string[], onError: (err: Error) 
     },
     stats: () => ({ published, dropped }),
     stop: async () => {
+      stopping = true;
+      if (retry) clearTimeout(retry);
       if (connected) await producer.disconnect();
     },
   };

@@ -21,10 +21,11 @@ Guarding (comment: "a failure is logged and counted, and never reaches the socke
 | Situation | Behaviour |
 |---|---|
 | Producer not connected yet | `publish()` increments `dropped` and returns; nothing is buffered |
-| Initial connect fails | `onError` logs `driver.location publish failed`, retried every 5 s in the background |
+| Connect fails (at start or after a disconnect) | `onError` logs `driver.location publish failed`, retried every 5 s in the background |
 | `send()` rejects | `dropped++`, logged with the same message |
 | `send()` resolves | `published++` |
-| `DISCONNECT` event | `connected = false`; every later ping is counted as dropped. The code restarts `connect()` only after a failed connect, not after a `DISCONNECT` event |
+| `DISCONNECT` event | `connected = false` (pings are counted as dropped meanwhile); `connect()` is tried again 1 s later, then every 5 s while it fails |
+| `stop()` | cancels any pending retry, then disconnects the producer if connected |
 | `KAFKA_BROKERS` unset | `noopPublisher`: nothing published, counters stay 0 |
 
 The counters are exposed on `GET /health/ready` as `kafka: { published, dropped }`.

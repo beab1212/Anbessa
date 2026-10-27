@@ -87,12 +87,23 @@ class ShiftController extends Notifier<ShiftState> {
         state = state.copyWith(clearSession: true, endedReason: reason);
         _stopStreaming();
       }
-    }, fireImmediately: true);
+    });
     // every 60 s while online, confirm the session is still open (forced offline, connection lost)
     final poll = Timer.periodic(const Duration(seconds: 60), (_) {
       if (state.online) ref.read(driverHomeProvider.notifier).refresh();
     });
     ref.onDispose(poll.cancel);
+    // The home may already be loaded (the listener above only sees later changes): start from
+    // its open session. `state` can't be read or written until build() returns, so streaming
+    // starts just after.
+    final home = ref.read(driverHomeProvider).value;
+    final open = home?.session;
+    if (open != null && open.isOpen) {
+      Future.microtask(() {
+        if (ref.mounted && state.online) _startStreaming();
+      });
+      return ShiftState(session: open, vehicle: home!.allVehicles.where((v) => v.id == open.vehicleId).firstOrNull);
+    }
     return const ShiftState();
   }
 

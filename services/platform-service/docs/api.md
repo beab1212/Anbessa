@@ -174,7 +174,7 @@ Errors: `400` (`endsAt` not after `startsAt`), `404` (PUT or archive on an unkno
 
 ### `GET /api/platform/system`
 
-Query `refresh` (coerced boolean, default `false`). Header `cache-control: no-store`. Response:
+Query `refresh` (`true` / `false` / `1` / `0`, default `false`; anything else is `400 validation_error`). Header `cache-control: no-store`. Response:
 
 ```ts
 {
@@ -187,7 +187,7 @@ Query `refresh` (coerced boolean, default `false`). Header `cache-control: no-st
 }
 ```
 
-Note that `refresh` uses `z.coerce.boolean()`, so any non-empty value, including `refresh=false`, counts as true.
+`refresh` is parsed by `queryFlag` in `src/http/routes.ts`: only `"true"` or `"1"` forces a fresh check; `refresh=false` uses the cache (fixed 2026-10-27: it used `z.coerce.boolean()`, which read `"false"` as true).
 
 ### `GET /internal/settings/snapshot`
 
@@ -202,6 +202,7 @@ From `src/middlewares/error-handler.ts`. Body shape `{ error, message }`.
 | `AppError` | its status | its code (`bad_request`, `invalid_value`, `not_found`, `conflict`, `change_pending`, `not_pending`, `expired`, `maker_is_checker`, `forbidden`, `unauthorized`, `dependency_unavailable`) |
 | Missing token | 401 | `unauthorized` |
 | Bad or expired token (`TokenError`) | 401 | the token error code |
+| Token check unavailable (`TokenCheckUnavailable`: Redis deny-list / permission-version lookup failed) | 503 | `auth_unavailable`, with `retry-after: 5`; logged warn `token check unavailable (Redis)` |
 | Missing permission (`AuthorizationError`) | 403 | `forbidden` |
 | zod validation | 400 | `validation_error`, plus `issues: [{ path, message }]` |
 | Other Fastify 4xx (e.g. body too large, rate limit) | that status | Fastify's code |

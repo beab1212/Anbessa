@@ -1,11 +1,12 @@
 import type { Socket } from "socket.io";
 import type { Redis } from "ioredis";
-import { createTokenVerifier } from "@ride-app/shared-authz";
+import { createTokenVerifier, TokenError } from "@ride-app/shared-authz";
+import type { Logger } from "@ride-app/shared-utils";
 import { config } from "../config/index.js";
 
 // Auth happens once at handshake, not on every message — re-verifying a JWT on
 // every location ping would add latency to a high-frequency hot path.
-export function createSocketAuth(redis: Redis) {
+export function createSocketAuth(redis: Redis, logger: Logger) {
   const verify = createTokenVerifier({
     issuer: config.AUTH_ISSUER,
     jwksUrl: config.AUTH_JWKS_URL,
@@ -25,8 +26,14 @@ export function createSocketAuth(redis: Redis) {
       socket.data.userId = principal.userId;
       socket.data.principal = principal;
       next();
-    } catch {
-      next(new Error("unauthorized"));
+    } catch (err) {
+      // "unauthorized: <reason>" means the token itself was refused (the app refreshes it, and
+      // signs out after repeated refusals). Anything else (Redis or the JWKS down) is
+      // "unavailable": the app just retries.
+      if (err instanceof TokenError) return next(new Error(`unauthorized: ${err.code}`));
+      if (err instanceof Error && err.message === "missing token") return next(new Error("unauthorized: missing_token"));
+      logger.warn({ err }, "socket auth: token check unavailable");
+      next(new Error("unavailable"));
     }
   };
 }

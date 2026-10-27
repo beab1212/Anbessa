@@ -2,7 +2,7 @@
 // JWT (Auth.md §10). Signature against the JWKS, pinned algorithm, issuer,
 // audience, expiry, then optional denylist and permission-version checks.
 
-import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from "jose";
+import { createRemoteJWKSet, errors, jwtVerify, type JWTVerifyGetKey } from "jose";
 import { parseRoleClaims, type Principal } from "./principal.js";
 import type { Audience } from "./roles.js";
 
@@ -27,6 +27,25 @@ export class TokenError extends Error {
   }
 }
 
+/**
+ * The suspension / permission-version lookup failed (Redis down). The token is still refused,
+ * but as a temporary failure (503), so clients retry instead of treating it as signed out.
+ */
+export class TokenCheckUnavailable extends Error {
+  readonly statusCode = 503;
+  readonly code = "auth_unavailable";
+  constructor(readonly cause: unknown) {
+    super("cannot check the token right now, try again");
+  }
+}
+
+/** A failure to get the JWKS, as opposed to a token that fails verification. */
+function keySetUnreachable(err: unknown): boolean {
+  if (!(err instanceof errors.JOSEError)) return true; // fetch threw (connection refused, DNS…)
+  if (err instanceof errors.JWKSTimeout || err instanceof errors.JWKSInvalid) return true;
+  return /JSON Web Key Set HTTP response/.test(err.message); // a non-200 from the JWKS endpoint
+}
+
 export function createTokenVerifier(options: VerifierOptions) {
   const keySet = options.keySet ?? (options.jwksUrl ? createRemoteJWKSet(new URL(options.jwksUrl)) : undefined);
   if (!keySet) throw new Error("createTokenVerifier needs jwksUrl or keySet");
@@ -42,17 +61,27 @@ export function createTokenVerifier(options: VerifierOptions) {
         clockTolerance: options.clockToleranceSeconds ?? 30,
         requiredClaims: ["sub", "exp", "iat"],
       }));
-    } catch {
+    } catch (err) {
+      // The key set couldn't be fetched (auth-service down or slow): that says nothing about the
+      // token, so it's a temporary failure, not a reason to sign the person out.
+      if (keySetUnreachable(err)) throw new TokenCheckUnavailable(err);
       throw new TokenError("invalid_token", "invalid or expired access token");
     }
 
     const userId = payload.sub!;
-    if (options.isDenied && (await options.isDenied(userId))) {
+    const lookup = async <T>(f: () => Promise<T>): Promise<T> => {
+      try {
+        return await f();
+      } catch (err) {
+        throw new TokenCheckUnavailable(err);
+      }
+    };
+    if (options.isDenied && (await lookup(() => options.isDenied!(userId)))) {
       throw new TokenError("token_revoked", "account suspended");
     }
     const pv = typeof payload.pv === "number" ? payload.pv : 0;
     if (options.currentPermissionVersion) {
-      const current = await options.currentPermissionVersion(userId);
+      const current = await lookup(() => options.currentPermissionVersion!(userId));
       if (current !== undefined && pv < current) throw new TokenError("token_outdated", "roles changed, refresh the token");
     }
 

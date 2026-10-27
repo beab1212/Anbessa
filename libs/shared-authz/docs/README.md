@@ -18,6 +18,7 @@ Related docs in this folder:
 flowchart LR
   JWT["Bearer JWT<br/>(Better Auth, auth-service)"] --> V["verifyAccessToken(token, audience)<br/>verify.ts"]
   V -->|TokenError 401| X1[reject]
+  V -->|"TokenCheckUnavailable 503<br/>(Redis lookup failed)"| X1
   V --> P["Principal<br/>{ userId, audience, roles[], pv, amr, actor? }"]
   P --> A["authorize / can / citiesWith<br/>authorize.ts"]
   R["current AuthzSnapshot<br/>registry.ts"] --> A
@@ -64,8 +65,10 @@ Found with `grep -r '@ride-app/shared-authz'` over `services/` and `apps/` (numb
 | `services/notification-service` | 5 | `createTokenVerifier`, `VerifyAccessToken`, `bearerToken`, `TokenError`, `AuthorizationError`, `createAuthzSync`, `fetchAuthzSnapshotFrom` (no `authorize` call) |
 | `services/pricing-service` | 5 | same as notification-service, plus `Principal` (no `authorize` call) |
 | `services/mapping-service` | 5 | `createTokenVerifier`, `VerifyAccessToken`, `bearerToken`, `TokenError`, `AuthorizationError` (no `authorize` call, no `createAuthzSync`) |
-| `services/realtime-gateway` | 4 | `createTokenVerifier`, `createAuthzSync`, `fetchAuthzSnapshotFrom`, `can`, `Principal` |
+| `services/realtime-gateway` | 4 | `createTokenVerifier`, `TokenError`, `createAuthzSync`, `fetchAuthzSnapshotFrom`, `can`, `Principal` |
 | `apps/web` | 9 | `can`, `Permission`, `Principal`, `ResourceScope`, `Audience`, `roleInfo`, `parseRoleClaims`, `setAuthzSnapshot` (loads the matrix from `GET /api/identity/authz`), `AuthzSnapshot`, `PERMISSION_GROUPS`, `PERMISSIONS`, `permissionGroup`, `RoleInfo`, `ScopeLetter`, `grantableStaffRoles` |
+
+Every service listed with `TokenError` also imports `TokenCheckUnavailable` in its `src/middlewares/error-handler.ts` (mapped to 503 `auth_unavailable`).
 
 Exports not imported anywhere outside the lib (as of this writing): `APPROVAL_PERMISSIONS`, `GRANTABLE_STAFF_ROLES`, `isRoleCode`, `isKnownRole`, `grantsOf`, `grantingAssignments`, `ROLE_LABELS`, `resetAuthzSnapshot`, `RoleClaim`. Some are used inside the lib (`grantsOf` by `authorize`, `ROLE_LABELS` by `builtInSnapshot`).
 
@@ -139,6 +142,10 @@ authorize(p, "trip:assign", { cityId: t.cityId });
 // middlewares/error-handler.ts
 if (err instanceof AuthorizationError) return reply.status(403).send({ error: "forbidden", message: err.message });
 if (err instanceof TokenError) return reply.status(401).send({ error: err.code, message: err.message });
+if (err instanceof TokenCheckUnavailable) {
+  req.log.warn({ err: err.cause }, "token check unavailable (Redis)");
+  return reply.status(503).header("retry-after", "5").send({ error: err.code, message: err.message });
+}
 ```
 
 The `deny:{userId}` and `pv:{userId}` Redis keys are written by auth-service (`services/auth-service/src/lib/signals.ts`), not by this lib.
@@ -154,4 +161,4 @@ The `deny:{userId}` and `pv:{userId}` Redis keys are written by auth-service (`s
 | [`src/sync.ts`](../src/sync.ts) | `AUTHZ_CHANNEL`, `RedisLike`, `AuthzSyncOptions`, `fetchAuthzSnapshotFrom`, `createAuthzSync`, `AuthzSync` |
 | [`src/principal.ts`](../src/principal.ts) | `RoleAssignment`, `Principal`, `RoleClaim`, `toRoleClaim`, `parseRoleClaims`, `hasRole` |
 | [`src/authorize.ts`](../src/authorize.ts) | `ResourceScope`, `AuthorizationError`, `grantingAssignments`, `can`, `authorize`, `citiesWith` |
-| [`src/verify.ts`](../src/verify.ts) | `VerifierOptions`, `TokenError`, `createTokenVerifier`, `VerifyAccessToken`, `bearerToken` |
+| [`src/verify.ts`](../src/verify.ts) | `VerifierOptions`, `TokenError`, `TokenCheckUnavailable`, `createTokenVerifier`, `VerifyAccessToken`, `bearerToken` |

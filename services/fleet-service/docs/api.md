@@ -32,11 +32,12 @@ All errors are JSON `{ "error": "<code>", "message": "<text>" }` (`src/middlewar
 | 401 | `token_outdated` | Token's permission version is older than Redis `pv:{userId}`: refresh the token |
 | 403 | `forbidden` | Missing permission for this resource (`AuthorizationError`, message `missing permission <perm> for this resource`) or an explicit ownership refusal |
 | 404 | `not_found` | `"<thing> not found"`, or unknown route |
-| 409 | `conflict` or a specific code | State conflicts |
+| 409 | `conflict` or a specific code | State conflicts; `user_not_found` when auth-service has no account for the driver (approve, suspend, reinstate) |
 | 413 | `FST_ERR_CTP_BODY_TOO_LARGE` | Body over 32 KB (10 MB on the local upload route) |
 | 422 | `idempotency_mismatch` | `Idempotency-Key` reused with a different request |
 | 429 | (from `@fastify/rate-limit`) | More than 300 requests per minute from one IP |
-| 503 | `dependency_unavailable` | auth-service unreachable, timed out (3 s) or answered non-2xx/404 |
+| 503 | `dependency_unavailable` | auth-service unreachable, timed out (3 s) or answered non-2xx other than 404 |
+| 503 | `auth_unavailable` | Redis deny-list / permission-version lookup failed (`TokenCheckUnavailable`); sent with `retry-after: 5`, logged warn `token check unavailable (Redis)`. The token is refused, retry later |
 | 500 | `internal_error` | Anything unexpected (logged) |
 
 Request bodies are parsed before the token is checked on most routes, so an invalid body returns 400 even without a token.
@@ -157,7 +158,7 @@ Request bodies are parsed before the token is checked on most routes, so an inva
 | Who | `driver:verify @ CITY` **and** `driver:activate @ CITY` |
 | Body | none |
 | 200 | Driver (masked), status `ACTIVE` |
-| Errors | 404 · 403 · 409 `invalid_state` (not `PENDING_REVIEW`) · 409 `documents_not_approved` · 503 `dependency_unavailable` (auth-service couldn't add `DRIVER`; nothing changed) |
+| Errors | 404 · 403 · 409 `invalid_state` (not `PENDING_REVIEW`) · 409 `documents_not_approved` · 503 `dependency_unavailable` (auth-service couldn't add `DRIVER`; nothing changed) · 409 `user_not_found` (auth-service has no account for this driver; nothing changed) |
 | Events | `driver.activated`, `audit.recorded` (`driver:activate`) |
 | Notes | Calls auth-service `POST /internal/drivers/:userId/role {active:true}` inside the transaction (15 s transaction timeout) |
 
@@ -178,9 +179,9 @@ Request bodies are parsed before the token is checked on most routes, so an inva
 | Who | `driver:suspend @ CITY` (onboarding or safety officer) |
 | Body | `reason` string 10–500 |
 | 200 | Driver (masked), status `SUSPENDED`, `statusReason: "SAFETY"`. Already suspended → current driver, nothing written |
-| Errors | 404 · 403 |
+| Errors | 404 · 403 · 503 `dependency_unavailable` (auth-service couldn't remove `DRIVER`; nothing changed, retry) · 409 `user_not_found` (auth-service has no such user) |
 | Events | `driver.offline` (`SUSPENDED`, if online), `driver.suspended`, `audit.recorded` (`driver:suspend`) |
-| Notes | Does not remove the `DRIVER` role in auth-service |
+| Notes | Calls auth-service `POST /internal/drivers/:userId/role {active:false}` inside the transaction (15 s transaction timeout), so the `DRIVER` role goes and open tokens become `token_outdated` |
 
 ### `POST /api/fleet/drivers/:userId/reinstate`
 
@@ -189,8 +190,9 @@ Request bodies are parsed before the token is checked on most routes, so an inva
 | Who | `driver:reinstate @ CITY` |
 | Body | `reason` string 10–500 |
 | 200 | Driver (masked), status `ACTIVE` |
-| Errors | 404 · 403 · 409 `invalid_state` (not suspended) · 409 `documents_not_approved` |
+| Errors | 404 · 403 · 409 `invalid_state` (not suspended) · 409 `documents_not_approved` · 503 `dependency_unavailable` (auth-service couldn't add `DRIVER`; nothing changed) · 409 `user_not_found` |
 | Events | `driver.reinstated`, `audit.recorded` (`driver:reinstate`) |
+| Notes | Calls auth-service `POST /internal/drivers/:userId/role {active:true}` inside the transaction (15 s transaction timeout) |
 
 ### `GET /api/fleet/stats`
 

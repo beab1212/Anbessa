@@ -51,6 +51,7 @@ Codes found in the code, by status. A route section lists the ones specific to i
 | 409 | `active_trip_exists`, `driver_busy`, `driver_unavailable`, `offer_closed`, `position_unknown`, `too_far_from_pickup`, `not_arrived`, `too_early_for_no_show`, `rating_closed`, `already_rated`, `trip_ended`, `too_many_places`, `request_in_progress` | see routes |
 | 422 | `idempotency_mismatch` | same key, different request |
 | 429 | (from `@fastify/rate-limit`, passed through the error handler's 4xx branch) | rate limit |
+| 503 | `auth_unavailable` | Redis deny-list / permission-version lookup failed (`TokenCheckUnavailable`); sent with `retry-after: 5`, logged warn `token check unavailable (Redis)`. The token is refused, retry later |
 | 500 | `internal_error` | anything unhandled (logged) |
 | 503 | `dependency_unavailable` | pricing-service or location-service could not be reached when needed |
 | 503 | `maintenance` | `maintenance.newTrips` is on; the message is `maintenance.message` |
@@ -105,7 +106,7 @@ Request a trip. **Idempotent.** `request()` in `src/trips/service.ts`.
 
 | Field | Type | Rules |
 |---|---|---|
-| `quoteId` | string 1–100 | must exist, be made by the caller (`requestedBy`), and not be expired |
+| `quoteId` | string 1–100 | must exist, be made by the caller (`requestedBy`), not be expired, and not already be on a trip that wasn't cancelled (one trip per quote; re-booking after a cancellation is allowed) |
 | `paymentMethod` | `CASH` \| `MOBILE_MONEY` \| `CARD` \| `CORPORATE` | `CORPORATE` exactly when `billingOrgId` is given |
 | `riderUserId` | uuid, optional | someone else rides (booking on behalf). Not checked against auth-service |
 | `billingOrgId` | uuid, optional | the company account to bill |
@@ -123,7 +124,7 @@ Then, in this order, the live settings: `maintenance.newTrips` (→ `503 mainten
 
 Response: `201` [trip](#the-trip-object) with `status: requested` (and `pin` for the caller). Matching starts right after.
 
-Errors: `400 invalid_quote`, `400 quote_expired`, `400 bad_request` (corporate/billing mismatch, staff without `riderUserId`, on-behalf without `billingOrgId`), `403 forbidden`, `403 feature_disabled`, `403 payment_method_unavailable`, `409 active_trip_exists` (the rider already has an active trip), `503 dependency_unavailable` (pricing-service), `503 maintenance`.
+Errors: `400 invalid_quote`, `400 quote_expired`, `400 quote_used` ("this quote was already used, get a new one"), `400 bad_request` (corporate/billing mismatch, staff without `riderUserId`, on-behalf without `billingOrgId`), `403 forbidden`, `403 feature_disabled`, `403 payment_method_unavailable`, `409 active_trip_exists` (the rider already has an active trip), `503 dependency_unavailable` (pricing-service), `503 maintenance`.
 
 ## Offers and assignment
 

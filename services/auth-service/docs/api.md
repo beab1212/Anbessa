@@ -25,6 +25,7 @@ No WebSocket or socket events.
 | 404 | `not_found` | Unknown resource or route |
 | 409 | `conflict`, `not_pending`, `expired`, `change_pending` | State conflicts |
 | 4xx | Fastify's code | Other client errors from Fastify (e.g. body too large, rate limit) |
+| 503 | `auth_unavailable` | `TokenCheckUnavailable` is mapped (503, `retry-after: 5`) but can't occur here: auth-service's own `SecuritySignals` lookups catch Redis errors and fall back (not denied, version unknown) |
 | 500 | `internal_error` | Anything else (logged with the request id, details never returned) |
 
 Better Auth routes answer with **Better Auth's own error bodies**, except the 404 from the allowlist and the 400 for `updatePhoneNumber`, which use the format above.

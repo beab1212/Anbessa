@@ -15,7 +15,7 @@ Source: `src/config/index.ts` (Zod, parsed at import), template `.env.example`. 
 
 `.env.example` also contains `LOG_LEVEL`, but the gateway's config schema doesn't read it and `createLogger` (`libs/shared-utils/src/logger.ts`) derives the level from `NODE_ENV` only, so **`LOG_LEVEL` has no effect** in this service.
 
-Not configurable (constants in code): minimum ping interval 1000 ms, deny recheck 60 s, max message size 16 KiB, Kafka reconnect 5 s, `acks: 1`, ping plausibility limits (`libs/shared-location/src/geo.ts`).
+Not configurable (constants in code): minimum ping interval 1000 ms, deny recheck 60 s, max message size 16 KiB, Kafka reconnect (1 s after a disconnect, then every 5 s while it fails), `acks: 1`, ping plausibility limits (`libs/shared-location/src/geo.ts`).
 
 ## Secrets
 

@@ -156,8 +156,13 @@ class ApiClient {
     } on DioException catch (second) {
       if (second.response?.statusCode == 401) await _tokens.onSessionEnded(_mapped(second).error as AppError);
       h.next(second);
+    } on AppError catch (err) {
+      // The refresh itself failed. A refused session is ended by the token source; a network
+      // error or a server hiccup is not a sign-out: surface it and let the caller retry.
+      if (err.isAuth || err.isForbidden) await _tokens.onSessionEnded(err);
+      h.next(e.copyWith(error: err));
     } catch (_) {
-      await _tokens.onSessionEnded(AppError(status: 401, code: ErrorCodes.sessionEnded, message: 'Your session has ended. Sign in again.'));
+      // an unexpected failure (a bug, a corrupt token) is not proof the session ended either
       h.next(e);
     }
   }

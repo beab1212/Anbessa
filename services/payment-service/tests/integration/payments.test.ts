@@ -174,6 +174,10 @@ describe("declined charges (workflow 08 step 6)", () => {
 describe("top-ups (workflow 09 B–C)", () => {
   it("mobile money: the provider's callback credits the balance; a retried request is the same top-up", async () => {
     const d = await h.driver();
+    // open=false only reads: no account is created (z.coerce.boolean once read "false" as true)
+    const peek = await h.ok<{ accountId: string | null }>(h.req("GET", "/api/payments/balances/me?open=false", d));
+    expect(peek.accountId ?? null).toBeNull();
+    expect(await h.c.db.beneficiary.count({ where: { ownerId: d.id } })).toBe(0);
     const opened = await h.ok<{ accountId: string; balanceMinor: number; referenceCode: string }>(h.req("GET", "/api/payments/balances/me?open=true", d));
     expect(opened).toMatchObject({ balanceMinor: 0 });
     const headers = { "idempotency-key": `topup-${uuid()}` };

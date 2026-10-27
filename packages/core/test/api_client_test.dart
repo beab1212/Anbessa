@@ -34,8 +34,11 @@ class _Tokens implements AccessTokenSource {
   String current = 'jwt-1';
   int refreshes = 0;
   bool ended = false;
+  /// thrown by the next forced refresh
+  AppError? refreshFails;
   @override
   Future<String?> accessToken({bool force = false}) async {
+    if (force && refreshFails != null) throw refreshFails!;
     if (force) current = 'jwt-${++refreshes + 1}';
     return current;
   }
@@ -79,6 +82,13 @@ void main() {
     adapter.script.addAll([(_) => _FakeAdapter.json(401, {'error': 'token_revoked'}), (_) => _FakeAdapter.json(401, {'error': 'token_revoked'})]);
     await expectLater(client.getJson('/api/trips/active'), throwsA(isA<AppError>().having((e) => e.code, 'code', 'token_revoked')));
     expect(tokens.ended, isTrue);
+  });
+
+  test('a refresh that fails for lack of network surfaces the error and keeps the session', () async {
+    tokens.refreshFails = const AppError(status: 0, code: ErrorCodes.network, message: 'offline', retryable: true);
+    adapter.script.add((_) => _FakeAdapter.json(401, {'error': 'invalid_token', 'message': 'expired'}));
+    await expectLater(client.getJson('/api/trips/active'), throwsA(isA<AppError>().having((e) => e.code, 'code', ErrorCodes.network)));
+    expect(tokens.ended, isFalse);
   });
 
   test('idempotent POSTs get a key and are retried on transient failures; plain POSTs are not', () async {

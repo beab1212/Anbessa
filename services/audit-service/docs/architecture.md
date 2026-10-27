@@ -70,7 +70,7 @@ No DLQ.
 | Concern | What the code does |
 |---|---|
 | Who can read | Access token for audience `ride-admin` (staff surface), verified against auth-service's JWKS: ES256, issuer, `sub`/`exp`/`iat`, 30 s tolerance (`libs/shared-authz/src/verify.ts`). Then permission `audit_log:read`; in the built-in matrix `SUPER_ADMIN` and `AUDITOR` hold it with global scope (`libs/shared-authz/src/matrix.ts`). The live matrix from auth-service can change this |
-| Suspended users, changed roles | With `REDIS_URL` set: `deny:{userId}` present → 401 `token_revoked`; token `pv` lower than `pv:{userId}` → 401 `token_outdated`. Without Redis these checks are skipped |
+| Suspended users, changed roles | With `REDIS_URL` set: `deny:{userId}` present → 401 `token_revoked`; token `pv` lower than `pv:{userId}` → 401 `token_outdated`; a failed Redis lookup → 503 `auth_unavailable`. Without Redis these checks are skipped |
 | Writes | None over HTTP. Kong routes only `GET /api/audit` |
 | Cache | Responses carry `cache-control: no-store` |
 | Rate limiting | 300/min/IP in the service (in memory), 60/min in Kong |

@@ -645,8 +645,11 @@ export function createFleetService(deps: FleetDeps) {
         { topic: "driver.suspended", key: userId, payload: { driverId: userId, cityId: d.cityId, reason, byUserId: p.userId } },
         audit({ actorId: p.userId, action: "driver:suspend", resource: { type: "driver", id: userId }, outcome: "EXECUTED", reason }),
       );
+      // the DRIVER role goes too (auth bumps the permission version, so open tokens are refreshed);
+      // inside the transaction like approval: if auth-service can't, nothing changes and staff retry
+      await auth.setDriverRole(userId, false);
       return driverView(row, { fullLicence: false });
-    });
+    }, { timeout: 15_000 });
   }
 
   async function reinstateDriver(p: Principal, userId: string, reason: string) {
@@ -662,8 +665,10 @@ export function createFleetService(deps: FleetDeps) {
         { topic: "driver.reinstated", key: userId, payload: { driverId: userId, cityId: d.cityId, byUserId: p.userId } },
         audit({ actorId: p.userId, action: "driver:reinstate", resource: { type: "driver", id: userId }, outcome: "EXECUTED", reason }),
       );
+      // ACTIVE means holding the DRIVER role, whatever state the suspension started from
+      await auth.setDriverRole(userId, true);
       return driverView(row, { fullLicence: false });
-    });
+    }, { timeout: 15_000 });
   }
 
   // ── driving sessions (workflow 04, parts A and D) ──────────────────────────

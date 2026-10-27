@@ -101,9 +101,11 @@ Then the client calls `tokens.accessToken(force: true)` and replays the request 
 | replay succeeds | its response is returned to the caller |
 | replay fails with 401 | `tokens.onSessionEnded(<mapped error>)`, then the error continues |
 | replay fails otherwise | the error continues |
-| the refresh call itself throws (anything that is not a `DioException`) | `tokens.onSessionEnded(AppError(401, session_ended))`, then the original error continues |
+| the refresh throws an `AppError` that `isAuth` or `isForbidden` | `tokens.onSessionEnded(<that error>)`, then the original error continues carrying it |
+| the refresh throws any other `AppError` (network, 5xx) | the session is **not** ended; the original error continues carrying that `AppError`, so the caller sees e.g. `network` and can retry |
+| the refresh throws something else (a bug, a corrupt token) | the session is not ended; the original error continues |
 
-Note on the last row: `TokenManager` rethrows network errors from the refresh, so a network failure during a refresh that follows a 401 also reaches `onSessionEnded` (see `ApiClient._onAuthError`, the final `catch (_)`).
+A network failure during a refresh that follows a 401 therefore no longer signs the person out (fixed 2026-10-27; see `ApiClient._onAuthError`). Test: "a refresh that fails for lack of network surfaces the error and keeps the session" in `test/api_client_test.dart`.
 
 ### 3. Idempotency
 

@@ -353,7 +353,7 @@ const cities = citiesWith(p, "balance:read");
 
 ## verify.ts
 
-### `VerifierOptions`, `createTokenVerifier`, `VerifyAccessToken`, `TokenError`, `bearerToken`
+### `VerifierOptions`, `createTokenVerifier`, `VerifyAccessToken`, `TokenError`, `TokenCheckUnavailable`, `bearerToken`
 
 Documented in [tokens.md](tokens.md#createtokenverifieroptions). Signatures:
 
@@ -370,5 +370,6 @@ interface VerifierOptions {
 function createTokenVerifier(options: VerifierOptions): (token: string, audience: Audience) => Promise<Principal>;
 type VerifyAccessToken = ReturnType<typeof createTokenVerifier>;
 class TokenError extends Error { statusCode: 401; code: "invalid_token" | "token_revoked" | "token_outdated" }
+class TokenCheckUnavailable extends Error { statusCode: 503; code: "auth_unavailable"; cause: unknown } // isDenied / currentPermissionVersion threw
 function bearerToken(header: string | undefined): string | undefined;
 ```

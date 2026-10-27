@@ -17,7 +17,7 @@ For request and response shapes, see each service's code and [docs/api/README.md
 
 | Method | Path | Token | Used by |
 |---|---|---|---|
-| GET | `/api/admin-auth/token` | cookie | `lib/api.ts` `accessToken("staff")`; every staff call, session start |
+| GET | `/api/admin-auth/token` | cookie | `lib/api.ts` `accessToken("staff")`; every staff call, session start (not on `/t/...` public pages) |
 | POST | `/api/admin-auth/sign-in/email` | cookie | pages/SignIn.tsx `StaffSignIn`, dev/DevSignIn.tsx |
 | POST | `/api/admin-auth/two-factor/verify-totp` | cookie | `StaffSignIn`, staff/Setup.tsx, DevSignIn |
 | POST | `/api/admin-auth/change-password` | cookie | staff/Setup.tsx |
@@ -28,7 +28,7 @@ For request and response shapes, see each service's code and [docs/api/README.md
 
 | Method | Path | Token | Used by |
 |---|---|---|---|
-| GET | `/api/auth/token` | cookie | `accessToken("partner")`; every partner call, session start |
+| GET | `/api/auth/token` | cookie | `accessToken("partner")`; every partner call, session start (not on `/t/...` public pages) |
 | POST | `/api/auth/phone-number/send-otp` | cookie | `PartnerSignIn`, DevSignIn |
 | POST | `/api/auth/phone-number/verify` | cookie | `PartnerSignIn`, DevSignIn |
 | POST | `/api/auth/sign-out` | cookie | `signOut("partner")` |

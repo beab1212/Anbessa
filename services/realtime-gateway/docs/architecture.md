@@ -21,7 +21,7 @@ The ping logic (validation, Redis layout) is in `libs/shared-location` and share
 4. A plain `node:http` server answers `/health`, `/health/live`, `/health/ready`, 404 otherwise. Socket.io attaches to the same server (default path `/socket.io/`).
 5. `new Server(httpServer, { cors: { origin: true }, maxHttpBufferSize: 16 * 1024 })`. Transports are the Socket.io defaults (polling and websocket); the phone app uses websocket only.
 6. `io.adapter(createAdapter(pubClient, subClient))` (`@socket.io/redis-adapter`, default key prefix `socket.io`).
-7. `io.use(createSocketAuth(pubClient))`.
+7. `io.use(createSocketAuth(pubClient, logger))` (the logger is used for the `unavailable` warning).
 8. If `INTERNAL_SERVICE_TOKEN` is set: `createAuthzSync(...).start()` (permission matrix from auth-service, `authz:changed` channel, 30 s poll). Otherwise the built-in matrix (`libs/shared-authz/src/matrix.ts`) applies, warning logged.
 9. `httpServer.listen(PORT)`.
 
@@ -33,12 +33,19 @@ Runs once per connection. Not repeated per event ("re-verifying a JWT on every l
 
 | Step | Rule | On failure |
 |---|---|---|
-| Token present | `socket.handshake.auth.token` is a non-empty string | refused |
-| Signature and claims | `createTokenVerifier` (`libs/shared-authz/src/verify.ts`): ES256, `iss = AUTH_ISSUER`, **`aud = ride-app`**, keys from `AUTH_JWKS_URL` (jose remote JWKS), `sub`/`exp`/`iat` required, 30 s clock tolerance | refused |
-| Not suspended | `EXISTS deny:{userId}` = 0 | refused |
-| Permission version | `GET pv:{userId}`; refused if the token's `pv` claim is lower | refused |
+| Token present | `socket.handshake.auth.token` is a non-empty string | `unauthorized: missing_token` |
+| Signature and claims | `createTokenVerifier` (`libs/shared-authz/src/verify.ts`): ES256, `iss = AUTH_ISSUER`, **`aud = ride-app`**, keys from `AUTH_JWKS_URL` (jose remote JWKS), `sub`/`exp`/`iat` required, 30 s clock tolerance | `unauthorized: invalid_token`; `unavailable` when the JWKS can't be fetched |
+| Not suspended | `EXISTS deny:{userId}` = 0 | `unauthorized: token_revoked`; a Redis error → `unavailable` |
+| Permission version | `GET pv:{userId}`; refused if the token's `pv` claim is lower | `unauthorized: token_outdated`; a Redis error → `unavailable` |
 
-Every refusal reaches the client as the same `connect_error` with message **`unauthorized`**: the middleware catches all errors (including Redis errors from the deny/pv lookups) and calls `next(new Error("unauthorized"))`. The specific reason (`invalid_token`, `token_revoked`, `token_outdated`, missing token, Redis down) is not sent and not logged.
+A refusal reaches the client as a `connect_error` whose message says which kind it is:
+
+| Message | When | Logged |
+|---|---|---|
+| `unauthorized: <code>`, code = `invalid_token` \| `token_revoked` \| `token_outdated` \| `missing_token` | the token itself was refused (a `TokenError`, or no token) | no |
+| `unavailable` | anything else, in practice `TokenCheckUnavailable` (the Redis deny/pv lookup failed) | warn `socket auth: token check unavailable` |
+
+The phone app counts only messages containing `unauthorized` toward its 3-refusal sign-out (`apps/phone-app/lib/core/realtime/realtime_hub.dart`), so a Redis outage no longer signs people out; the app just keeps reconnecting. An unreachable JWKS (auth-service down, timeout, non-200) is `unavailable` too: the verifier tells a key-set fetch failure apart from a token that fails verification (`keySetUnreachable` in `libs/shared-authz/src/verify.ts`).
 
 On success: `socket.data.userId = principal.userId` and `socket.data.principal = principal` (roles parsed from the token for audience `ride-app`).
 
@@ -122,7 +129,7 @@ The event list is in [api.md](api.md#server--client).
 | `trip:{tripId}` | **not** restored by the server; the client must send `trip:subscribe` again. The app's `RealtimeHub` re-subscribes every remembered trip on `connect` (`apps/phone-app/lib/core/realtime/realtime_hub.dart`) |
 | Events while disconnected | lost (no buffering, no replay). The rider app polls `GET /api/locations/trips/:id/driver` every 5 s while not joined |
 | Ping rate limit | resets with the new socket (`lastPingAt = 0`) |
-| Token | checked again at every reconnect. The app refreshes the token before each reconnect attempt, force-refreshes after an `unauthorized`, and signs out after 3 refusals in a row |
+| Token | checked again at every reconnect. The app refreshes the token before each reconnect attempt, force-refreshes after an `unauthorized: …`, and signs out after 3 such refusals in a row. `unavailable` refusals don't count |
 | App backoff | reconnection delay 1 s growing to 16 s max (`setReconnectionDelay(1000)`, `setReconnectionDelayMax(16000)`) |
 | Gateway pod restart | sockets on that pod drop; the driver's next ping on another pod continues where Redis left off (state is all in Redis) |
 

@@ -64,7 +64,7 @@ Needs Docker and a running Postgres (`make infra-up`).
 
 | Area | Cases |
 |---|---|
-| Request | the quote's road line on the trip; PIN only for the rider; idempotency (same key → same trip, different body → refused); one active trip per rider; expired and foreign quotes; call center and coordinator bookings on behalf; only company employees may bill it |
+| Request | the quote's road line on the trip; PIN only for the rider; idempotency (same key → same trip, different body → refused); one active trip per rider; expired and foreign quotes; a quote books one trip (`quote_used`), and again after a cancellation; call center and coordinator bookings on behalf; only company employees may bill it |
 | Matching | nearest by driving time, then accept; decline and expiry move on; cash filter; blocked balances; payment methods turned off; ranking by distance when mapping is down; `NO_DRIVER_FOUND` after 120 s, free; rider cancel beats a late accept; one active trip per driver even through a dispatcher; dispatchers assign in their city only |
 | Execution | en route → arrive (geofence) → start → complete with paid waiting and the `trip.completed` payload; `FAR_FROM_DROPOFF` (staff only); ratings once, after completion; tags, read-back and averages (shown from 3) |
 | Cancellations | rider free window then fee; no-show only after 5 min at the pickup; driver and staff free; no cancelling a started trip; strangers get 404 |
@@ -119,6 +119,7 @@ Messages worth knowing:
 | `parties: rider\|driver\|vehicle unavailable` | warn | auth/fleet call failed; `null` returned |
 | `settings refresh failed; keeping the current values` | warn | platform-service unreachable |
 | `permission matrix refresh failed; keeping the current one` | warn | auth-service unreachable |
+| `token check unavailable (Redis)` | warn | Redis deny-list / permission-version lookup failed; the request got `503 auth_unavailable` |
 | `settings updated` / `permission matrix updated` | info | a new snapshot version was loaded |
 
 ## Failure modes
@@ -126,7 +127,7 @@ Messages worth knowing:
 | Failure | Effect | Diagnose |
 |---|---|---|
 | **Postgres down** | every route fails (`500`); `/health/ready` → `503`; matcher steps fail | readiness probe, logs |
-| **Redis down** | token checks (`deny:`/`pv:` lookups) throw, so authenticated routes answer `500`; matching stops; pushes are lost; settings/authz updates fall back to polling | `matcher tick failed`, `unhandled error` in logs |
+| **Redis down** | token checks (`deny:`/`pv:` lookups) throw, so authenticated routes answer `503 auth_unavailable` (`retry-after: 5`); matching stops; pushes are lost; settings/authz updates fall back to polling | `matcher tick failed`, warn `token check unavailable (Redis)`, `unhandled error` in logs |
 | **Redis data lost** (flush, failover without persistence) | trips in `requested` lose their `match:due` entry and are never matched or timed out; nothing re-enqueues them (no sweeper found in code). The rider sees "searching" until they cancel (free) | `ZSCORE match:due <tripId>` is nil for a `requested` trip |
 | **Crash between request commit and `matching.start()`** | same as above for that one trip | same |
 | **Kafka down or `KAFKA_BROKERS` unset** | trip state is correct, but events wait in `outbox`; payment-service doesn't settle; location-service doesn't mark matched drivers busy (they keep getting offers, accepting fails with `driver_busy`) | `GET /internal/ops/outbox`; relay warnings |

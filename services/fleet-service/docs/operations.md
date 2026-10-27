@@ -19,7 +19,7 @@ Or use the repo-wide infrastructure: `make infra-up` (Postgres, Redis, Redpanda 
 
 Things to know:
 
-- `docker-compose.dev.yml` doesn't start Redis, but `.env.example` sets `REDIS_URL=redis://localhost:6379`. If nothing listens there, every authenticated request fails (see failure modes). Either run Redis (`make infra-up`) or blank `REDIS_URL` for development.
+- `docker-compose.dev.yml` doesn't start Redis, but `.env.example` sets `REDIS_URL=redis://localhost:6379`. If nothing listens there, every authenticated request answers `503 auth_unavailable` (see failure modes). Either run Redis (`make infra-up`) or blank `REDIS_URL` for development.
 - Without auth-service on `AUTH_JWKS_URL` no token can be verified. Without it on `AUTH_INTERNAL_URL` the built-in permission matrix is used and organisation lookups / approvals fail with 503.
 - Without payment-service every driver goes online with `cashAllowed: true`; without platform-service the env/registry defaults apply.
 - With `STORAGE=local` files land in `.dev-data/uploads/` and are served by this service. The phone app and the web app can PUT to the relative URL directly (port 3008) or through Kong (`make dev-gateway`).
@@ -66,7 +66,7 @@ Integration scenarios covered:
 - Owner-driver session: `driver.online` payload, idempotent re-start, other driver refused (`not_your_vehicle`), going offline, `CASH_BLOCKED` goes online without cash, `BLOCKED` refused.
 - Plates unique after normalisation; seat ranges; registering a car without a profile.
 - Fleet cars: unverified fleet refused, other fleet's owner refused, authorisation needs `fleet_driver` membership, V7 checks, picker shows `canDrive`, beneficiary is the fleet, second driver gets `vehicle_in_use`, overview content, revoking ends the session.
-- Expiry: expired insurance suspends the car and ends the session, renewal flow, dispatcher can't suspend a driver, safety officer suspends (session ends) and reinstates.
+- Expiry: expired insurance suspends the car and ends the session, renewal flow, dispatcher can't suspend a driver, safety officer suspends (session ends, `DRIVER` role removed in auth-service) and reinstates (role added back).
 
 Not covered by tests: the Kafka consumer and relay, the S3 store, reminders, the internal routes, stats, the seed script.
 
@@ -104,6 +104,7 @@ Messages worth alerting on:
 | `document expiry job failed` | error | The hourly run threw (often the database) |
 | `idempotency purge failed` | error | Daily purge threw |
 | `payment-service unreachable at session start; …` | warn | Driver went online without a balance check |
+| `token check unavailable (Redis)` | warn | Redis deny-list / permission-version lookup failed; the request got `503 auth_unavailable` |
 | `documents expired` (`count`) | info | Expiry run changed documents |
 | `permission matrix updated` / `settings updated` | info | New snapshot loaded |
 
@@ -127,14 +128,15 @@ Shutdown on `SIGTERM` / `SIGINT`: stop the matrix and settings sync, the expiry 
 
 | Symptom | Likely cause | Check / fix |
 |---|---|---|
-| Every authenticated request returns 500 (`unhandled error`, ioredis errors) | `REDIS_URL` set but Redis unreachable: the deny-list / pv lookup throws | Start Redis or blank `REDIS_URL` (development only) |
+| Every authenticated request returns `503 auth_unavailable` (`retry-after: 5`; warn `token check unavailable (Redis)`) | `REDIS_URL` set but Redis unreachable: the deny-list / pv lookup throws, and the verifier refuses the token as `TokenCheckUnavailable` | Start Redis or blank `REDIS_URL` (development only) |
 | 401 `invalid_token` for valid-looking tokens | `AUTH_ISSUER` / `AUTH_JWKS_URL` wrong, auth-service down, token from another environment | Compare the token's `iss` with `AUTH_ISSUER`; fetch the JWKS URL |
 | 401 `token_outdated` right after approval | Expected: the DRIVER role bumped the permission version | The app refreshes its token |
 | 401 `token_revoked` | User suspended in auth-service | auth-service |
 | 403 `forbidden` for a staff member who should have access | Wrong city (scope comes from the resource), or the live matrix differs from the built-in one, or the matrix couldn't be loaded | Check the role claims in the token and the `permission matrix …` logs |
 | Staff get 403 listing documents of a driver/vehicle that has none | The staff city is taken from the newest document; with no documents it is empty | Expected limitation; `GLOBAL` grants pass |
 | Approve returns 503 `dependency_unavailable` | auth-service unreachable or erroring; nothing was changed | Fix auth-service, retry |
-| Driver approved but no DRIVER role | auth-service returned 404 for the user (swallowed) | Check the user exists in auth-service |
+| Approve / suspend / reinstate → `409 user_not_found` | auth-service has no account for the driver's user id (this used to be swallowed, so approval went through without the role; fixed 2026-10-27) | Check the user exists in auth-service |
+| Suspend / reinstate → `503 dependency_unavailable` | auth-service unreachable when changing the `DRIVER` role; nothing changed | Retry once auth-service is back |
 | Drivers go online but never appear on the map | Relay not running (`KAFKA_BROKERS` unset) or Kafka down | `GET /internal/ops/outbox` (pending, oldest); relay warnings |
 | Sessions never end after the app is killed | Consumer not running, or location-service not producing `driver.connection_lost` | `Kafka consumer failed to start` log; `fleet-service` group lag on the system page |
 | `upload_missing` on confirm | The client didn't PUT, PUT to the wrong place, or the URL expired (5 min) | Request a new upload URL |

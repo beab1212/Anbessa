@@ -58,6 +58,9 @@ describe("Telegram first, SMS fallback", () => {
     const all = await h.c.db.otpDelivery.findMany({ where: { OR: [{ id: d.deliveryId }, { fallbackOfId: d.deliveryId }] } });
     expect(all.find((r) => r.id === d.deliveryId)?.status).toBe("NOT_REACHABLE");
     expect(all.find((r) => r.fallbackOfId === d.deliveryId)).toMatchObject({ channel: "SMS", status: "SENT" });
+    // the admin system page sees the fallback (the rate used to be null whatever happened)
+    const st = await h.c.otp.status();
+    expect(st.smsFallbackRate).toBeGreaterThan(0);
   });
 
   it("falls back to SMS when the Telegram send itself fails", async () => {

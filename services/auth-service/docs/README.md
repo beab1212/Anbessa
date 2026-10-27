@@ -32,7 +32,7 @@ Where these design docs and the code disagree, the code wins. See the notes in e
 | Verifying tokens in other services | each service, with `libs/shared-authz` (`createTokenVerifier`). Kong does not verify JWTs |
 | The permission and role **catalog in code** (built-in roles, permission names, the default matrix) | `libs/shared-authz`. auth-service seeds its tables from it once, then serves the live copy |
 | Cities as a product concept (creating, naming) | platform-service. auth-service only keeps a copy |
-| Driver onboarding, vehicles | fleet-service. It tells auth-service when a driver is activated (`POST /internal/drivers/:userId/role`) |
+| Driver onboarding, vehicles | fleet-service. It tells auth-service when a driver is activated, suspended or reinstated (`POST /internal/drivers/:userId/role`) |
 | The audit log | audit-service consumes `audit.recorded` |
 | Rider profile data beyond name and photo, trips, payments | trip-service, payment-service |
 

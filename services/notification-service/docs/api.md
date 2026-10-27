@@ -32,6 +32,7 @@ From `src/middlewares/error-handler.ts`. Every error body is `{ "error": "<code>
 | 404 | `not_found` | Unknown route (also the webhook when `TELEGRAM_GATEWAY_TOKEN` is unset) |
 | 413, 415, other 4xx | Fastify's code | Body too large, wrong content type, etc. |
 | 429 | rate-limit plugin response | More than 300 requests/min from one IP (per process) |
+| 503 | `auth_unavailable` | `TokenCheckUnavailable` is mapped (503, `retry-after: 5`) but can't occur here: no deny list or permission version is configured |
 | 500 | `internal_error` | Anything else; details are logged, not returned |
 
 ## Rate limits
@@ -106,7 +107,7 @@ Response `200`:
     "telegramConfigured": true,
     "telegramBalance": { "usd": 49.99, "at": "2026-10-27T09:00:00.000Z" },
     "lastHour": [{ "channel": "TELEGRAM", "status": "DELIVERED", "count": 12 }],
-    "smsFallbackRate": null
+    "smsFallbackRate": 0.08
   },
   "failedNotifications24h": { "PUSH": 3 }
 }
@@ -114,7 +115,7 @@ Response `200`:
 
 - `telegramBalance` is the last balance seen by this process, or `null`.
 - `lastHour` groups `otp_delivery` rows created in the last hour by channel and status.
-- `smsFallbackRate` is meant to be fallbacks / Telegram attempts in the last hour. The code compares `channel === "telegram"` while rows store `TELEGRAM`, so the denominator is always 0 and the value is always `null` (`src/otp/otp-service.ts`, `status()`).
+- `smsFallbackRate` = SMS fallbacks (rows with `fallback_of_id`) / Telegram attempts (rows with `channel = "TELEGRAM"`) in the last hour; `null` when there were no Telegram attempts (`src/otp/otp-service.ts`, `status()`). It used to compare with lowercase `"telegram"` and was always `null` (fixed 2026-10-27).
 - `failedNotifications24h` counts `notification` rows with status `FAILED` created in the last 24 h, per channel.
 
 ---

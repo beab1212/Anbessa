@@ -31,6 +31,7 @@ Every route is registered in `src/app.ts` (health) and `src/http/routes.ts` (eve
 | 409 | `invalid_state`, `conflict`, … | the resource is in the wrong state, or a decision raced another |
 | 422 | `idempotency_mismatch` | `Idempotency-Key` reused with a different request |
 | 429 | (from `@fastify/rate-limit`) | rate limit hit |
+| 503 | `auth_unavailable` | Redis deny-list / permission-version lookup failed (`TokenCheckUnavailable`); sent with `retry-after: 5`, logged warn `token check unavailable (Redis)`. The token is refused, retry later |
 | 500 | `internal_error` | anything else (details only in the log) |
 | 502 | `provider_unavailable` | refund approval: the provider didn't answer |
 
@@ -174,11 +175,11 @@ The caller's own (`INDIVIDUAL`) balance.
 | Query | Type | Default |
 |---|---|---|
 | `cityId` | `cityId` | `addis-ababa` |
-| `open` | boolean (coerced) | `false` |
+| `open` | `true` / `false` / `1` / `0` | `false` |
 
 Permission: `balance:read` covering `{ ownerUserIds: [caller] }` (DRIVER). With `open=true` and no account yet, it is created (needs `topup:create` too) so the driver can top up before a first trip; the account's city is `cityId`. 200 `BalanceView` (the empty view with `accountId: null` if there is no account and `open` is false). 404 if the caller may not read it.
 
-Note: `z.coerce.boolean()` turns any non-empty string, including `"false"`, into `true`.
+`open` is parsed by `queryFlag` in `src/http/routes.ts`: `"true"` or `"1"` is on, `"false"` or `"0"` (or no value) is off, anything else is `400 validation_error`. So `open=false` creates nothing (fixed 2026-10-27: it used `z.coerce.boolean()`, which read `"false"` as true). Test: `tests/integration/payments.test.ts`.
 
 ### GET /api/payments/balances/org/:orgId
 

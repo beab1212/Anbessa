@@ -52,4 +52,4 @@ From the class comment: `forbidden`, `too_frequent`, `unavailable`, `invalid`, `
 
 ## Handshake
 
-The token goes in the Socket.io `auth` object: `{token: <access JWT>}`. The gateway checks it only at the handshake (per the hub's comment), which is why the app refreshes it before every reconnect. A connect error whose text contains `unauthorized` makes the hub force a new token; three such refusals in a row sign the person out.
+The token goes in the Socket.io `auth` object: `{token: <access JWT>}`. The gateway checks it only at the handshake (per the hub's comment), which is why the app refreshes it before every reconnect. A connect error whose text contains `unauthorized` makes the hub force a new token; three such refusals in a row sign the person out. The gateway sends `unauthorized: <code>` only when the token itself is refused; a failed check (Redis down) comes as `unavailable`, which doesn't count, so an outage doesn't sign anyone out.

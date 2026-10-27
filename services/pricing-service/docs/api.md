@@ -57,6 +57,7 @@ Errors:
 | 400 | `unknown_vehicle_type` | a type (requested or offered) has no `fares.<type>.*` settings |
 | 401 | `unauthorized` / token error code | no token, bad token, wrong audience, denied user, stale permission version |
 | 503 | `dependency_unavailable` | mapping-service call failed (any error, including no road between the points) |
+| 503 | `auth_unavailable` | Redis deny-list / permission-version lookup failed (`TokenCheckUnavailable`); sent with `retry-after: 5`, logged warn `token check unavailable (Redis)`. The token is refused, retry later |
 | 500 | `internal_error` | e.g. Redis unavailable while storing a quote |
 
 ### `GET /api/pricing/fares?cityId=`
@@ -78,4 +79,4 @@ Params: `id` string 1–100. Response: the stored `Quote`. Errors: `401 unauthor
 
 ## Errors
 
-`src/middlewares/error-handler.ts`, body `{ error, message }`: `AppError` → its status and code; `AuthorizationError` → 403 `forbidden` (no route raises it today); `TokenError` → 401 with its code; `ZodError` → 400 `validation_error` with `issues[]`; other Fastify 4xx pass through; everything else → 500 `internal_error`; unknown route → 404 `not_found`.
+`src/middlewares/error-handler.ts`, body `{ error, message }`: `AppError` → its status and code; `AuthorizationError` → 403 `forbidden` (no route raises it today); `TokenError` → 401 with its code; `TokenCheckUnavailable` (Redis lookup failed) → 503 `auth_unavailable` with `retry-after: 5`; `ZodError` → 400 `validation_error` with `issues[]`; other Fastify 4xx pass through; everything else → 500 `internal_error`; unknown route → 404 `not_found`.

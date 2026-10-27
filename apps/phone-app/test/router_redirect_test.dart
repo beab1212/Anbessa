@@ -23,21 +23,28 @@ Future<String?> redirect(
   DriverHome? driverHome,
   bool updateRequired = false,
   bool introSeen = true,
+  bool offlineAtStart = false,
 }) async {
-  final c = ProviderContainer(overrides: [
+  final c = ProviderContainer(retry: (_, _) => null, overrides: [
     introSeenProvider.overrideWith(() => FixedIntroSeen(introSeen)),
-    sessionProvider.overrideWith(() => FixedSession(signedIn)),
+    sessionProvider.overrideWith(() => offlineAtStart ? OfflineSession() : FixedSession(signedIn)),
     modeProvider.overrideWith(() => FixedMode(mode)),
     activeTripProvider.overrideWith(() => FixedActiveTrip(trip)),
     if (driverHome != null) driverHomeProvider.overrideWith(() => FixedDriverHome(driverHome)),
     updateRequiredProvider.overrideWithValue(updateRequired),
   ]);
   addTearDown(c.dispose);
-  await c.read(sessionProvider.future);
+  await c.read(sessionProvider.future).catchError((_) => null);
   await c.read(activeTripProvider.future);
   if (driverHome != null) await c.read(driverHomeProvider.future);
   final probe = Provider((ref) => redirectFor(ref, Uri.parse(path)));
   return c.read(probe);
+}
+
+/// The stored session couldn't be checked: no network at start.
+class OfflineSession extends SessionController {
+  @override
+  Future<Session?> build() async => throw const AppError(status: 0, code: ErrorCodes.network, message: 'offline', retryable: true);
 }
 
 class FixedIntroSeen extends IntroSeen {
@@ -53,6 +60,11 @@ void main() {
     expect(await redirect(Routes.intro, introSeen: false), isNull);
     expect(await redirect(Routes.intro), Routes.welcome);
     expect(await redirect(Routes.intro, signedIn: session()), Routes.splash);
+  });
+
+  test('offline at start with a stored session: the splash (with retry), never welcome', () async {
+    expect(await redirect(Routes.riderHome, offlineAtStart: true), Routes.splash);
+    expect(await redirect(Routes.splash, offlineAtStart: true), isNull);
   });
 
   test('signed out: everything leads to welcome, sign-in screens stay', () async {

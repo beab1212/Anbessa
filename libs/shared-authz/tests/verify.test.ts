@@ -1,6 +1,6 @@
-import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
+import { createLocalJWKSet, errors as joseErrors, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { beforeAll, describe, expect, it } from "vitest";
-import { createTokenVerifier, TokenError } from "../src/index.js";
+import { createTokenVerifier, TokenCheckUnavailable, TokenError } from "../src/index.js";
 
 const ISSUER = "https://auth.test";
 let privateKey: CryptoKey;
@@ -49,6 +49,28 @@ describe("verifyAccessToken", () => {
     await expect(denied(await sign({}), "ride-app")).rejects.toMatchObject({ code: "token_revoked" });
     const outdated = createTokenVerifier({ issuer: ISSUER, keySet, currentPermissionVersion: async () => 3 });
     await expect(outdated(await sign({ pv: 2 }), "ride-app")).rejects.toMatchObject({ code: "token_outdated" });
+  });
+
+  it("a failed suspension / version lookup refuses the token as temporarily unavailable, not as invalid", async () => {
+    const down = async () => {
+      throw new Error("ECONNREFUSED");
+    };
+    for (const opts of [{ isDenied: down }, { currentPermissionVersion: down }]) {
+      const verify = createTokenVerifier({ issuer: ISSUER, keySet, ...opts });
+      const err = await verify(await sign({}), "ride-app").catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(TokenCheckUnavailable);
+      expect(err).not.toBeInstanceOf(TokenError);
+      expect(err).toMatchObject({ statusCode: 503, code: "auth_unavailable" });
+    }
+  });
+
+  it("an unreachable key set (auth-service down) is temporarily unavailable; a bad token is still invalid", async () => {
+    const unreachable = createTokenVerifier({ issuer: ISSUER, keySet: async () => { throw new TypeError("fetch failed"); } });
+    await expect(unreachable(await sign({}), "ride-app")).rejects.toBeInstanceOf(TokenCheckUnavailable);
+    const non200 = createTokenVerifier({ issuer: ISSUER, keySet: async () => { throw new joseErrors.JOSEError("Expected 200 OK from the JSON Web Key Set HTTP response"); } });
+    await expect(non200(await sign({}), "ride-app")).rejects.toBeInstanceOf(TokenCheckUnavailable);
+    const verify = createTokenVerifier({ issuer: ISSUER, keySet });
+    await expect(verify("not.a.jwt", "ride-app")).rejects.toMatchObject({ code: "invalid_token" });
   });
 
   it("drops staff roles smuggled into an app-audience token", async () => {

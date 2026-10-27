@@ -79,7 +79,7 @@ A 429 is turned into a hint to set `AUTH_RATE_LIMIT=off` in auth-service.
 
 The map is created with `cityId="addis-ababa"` for its initial bounds, then fits the pickup, drop-off and car position once (`fitOnce`).
 
-Note: like every page, it is inside `SessionProvider`, so loading it also calls `GET /api/admin-auth/token` and `GET /api/auth/token` (both answer 401 for a visitor).
+Note: it is inside `SessionProvider` like every page, but the session queries are disabled on `/t/...` paths (`src/lib/session.tsx`), so it does not call `GET /api/admin-auth/token` or `GET /api/auth/token` (fixed 2026-10-27).
 
 ---
 

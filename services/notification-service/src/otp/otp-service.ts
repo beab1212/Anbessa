@@ -160,7 +160,8 @@ export function createOtpService(deps: OtpServiceDeps) {
       const since = new Date(now().getTime() - 3_600_000);
       const rows = await db.otpDelivery.groupBy({ by: ["channel", "status"], where: { createdAt: { gte: since } }, _count: true });
       const fallbacks = await db.otpDelivery.count({ where: { createdAt: { gte: since }, fallbackOfId: { not: null } } });
-      const telegramSent = rows.filter((r) => r.channel === "telegram").reduce((n, r) => n + r._count, 0);
+      // the column holds "TELEGRAM" / "SMS" (comparing with "telegram" left the rate always null)
+      const telegramSent = rows.filter((r) => r.channel === "TELEGRAM").reduce((n, r) => n + r._count, 0);
       return {
         channels: channels(), fallbackSeconds: fallbackSeconds(), telegramConfigured: !!telegram, telegramBalance: lastBalance,
         lastHour: rows.map((r) => ({ channel: r.channel, status: r.status, count: r._count })),

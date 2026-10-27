@@ -113,6 +113,7 @@ Response: `{ polyline6: string, distanceMeters, durationSeconds, approximate, st
 |---|---|---|
 | `AppError` | its status | `bad_request`, `outside_service_area`, `not_found`, `unauthorized` |
 | `TokenError` | 401 | its code |
+| `TokenCheckUnavailable` | 503 | `auth_unavailable`, `retry-after: 5`. Mapped but can't occur here: mapping-service's verifier has no deny-list / permission-version callbacks |
 | `ZodError` | 400 | `validation_error` with `issues[]` |
 | `EngineError` | 503 | `engine_unavailable` ("routing is temporarily unavailable" or "address search is temporarily unavailable"); logged at warn with engine and reason |
 | rate limit | 429 | from `@fastify/rate-limit` |

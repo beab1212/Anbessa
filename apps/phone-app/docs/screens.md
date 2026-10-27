@@ -12,7 +12,9 @@ Common patterns:
 
 ### SplashScreen (`bootstrap/gates.dart`)
 
-The logo (the አ mark on amber), the app name and a small spinner. Shown while `sessionProvider` loads. No actions; the router moves on.
+The logo (the አ mark on amber), the app name and a small spinner. Shown while `sessionProvider` loads; the router moves on.
+
+When the stored session couldn't be checked (no network at a cold start: `sessionProvider` has an error and no value), the router keeps the person here instead of sending them to Welcome. The spinner is replaced by the offline text (`offlineBanner`) and a "Try again" button (`retry`) that invalidates `sessionProvider`.
 
 ### IntroScreen (`intro/intro_screen.dart`)
 

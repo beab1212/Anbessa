@@ -164,6 +164,8 @@ String? _redirect(Ref ref, GoRouterState state) {
   final sessionAsync = ref.read(sessionProvider);
   // 1. bootstrap: the session is still being read
   if (sessionAsync.isLoading && !sessionAsync.hasValue) return path == Routes.splash ? null : Routes.splash;
+  // the stored session couldn't be checked (offline at start): not signed out; the splash offers a retry
+  if (sessionAsync.hasError && !sessionAsync.hasValue) return path == Routes.splash ? null : Routes.splash;
   // 2. forced update
   if (ref.read(updateRequiredProvider)) return path == Routes.updateRequired ? null : Routes.updateRequired;
   if (path == Routes.updateRequired) return Routes.splash;

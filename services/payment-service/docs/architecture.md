@@ -158,10 +158,12 @@ States are also recomputed for every beneficiary of a city when a balance policy
 
 | Source (when) | Lines |
 |---|---|
-| `CASH` (on `trip.completed`; also corporate trips with no `billingOrgId`) | beneficiary `−(commission + VAT)`, commission `+commission`, VAT `+VAT` |
+| `CASH` (on `trip.completed`) | beneficiary `−(commission + VAT)`, commission `+commission`, VAT `+VAT` |
 | `PROVIDER` (charge captured) | clearing `−fare`, beneficiary `+earnings`, commission `+`, VAT `+` |
 | `RIDER_RECEIVABLE` (last retry failed) | rider receivable `−fare`, beneficiary `+earnings`, commission `+`, VAT `+` |
 | `CORPORATE` (`paymentMethod = CORPORATE` with `billingOrgId`, on `trip.completed`) | corporate receivable `−fare`, beneficiary `+earnings`, commission `+`, VAT `+` |
+
+A `CORPORATE` event without `billingOrgId` never reaches settlement: the consumer's schema refuses it and skips it (see [events.md](events.md)). It used to be settled as cash, charging the driver commission on money they never collected (fixed 2026-10-27).
 
 Example with the defaults, fare 400 ETB: commission 60, VAT 9. Cash: beneficiary −69. Card: clearing −400, beneficiary +331, commission +60, VAT +9.
 
@@ -326,7 +328,7 @@ Also running in the process: the outbox relay (every 500 ms), the settings clien
 
 ## Security model
 
-**Authentication.** Public routes (`/api/payments/*` except the three below) need a bearer access token from auth-service, verified with `createTokenVerifier` (`libs/shared-authz/src/verify.ts`): issuer `AUTH_ISSUER`, keys from `AUTH_JWKS_URL`, audience `ride-app` or `ride-admin`. With Redis configured, a user in `deny:{userId}` gets 401 `token_revoked`, and a token whose `pv` claim is older than `pv:{userId}` gets 401 `token_outdated`.
+**Authentication.** Public routes (`/api/payments/*` except the three below) need a bearer access token from auth-service, verified with `createTokenVerifier` (`libs/shared-authz/src/verify.ts`): issuer `AUTH_ISSUER`, keys from `AUTH_JWKS_URL`, audience `ride-app` or `ride-admin`. With Redis configured, a user in `deny:{userId}` gets 401 `token_revoked`, and a token whose `pv` claim is older than `pv:{userId}` gets 401 `token_outdated`. If the Redis lookup itself fails, the token is refused with `503 auth_unavailable` (`retry-after: 5`).
 
 Unauthenticated routes: `GET /api/payments/methods`, `POST /api/payments/webhooks/:provider` (provider signature instead), and the simulator checkout `GET/POST /api/payments/sim/checkout/:ref` (only when `GATEWAY_MODE=simulated` and `NODE_ENV≠production`). Health routes are unauthenticated.
 

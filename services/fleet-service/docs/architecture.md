@@ -48,7 +48,7 @@ flowchart TD
 2. The route parses its input with zod. A `ZodError` becomes `400 validation_error` with `issues`.
 3. `principal(req)` reads `Authorization: Bearer …`. Missing → `401 unauthorized`. It verifies the token as `ride-app`; if that fails with `invalid_token` it tries `ride-admin`. `token_revoked` (user in the Redis deny list) and `token_outdated` (token's `pv` older than Redis `pv:{userId}`) are returned as 401 straight away.
 4. The service method authorises (see §11), loads rows, and for any state change opens a Prisma transaction that writes the new state **and** its events (`writeOutbox`). The relay publishes them later.
-5. Errors: `AppError` → its status and code; `AuthorizationError` → `403 forbidden`; `TokenError` → 401 with its code; Fastify 4xx → passed through; anything else → logged and `500 internal_error`. Unknown routes → `404 not_found`.
+5. Errors: `AppError` → its status and code; `AuthorizationError` → `403 forbidden`; `TokenError` → 401 with its code; `TokenCheckUnavailable` (Redis lookup failed) → `503 auth_unavailable` with `retry-after: 5`, logged at warn; Fastify 4xx → passed through; anything else → logged and `500 internal_error`. Unknown routes → `404 not_found`.
 
 Note the order in most routes: the body is parsed **before** the token is checked, so an unauthenticated request with an invalid body gets 400, not 401.
 
@@ -73,10 +73,10 @@ Details from `src/fleet/service.ts`:
 
 - **Apply** needs `driver:apply @ SELF` (held by `RIDER`), a city in `CITIES`, and a licence that normalises (spaces and dashes removed, upper case) to 5–20 letters/digits. One profile per user (`already_applied`); a licence whose blind index already exists is refused (`licence_registered`), which also catches banned drivers' licences because profiles are never deleted.
 - **Submit** works from `APPLIED`, or from `SUSPENDED` with `status_reason = DOCUMENT_EXPIRED` (renewal). It clears `status_reason`, sets `submitted_at`.
-- **Approve** requires both `driver:verify` and `driver:activate` in the driver's city. Inside the transaction (timeout 15 s) it updates the profile, writes `driver.activated` + an audit entry, then calls auth-service `POST /internal/drivers/:id/role {active:true}`. If that call fails the transaction rolls back and the officer gets `503 dependency_unavailable`. `activated_at` is set only the first time.
+- **Approve** requires both `driver:verify` and `driver:activate` in the driver's city. Inside the transaction (timeout 15 s) it updates the profile, writes `driver.activated` + an audit entry, then calls auth-service `POST /internal/drivers/:id/role {active:true}`. If that call fails the transaction rolls back and the officer gets `503 dependency_unavailable` (or `409 user_not_found` when auth-service answers 404). `activated_at` is set only the first time.
 - **Request changes** only from `PENDING_REVIEW`; it does not touch documents. Rejecting a document does **not** move the driver back on its own: the officer calls request-changes.
-- **Suspend** (`driver:suspend @ CITY`) works from any status except `SUSPENDED` (idempotent: returns the current view). It ends the open session (`SUSPENDED`). It does **not** remove the `DRIVER` role in auth-service.
-- **Reinstate** (`driver:reinstate @ CITY`) needs every driver document approved and in date; otherwise `409 documents_not_approved` and the driver must upload and resubmit. It does not call auth-service.
+- **Suspend** (`driver:suspend @ CITY`) works from any status except `SUSPENDED` (idempotent: returns the current view). It ends the open session (`SUSPENDED`). Inside the transaction (timeout 15 s) it also calls auth-service `POST /internal/drivers/:id/role {active:false}`, which removes `DRIVER` and bumps the permission version; if that call fails, nothing changes and staff retry. The expiry job's licence suspension does not call auth-service.
+- **Reinstate** (`driver:reinstate @ CITY`) needs every driver document approved and in date; otherwise `409 documents_not_approved` and the driver must upload and resubmit. Inside the transaction (timeout 15 s) it calls auth-service `POST /internal/drivers/:id/role {active:true}` (ACTIVE means holding `DRIVER`, whatever state the suspension started from); a failure rolls back.
 
 ## 4. Vehicle lifecycle
 
@@ -266,7 +266,7 @@ Apart from that, many actions are naturally idempotent: starting a session with 
 ### Authentication
 
 - Public routes: an access token from auth-service (ES256 JWT, issuer `AUTH_ISSUER`, keys from `AUTH_JWKS_URL`), audience `ride-app` or `ride-admin`. Roles not belonging to the token's audience are dropped when parsing claims (`parseRoleClaims`).
-- With `REDIS_URL`: a token of a user in `deny:{userId}` is refused (`token_revoked`), and a token whose `pv` claim is older than `pv:{userId}` is refused (`token_outdated`). Without Redis, suspensions and role changes only take effect when tokens expire.
+- With `REDIS_URL`: a token of a user in `deny:{userId}` is refused (`token_revoked`), and a token whose `pv` claim is older than `pv:{userId}` is refused (`token_outdated`). A failed lookup (Redis down) refuses the token with `503 auth_unavailable`. Without Redis, suspensions and role changes only take effect when tokens expire.
 - `/internal/*`: `Authorization: Bearer <INTERNAL_SERVICE_TOKEN>`, compared in constant time (`timingSafeEqual`). The `Bearer ` prefix is optional in the comparison. The shared token is the same across services.
 - Local file routes `/api/fleet/files/:ticket`: no token; the HMAC-signed ticket in the path is the credential (5 min, one operation, one key).
 - Upload tickets: HMAC-signed with a sub-key of `UPLOAD_SIGNING_KEY` (`HMAC(key, "upload-ticket")`); file links use another sub-key (`"file-link"`), so one can't be used as the other.

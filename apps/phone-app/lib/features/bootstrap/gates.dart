@@ -12,22 +12,33 @@ import '../../core/realtime/realtime_hub.dart';
 import '../../core/session/session_controller.dart';
 import '../config/client_config_provider.dart';
 
-class SplashScreen extends StatelessWidget {
+class SplashScreen extends ConsumerWidget {
   const SplashScreen({super.key});
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final c = context.colors;
+    final l = context.l10n;
+    // the stored session couldn't be checked (no network at start): say so, keep it, retry
+    final stuck = ref.watch(sessionProvider.select((s) => s.hasError && !s.hasValue && !s.isLoading));
     return Scaffold(
       body: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const AnbessaLogo(size: 64),
-            const SizedBox(height: 16),
-            Text(context.l10n.appName, style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: c.text)),
-            const SizedBox(height: 24),
-            const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2.5)),
-          ],
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const AnbessaLogo(size: 64),
+              const SizedBox(height: 16),
+              Text(l.appName, style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: c.text)),
+              const SizedBox(height: 24),
+              if (stuck) ...[
+                Text(l.offlineBanner, textAlign: TextAlign.center, style: AnbessaType.body2.copyWith(color: c.text2)),
+                const SizedBox(height: 16),
+                PrimaryButton(label: l.retry, icon: Icons.refresh, onPressed: () => ref.invalidate(sessionProvider)),
+              ] else
+                const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2.5)),
+            ],
+          ),
         ),
       ),
     );

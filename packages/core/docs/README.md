@@ -49,7 +49,7 @@ packages/core/
 
 | File | Covers |
 |---|---|
-| `test/api_client_test.dart` | Host-mode routing and the bearer header; one refresh and replay on a token 401, a second 401 ends the session; idempotent POSTs get a key and are retried on a connection error while plain POSTs are not; error code, message and validation issues on `AppError` |
+| `test/api_client_test.dart` | Host-mode routing and the bearer header; one refresh and replay on a token 401, a second 401 ends the session; a refresh that fails for lack of network surfaces the network error and keeps the session; idempotent POSTs get a key and are retried on a connection error while plain POSTs are not; error code, message and validation issues on `AppError` |
 | `test/models_test.dart` | `trip.json` parses and gives the right rider and driver stages; every status literal maps and an unknown one becomes `unknown`; the free-cancel window; client config (cities by point, vehicle types per city, flag defaults, fallback); balance and driver home fixtures; JWT claims decode; every registered socket event parses and unknown names are ignored; phone, money, version, Addis time and geometry helpers |
 | `test/polyline_test.dart` | polyline6 round trip, a known precision-5 polyline, distances and bearings in Addis, `lerpAngleDeg`, projection onto a polyline, `pointAlong` |
 | `test/theme_test.dart` | Palette `lerp`, WCAG AA 4.5:1 contrast of the text colours on every surface in both palettes, both themes build with the extension and the font |

@@ -28,6 +28,7 @@ No `/internal/*` routes and no webhooks.
 | 403 | `forbidden` | no `audit_log:read` |
 | 404 | `not_found` | unknown route |
 | 429 | rate-limit plugin | > 300 req/min/IP (in-process) |
+| 503 | `auth_unavailable` | Redis deny-list / permission-version lookup failed (`TokenCheckUnavailable`); sent with `retry-after: 5`, logged warn `token check unavailable (Redis)`. The token is refused, retry later |
 | 500 | `internal_error` | anything else |
 
 ## Rate limits

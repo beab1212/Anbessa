@@ -6,7 +6,7 @@
 | auth-service, fleet-service, payment-service, platform-service | in (via Kafka) | outbox → relay → `audit.recorded` | — | — | events wait in the producer's outbox or in Kafka |
 | auth-service | out | `GET {AUTH_INTERNAL_URL}/internal/authz/snapshot` | `Bearer INTERNAL_SERVICE_TOKEN` | 3 s | keeps the current matrix (built-in at start), warning logged |
 | auth-service | out | JWKS at `AUTH_JWKS_URL` | none | jose defaults | 401 on API calls |
-| Redis | out | `EXISTS deny:{id}`, `GET pv:{id}`, subscribe `authz:changed` | `REDIS_URL` | `maxRetriesPerRequest: 2` | Redis errors during token checks fail the request (500); subscribe failure falls back to polling |
+| Redis | out | `EXISTS deny:{id}`, `GET pv:{id}`, subscribe `authz:changed` | `REDIS_URL` | `maxRetriesPerRequest: 2` | Redis errors during token checks refuse the token with `503 auth_unavailable` (`retry-after: 5`); subscribe failure falls back to polling |
 | Postgres | out | Prisma + `@prisma/adapter-pg` | `DATABASE_URL` | driver defaults | 500 / 503 ready; consumer retries |
 | Web admin dashboard | in | `GET /api/audit/entries`, `/entries.csv` via Kong (Vite proxy `AUDIT_URL` in dev, `apps/web/vite.config.ts`) | staff token | — | — |
 | platform-service | in | `/health/ready`; consumer-group lag of `audit-service` (`CONSUMER_GROUPS`) | none | — | shown on the System page |

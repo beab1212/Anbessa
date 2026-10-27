@@ -1,6 +1,6 @@
 import type { FastifyError, FastifyInstance } from "fastify";
 import { ZodError } from "zod";
-import { AuthorizationError, TokenError } from "@ride-app/shared-authz";
+import { AuthorizationError, TokenCheckUnavailable, TokenError } from "@ride-app/shared-authz";
 import { AppError } from "@ride-app/shared-utils";
 
 // Registered BEFORE any route, so every route uses it (it used to be registered
@@ -11,6 +11,10 @@ export function registerErrorHandler(app: FastifyInstance) {
     if (err instanceof AppError) return reply.status(err.statusCode).send({ error: err.code, message: err.message });
     if (err instanceof AuthorizationError) return reply.status(403).send({ error: "forbidden", message: err.message });
     if (err instanceof TokenError) return reply.status(401).send({ error: err.code, message: err.message });
+    if (err instanceof TokenCheckUnavailable) {
+      req.log.warn({ err: err.cause }, "token check unavailable (Redis)");
+      return reply.status(503).header("retry-after", "5").send({ error: err.code, message: err.message });
+    }
     if (err instanceof ZodError) {
       return reply.status(400).send({
         error: "validation_error",

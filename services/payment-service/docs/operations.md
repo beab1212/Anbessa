@@ -41,6 +41,7 @@ The `seed:dev` script in `package.json` points at `src/dev/seed.ts`, which does 
 | File | Covers |
 |---|---|
 | `tests/unit/rules.test.ts` | commission (percentage with minimum, fixed, zero), trip money for card and cash, VAT on commission or full fare, balance states through the limits, overdue blocking, prepaid, suggested top-up, payment dues and their status, Addis dates |
+| `tests/unit/consumer.test.ts` | event schemas: a `CORPORATE` `trip.completed` or `trip.cancelled` without `billingOrgId` is invalid (never settled as cash); with it, or a cash trip, passes |
 | `tests/unit/gateways.test.ts` | reference round trip (with attempts), each provider's callback format read back by its adapter, tampered or wrongly signed callbacks refused, simulator auto-approval, payout delay and the `0000` failure |
 
 **Integration** (`tests/integration/payments.test.ts`): `global-setup.ts` drops and recreates `payment_service_test` (refuses a database name not ending in `_test`) and runs `prisma migrate deploy`. `harness.ts` builds the real app and container with a test clock, the in-process simulator whose callbacks are injected into the app's webhook route (signatures included), static settings, a local ES256 key set for tokens, and recorded realtime pushes. Kafka is not used: tests call `onTripCompleted` / `onTripCancelled` directly. Needs Postgres reachable at `TEST_DATABASE_URL`.
@@ -51,13 +52,13 @@ The `seed:dev` script in `package.json` points at `src/dev/seed.ts`, which does 
 | Earnings | today's totals by day; only the driver may read them |
 | Balance limits | cash trips pause cash; a card trip repays and lifts it |
 | Declined charges | retried, then a rider receivable; paying later collects it; a lost callback recovered by reconciliation |
-| Top-ups | mobile money via callback, retried request returns the same top-up (idempotency); office cash maker–checker |
+| Top-ups | `open=false` only reads and creates no account; mobile money via callback, retried request returns the same top-up (idempotency); office cash maker–checker |
 | Refunds | requested by support, approved by finance, charged to the driver when at fault |
 | Settlement and payouts | positive balances paid after a second person approves; negative balances get a due that blocks when overdue |
 | Rules | operations proposes, finance approves, the next trip uses the new rule |
 | Access | owners see their own balance, fleets theirs, others get 404, finance lists; the ledger balances and `UPDATE`/`DELETE` on the ledger fail |
 
-Not covered by tests: the Kafka consumer and outbox relay against a real broker, the HTTP gateway mode (doesn't exist), Redis-backed paths (deny list, realtime emitter, Redis sim store), the jobs scheduler itself.
+Not covered by tests: the Kafka consumer (only its schemas, in `tests/unit/consumer.test.ts`) and outbox relay against a real broker, the HTTP gateway mode (doesn't exist), Redis-backed paths (deny list, realtime emitter, Redis sim store), the jobs scheduler itself.
 
 ## Build and deploy
 
@@ -105,6 +106,7 @@ pino via `libs/shared-utils` (`createLogger("payment-service", NODE_ENV)`): JSON
 | error | `LEDGER INTEGRITY CHECK FAILED` | hourly integrity check found a mismatch |
 | error | `job failed` (with `job`) | a background job threw |
 | warn | `settings refresh failed; keeping the current values` | platform-service unreachable |
+| warn | `token check unavailable (Redis)` | Redis deny-list / permission-version lookup failed; the request got `503 auth_unavailable` |
 
 ## Metrics
 

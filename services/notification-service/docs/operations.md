@@ -73,7 +73,7 @@ Codes are not logged except by the console SMS provider. Phone numbers are maske
 | No SMS fallback after a crash | none expected: the schedule is in Redis; the poller resumes on restart. If Redis was flushed, pending fallbacks and active codes are lost | Redis persistence |
 | Pushes not arriving | user has no `device_token` (row status `SKIPPED`), `PUSH_PROVIDER=console`, or FCM errors (`notification.error`) | `SELECT * FROM notification WHERE user_id = …` |
 | Consumer lag growing on one partition | a send keeps failing; the partition retries the same message up to 5 times per `(event, channel)` | `notification` rows with `attempts > 0` |
-| `smsFallbackRate` always `null` on the System page | known code issue (case mismatch in `status()`) | [api.md](api.md#get-internalopsintegrations) |
+| `smsFallbackRate` `null` on the System page | no Telegram attempts in the last hour (Telegram not configured, or not first in `otp.channels`). The old case-mismatch bug that kept it always `null` is fixed (2026-10-27) | [api.md](api.md#get-internalopsintegrations) |
 
 ## Key rotation
 

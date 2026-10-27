@@ -186,7 +186,7 @@ On the OTP screen with `?driver=1`, `modeProvider` is set to driver right after 
 3. An `AppError` that `isAuth` (401 or `session_ended`) or `isForbidden` (403) clears the token and the cache → `null`.
 4. Any other `AppError` (network down): if `TokenManager.claims` is set, a session with an empty profile is returned; otherwise the error is rethrown.
 
-At a cold start `TokenManager` has no claims yet (they only exist after a successful mint), so a network failure in step 2 leaves `sessionProvider` in an error state with no value. The router reads `sessionAsync.value`, which is then null, and treats the person as signed out (welcome screen). The stored token is kept. This is what the code does; it was not checked on a device.
+At a cold start `TokenManager` has no claims yet (they only exist after a successful mint), so a network failure in step 2 leaves `sessionProvider` in an error state with no value. The router then keeps the person on the splash screen (`sessionAsync.hasError && !sessionAsync.hasValue` in `lib/core/router/app_router.dart`), not on Welcome. `SplashScreen` (`lib/features/bootstrap/gates.dart`) shows the offline text (`offlineBanner`) and a "Try again" button that invalidates `sessionProvider`. The stored token is kept. Test: "offline at start with a stored session: the splash (with retry), never welcome" in `test/router_redirect_test.dart`.
 
 ### TokenManager
 
@@ -202,7 +202,7 @@ At a cold start `TokenManager` has no claims yet (they only exist after a succes
 |---|---|---|
 | The person signs out (Account → Sign out, confirmed) | `SessionController.signOut()`: `PushService.unregister()` (5 s timeout), `POST /api/auth/sign-out` (5 s timeout, errors ignored), clear the token and JWT | none (`SignOutReason.user`) |
 | A token refresh is refused | `TokenManager` → `sessionEnded(cause)` | `suspended` when the code is `token_revoked` or the status is 403, else `sessionEnded` |
-| The replay after a refresh gets 401, or the refresh throws | `ApiClient` → `onSessionEnded` → `sessionEnded` | same rule |
+| The replay after a refresh gets 401, or the refresh fails with an auth / forbidden `AppError` | `ApiClient` → `onSessionEnded` → `sessionEnded` | same rule |
 | The socket refuses the token three times | `RealtimeHub` → `sessionEnded(401 session_ended)` | `sessionEnded` |
 
 `sessionEnded` is ignored when the person already signed out. `SessionController.endings` is a broadcast stream of reasons; nothing in `lib/` listens to it. `WelcomeScreen` shows a notice from `lastSignOut`.
@@ -316,7 +316,7 @@ Every route is registered whatever the feature flags say; the flags only hide th
 
 ### Redirect guards, in order (`_redirect`)
 
-1. **Bootstrap.** While `sessionProvider` is loading and has no value: go to `/splash` (stay if already there).
+1. **Bootstrap.** While `sessionProvider` is loading and has no value: go to `/splash` (stay if already there). Same when it ended in an error with no value (offline at cold start): stay on `/splash`, which offers "Try again".
 2. **Forced update.** If `updateRequiredProvider` is true: go to `/update-required`. If it is false and the path is `/update-required`: go to `/splash`.
 3. **Signed out** (session value is null). If the intro was never seen: `/intro`. Otherwise `/welcome`, except that `/welcome`, `/sign-in` and `/sign-in/verify` are allowed. A signed-in person on `/intro` goes to `/splash`.
 4. **Mode.** If `effectiveModeProvider` is null: `/mode`. From `/splash`, `/mode` or a sign-in path: the mode's home (`/rider/home` or `/driver/home`).
@@ -349,7 +349,7 @@ The comment in `routes.dart` says `anbessa://` and `https://app.anbessa.et` link
 
 - Fetched with `GET /api/platform/client-config?audience=<mode or rider>` (no bearer) when the provider builds, every 60 s (a periodic stream started in `build`), and on app resume.
 - The raw JSON of each successful fetch is stored in prefs (`client_config`). If the fetch fails, the last cached copy is used, else `ClientConfig.fallback`.
-- `refresh()` replaces the state only when `version` changed (or there was none). Errors are ignored.
+- `refresh()` replaces the state when `version` changed, when the announcement list changed (compared by id, title and body, in order: announcements don't bump the settings version), or when there was none. So a new announcement shows on the next refresh, without a restart. Errors are ignored.
 - `featureProvider(flag)` reads `configProvider.features[flag]`.
 
 | Flag | Default when missing from the response | Read by |
@@ -386,7 +386,8 @@ The flagged modules (`flagged_modules.dart`) each have a repository interface wh
 | connected | reset the refusal counter, state `connected`, re-send `trip:subscribe` for every remembered room |
 | disconnected | `reconnecting` if a connection is wanted, else `offline` |
 | reconnect attempt | state `reconnecting`, put the current JWT in `auth` (the gateway checks it only at the handshake) |
-| connect error containing `unauthorized` | count it; on the third in a row, end the session; otherwise put a **forced** new JWT in `auth` |
+| connect error containing `unauthorized` (the gateway sends `unauthorized: <code>` for a refused token) | count it; on the third in a row, end the session; otherwise put a **forced** new JWT in `auth` |
+| any other connect error, e.g. `unavailable` (the gateway couldn't check the token: Redis down) | not counted; Socket.io keeps reconnecting with its backoff |
 | an event in `realtimeEventNames` | parse with `RealtimeEvent.fromSocket` and add to `events` (broadcast) |
 
 `subscribeTrip(id)` remembers the room even when offline and returns the ack's `ok` (false after 5 s). `sendLocation(ping)` emits `location:update` and returns the `PingAck` (3 s timeout; `offline` when not connected). `inject(event)` is for tests.

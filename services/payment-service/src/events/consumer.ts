@@ -13,6 +13,12 @@ const id = z.string().uuid();
 const method = z.enum(["CASH", "MOBILE_MONEY", "CARD", "CORPORATE"]);
 const beneficiary = z.object({ type: z.enum(["INDIVIDUAL", "ORGANIZATION"]), id });
 const minor = z.number().int().min(0);
+/** A company-billed trip must name the company: settling it as cash would charge the driver
+ *  commission on money they never collected. Such an event is invalid (logged and skipped). */
+const corporateNamesOrg: [(e: { paymentMethod: string; billingOrgId?: string }) => boolean, { message: string; path: string[] }] = [
+  (e) => e.paymentMethod !== "CORPORATE" || !!e.billingOrgId,
+  { message: "CORPORATE payment without billingOrgId", path: ["billingOrgId"] },
+];
 
 export const schemas = {
   "trip.completed": z.object({
@@ -20,13 +26,13 @@ export const schemas = {
     tripId: id, riderId: id, driverId: id, cityId: z.string().min(1).max(40), vehicleType: z.string().min(1).max(30), vehicleId: z.string().min(1),
     beneficiary, paymentMethod: method, billingType: z.enum(["PERSONAL", "CORPORATE"]), billingOrgId: id.optional(),
     fareMinor: minor, waitingFeeMinor: minor, currency: z.string().length(3), distanceMeters: z.number(), durationSeconds: z.number(), completedAt: z.string(),
-  }),
+  }).refine(...corporateNamesOrg),
   "trip.cancelled": z.object({
     eventId: z.string().min(1), version: z.number(), at: z.string(),
     tripId: id, riderId: id, driverId: id.optional(), cityId: z.string().min(1).max(40), by: z.enum(["RIDER", "DRIVER", "SYSTEM", "STAFF"]),
     reason: z.string(), paymentMethod: method, feeMinor: minor, driverCompensationMinor: minor, beneficiary: beneficiary.optional(),
     currency: z.string().length(3), billingOrgId: id.optional(),
-  }),
+  }).refine(...corporateNamesOrg),
 };
 
 export const TOPICS = Object.keys(schemas) as (keyof typeof schemas)[];

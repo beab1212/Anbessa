@@ -28,7 +28,7 @@ Types: `IdentityEvent` in `src/outbox/outbox.ts`. Only `user.created` also has a
 | `user.suspended` | userId | `userId`, `until: ISO \| null`, `byUserId` | `POST /api/identity/users/:id/suspend` |
 | `user.reinstated` | userId | `userId`, `byUserId` | `POST /api/identity/users/:id/reinstate` |
 | `role.granted` | userId | `userId`, `role` (role **code**, e.g. `DRIVER`, `DISPATCHER`, `FLEET_DRIVER`), `orgId?`, `cityId?`, `byUserId: string \| null` | Staff grant approved (`cityId` for city roles, `byUserId` = checker); driver activated via `/internal/drivers/:userId/role` (`role: "DRIVER"`, `byUserId: null`); member added to a partner org, one event per role (`orgId`, `byUserId: null`) — `hooks.ts` `afterAddMember` (includes the creator at org creation); bootstrap super admin (`role: "SUPER_ADMIN"`) |
-| `role.revoked` | userId | same as `role.granted` | Staff role revoked (`cityId?`, `byUserId` = revoker); driver deactivated; member removed from a partner org (one per role) — `hooks.ts` `afterRemoveMember` |
+| `role.revoked` | userId | same as `role.granted` | Staff role revoked (`cityId?`, `byUserId` = revoker); driver deactivated (fleet-service suspends the driver: `/internal/drivers/:userId/role {active:false}`); member removed from a partner org (one per role) — `hooks.ts` `afterRemoveMember` |
 | `org.created` | orgId | `orgId`, `kind`, `cityId` | `POST /api/auth/organization/create` — `hooks.ts` `afterCreateOrganization` |
 | `org.verified` | orgId | `orgId`, `kind`, `cityId`, `byUserId` | `POST /api/identity/organizations/:id/verify` |
 | `org.suspended` | orgId | `orgId`, `kind`, `byUserId` | `POST /api/identity/organizations/:id/suspend` |

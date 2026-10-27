@@ -41,7 +41,7 @@ const httpServer = createServer((req, res) => {
 // Tokens travel in the handshake (auth.token), not cookies, so any origin may connect.
 const io = new Server(httpServer, { cors: { origin: true }, maxHttpBufferSize: 16 * 1024 });
 io.adapter(createAdapter(pubClient, subClient));
-io.use(createSocketAuth(pubClient));
+io.use(createSocketAuth(pubClient, logger));
 
 io.on("connection", (socket) => {
   // services push to people, not connections: trip-service emits trip:offer / trip:status to

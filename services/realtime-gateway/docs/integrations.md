@@ -14,7 +14,7 @@
 
 | Callee | What | Timeout | On failure |
 |---|---|---|---|
-| Redis | adapter, location keys, deny list, permission version | ioredis defaults (no options passed) | handshake refused (`unauthorized`); pings ack `unavailable`; `trip:subscribe` ack `unavailable`; `/health/ready` 503 |
+| Redis | adapter, location keys, deny list, permission version | ioredis defaults (no options passed) | handshake refused (`unavailable`, not counted toward the app's sign-out); pings ack `unavailable`; `trip:subscribe` ack `unavailable`; `/health/ready` 503 |
 | auth-service JWKS (`AUTH_JWKS_URL`) | key set for ES256 verification (jose remote JWKS, cached, refetched for an unknown `kid`) | jose defaults | handshakes refused |
 | auth-service `GET /internal/authz/snapshot` | live permission matrix (only with `INTERNAL_SERVICE_TOKEN`) | 3 s | keeps the current/built-in matrix, logged; polled every 30 s and on `authz:changed` |
 | Kafka | `driver.location` | kafkajs defaults | counted as dropped; never affects the ping |

@@ -55,21 +55,23 @@ pino, logger name `realtime-gateway`, level from `NODE_ENV` only (`LOG_LEVEL` is
 | `realtime-gateway listening on :3000` | info |
 | `KAFKA_BROKERS not set: driver.location is not published (Redis still updates)` | warn |
 | `driver.location publish failed` (with `err`) | warn |
+| `socket auth: token check unavailable` (with `err`) | warn |
 | `INTERNAL_SERVICE_TOKEN not set: using the built-in permission matrix` | warn |
 | `permission matrix updated` / `… refresh failed; keeping the current one` / `can't subscribe to permission changes; polling only` | info / warn |
 | `SIGTERM received, shutting down` | info |
 
-Connections, refused handshakes, rejected pings and disconnects are **not** logged. There's no metrics endpoint beyond the two Kafka counters.
+Connections, handshakes refused as `unauthorized`, rejected pings and disconnects are **not** logged (only `unavailable` refusals are). There's no metrics endpoint beyond the two Kafka counters.
 
 ## Failure modes and diagnosis
 
 | Symptom | Likely cause | Check |
 |---|---|---|
-| App can't connect, `connect_error: unauthorized`, and the user is signed out after 3 tries | expired/invalid token, wrong `AUTH_ISSUER`/`AUTH_JWKS_URL`, user suspended (`deny:{id}`), outdated `pv`, **or Redis unreachable** (the deny/pv lookup fails and is reported as `unauthorized`) | `redis-cli EXISTS deny:<id>`, `GET pv:<id>`; JWKS reachable from the pod; the token's `iss`/`aud` |
+| App can't connect, `connect_error: unauthorized: <code>`, and the user is signed out after 3 tries | expired/invalid token, wrong `AUTH_ISSUER`/`AUTH_JWKS_URL` (`invalid_token`), user suspended (`token_revoked`, `deny:{id}`), outdated `pv` (`token_outdated`), no token (`missing_token`) | `redis-cli EXISTS deny:<id>`, `GET pv:<id>`; JWKS reachable from the pod; the token's `iss`/`aud` |
+| App can't connect, `connect_error: unavailable`; the user stays signed in and the app keeps retrying | Redis unreachable (the deny/pv lookup failed), or the JWKS at `AUTH_JWKS_URL` can't be fetched (fixed 2026-10-27: both used to be reported as `unauthorized` and signed people out) | warn `socket auth: token check unavailable`; `/health/ready` |
 | Every ping acked `not_online` | no `driver:{id}` hash: `driver.online` not applied by location-service (Kafka/fleet-service), or different Redis instances | `HGETALL driver:<id>` on the gateway's Redis |
 | Pings acked `too_fast` / `out_of_order` after a phone clock change | `at` is device time and compared with the last accepted device time | wait for the hash to expire (15 min) or go offline/online |
 | Pings acked `unavailable` | Redis errors | `/health/ready` |
 | Rider sees no live car | not joined (`trip:subscribe` → `not_found` because `trip.matched` not applied yet), driver not `on_trip` in Redis, or gateway pods on different Redis | `SMEMBERS trip:<id>:members`, `HGET driver:<id> tripId` |
 | Drivers don't get offers / riders no status | trip-service's `REDIS_URL` differs from the gateway's, or the user has no connected socket (events aren't stored) | compare `REDIS_URL`s |
-| `/health/ready` shows `dropped` rising | Kafka unreachable or producer disconnected; pings still work | Kafka brokers; restart the pod if `published` stays flat (no reconnect after a `DISCONNECT` event) |
+| `/health/ready` shows `dropped` rising | Kafka unreachable or producer disconnected; pings still work | Kafka brokers. The producer reconnects by itself after a `DISCONNECT` (1 s, then every 5 s); if `published` stays flat, look for `driver.location publish failed` in the log |
 | Suspended user still connected for up to a minute | expected: 60 s recheck | |

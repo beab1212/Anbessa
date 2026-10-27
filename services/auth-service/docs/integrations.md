@@ -20,7 +20,7 @@ auth-service makes no other outbound HTTP calls. It verifies its own JWTs in pro
 | Phone app | `/api/auth/*`: OTP sign-in, `/token`, sessions, profile; `/api/identity/me`, `/cities` | `apps/phone-app` |
 | Web app — staff dashboard | `/api/admin-auth/*` (password, TOTP, `/token`); `/api/identity/*` (approvals, users, roles/matrix, stats, organisations, suspension) | `apps/web/src/pages/admin/*`, `apps/web/src/lib/session.tsx` |
 | Web app — fleet and corporate portals | `/api/auth/*` (phone OTP, organisations, invitations), `/api/identity/authz` | `apps/web` |
-| fleet-service | `GET /internal/organizations/:id`, `GET /internal/organizations/:id/members/:userId`, `POST /internal/drivers/:userId/role`. 3 s timeout; 404 → `null`; other errors → 503 `dependency_unavailable`. The driver-role call runs inside fleet-service's transaction, so a failure there rolls back the activation | `services/fleet-service/src/lib/clients.ts` |
+| fleet-service | `GET /internal/organizations/:id`, `GET /internal/organizations/:id/members/:userId`, `POST /internal/drivers/:userId/role`. 3 s timeout; 404 → `null` for the lookups, `409 user_not_found` for the driver-role call; other errors → 503 `dependency_unavailable`. The driver-role call (`active: true` on approve and reinstate, `false` on suspend) runs inside fleet-service's transaction, so a failure there rolls back the change | `services/fleet-service/src/lib/clients.ts` |
 | fleet-service `seed:dev` | `GET /api/dev/accounts` | `services/fleet-service/src/dev/seed.ts` |
 | trip-service | `GET /internal/users/:id` for `GET /api/trips/:id/parties`; 404 → `null` | `services/trip-service/src/lib/clients.ts` |
 | platform-service | `PUT /internal/cities/:id` when a city is created or changed (3 s timeout; failure → 503 to its caller, "try again"); `GET /internal/ops/outbox` for the system page | `services/platform-service/src/lib/identity.ts`, `src/system/health.ts` |
@@ -145,4 +145,6 @@ sequenceDiagram
 
 ### Driver activation (fleet-service → auth-service)
 
-fleet-service calls `POST /internal/drivers/:userId/role {active: true}` inside its own transaction. auth-service adds `driver` to `app_user.role`, bumps `pv`, writes `role.granted {role: "DRIVER"}` (notification-service pushes "driver activated"), and sets `pv:{userId}`. The driver's next `/token` includes `{ r: "DRIVER" }`.
+fleet-service calls `POST /internal/drivers/:userId/role {active: true}` inside its own transaction (on approve and on reinstate). auth-service adds `driver` to `app_user.role`, bumps `pv`, writes `role.granted {role: "DRIVER"}` (notification-service pushes "driver activated"), and sets `pv:{userId}`. The driver's next `/token` includes `{ r: "DRIVER" }`.
+
+On a driver suspension fleet-service calls the same route with `{active: false}`: auth-service removes `driver`, bumps `pv` and writes `role.revoked {role: "DRIVER"}`, so open tokens are refused as `token_outdated` and the next `/token` has no `DRIVER`.

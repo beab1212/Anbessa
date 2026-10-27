@@ -56,6 +56,21 @@ describe("request (workflow 05, part C)", () => {
     expect(second.json()).toMatchObject({ error: "active_trip_exists" });
   });
 
+  it("a quote books one trip; after a cancellation it can book again", async () => {
+    const r = await h.rider();
+    const q = await h.quote(r);
+    const first = await h.req("POST", "/api/trips", r, { quoteId: q.id, paymentMethod: "CASH" });
+    expect(first.statusCode).toBe(201);
+    const tripId = first.json<{ id: string }>().id;
+    expect((await h.req("POST", `/api/trips/${tripId}/cancel`, r, { reason: "CHANGED_PLANS" })).statusCode).toBe(200);
+    const again = await h.req("POST", "/api/trips", r, { quoteId: q.id, paymentMethod: "CASH" });
+    expect(again.statusCode).toBe(201);
+    // that trip stays live (moved to someone else here, so the rider may request again): the quote is spent
+    await h.c.db.trip.update({ where: { id: again.json<{ id: string }>().id }, data: { riderUserId: uuid() } });
+    const third = await h.req("POST", "/api/trips", r, { quoteId: q.id, paymentMethod: "CASH" });
+    expect(third.json()).toMatchObject({ error: "quote_used" });
+  });
+
   it("refuses expired quotes and other people's quotes", async () => {
     const r = await h.rider();
     const q = await h.quote(r);

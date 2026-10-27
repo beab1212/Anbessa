@@ -18,7 +18,7 @@
 | platform-service | `GET /internal/settings/snapshot` | service token | 3 s | keep current snapshot (registry defaults at start) | `libs/shared-settings` |
 | auth-service | `GET /internal/authz/snapshot` | service token | 3 s | keep current matrix | `libs/shared-authz/src/sync.ts` |
 | auth-service | JWKS `AUTH_JWKS_URL` | none | jose defaults | token rejected → 401 | `libs/shared-authz` |
-| Redis | `SET/GET quote:*`, `EXISTS deny:*`, `GET pv:*`, SUBSCRIBE | `REDIS_URL` | `maxRetriesPerRequest: 2` | readiness 503; estimates 500; token checks fail | `src/container.ts` |
+| Redis | `SET/GET quote:*`, `EXISTS deny:*`, `GET pv:*`, SUBSCRIBE | `REDIS_URL` | `maxRetriesPerRequest: 2` | readiness 503; estimates 500; token checks refuse the request with `503 auth_unavailable` (`retry-after: 5`) | `src/container.ts` |
 
 pricing-service never calls OSRM directly; mapping-service is the only service that does (`infra/mapping-stack/README.md`).
 

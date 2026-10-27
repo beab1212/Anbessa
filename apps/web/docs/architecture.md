@@ -182,7 +182,7 @@ The app keeps two independent sign-ins on one origin. Both are Better Auth insta
 
 ### Session state ([src/lib/session.tsx](../src/lib/session.tsx))
 
-- `useClaims(surface)`: a query `["session", surface]` that calls `accessToken(surface, true)` and stores its claims (`null` if signed out). `staleTime` 5 min, no retry. It runs for both surfaces on every page load, including the public page.
+- `useClaims(surface)`: a query `["session", surface]` that calls `accessToken(surface, true)` and stores its claims (`null` if signed out). `staleTime` 5 min, no retry. It runs for both surfaces on every page load except public pages: on a path starting with `/t/` the query is disabled (`enabled: !onPublicPage()`), so the shared-trip page makes no token calls.
 - `useAuthz(surface)`: once a staff (preferred) or partner session exists, fetches `GET /api/identity/authz` every 60 s and passes it to `setAuthzSnapshot()`, so `can()` reads the live matrix instead of the bundled fallback. Staff `loading` stays true until the first snapshot arrives.
 - `principal` objects are re-derived when the matrix `version` changes.
 - `refresh(surface)` drops the cached token and refetches the session query. Sign-in pages, setup and company registration call it.

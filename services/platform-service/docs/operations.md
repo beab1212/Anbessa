@@ -56,6 +56,7 @@ pino via `createLogger("platform-service", NODE_ENV)` from `libs/shared-utils`; 
 | warn | `REDIS_URL not set: …` / `KAFKA_BROKERS not set: audit events stay in the outbox table` | optional dependency missing (development) |
 | warn | `couldn't publish settings:changed; services pick it up on their next poll` | Redis publish failed after a commit |
 | warn | `outbox relay: publish failed, will retry` | Kafka unreachable |
+| warn | `token check unavailable (Redis)` | Redis deny-list / permission-version lookup failed; the request got `503 auth_unavailable` |
 | error | `settings approval expiry failed` | the hourly job failed |
 | error | `unhandled error` | a 500, with the request id |
 
@@ -73,4 +74,4 @@ pino via `createLogger("platform-service", NODE_ENV)` from `libs/shared-utils`; 
 | Every staff call → 403 for a super admin | permission matrix not loaded or changed in auth-service | `authz` sync logs |
 | System page slow | each check waits up to 2–4 s; Kafka admin can take longer | use the cached result (10 s) |
 | Start fails with a zod error | missing `DATABASE_URL`/`INTERNAL_SERVICE_TOKEN`, or `REDIS_URL`/`KAFKA_BROKERS` missing in production | |
-| New announcement not shown in the phone app until restart | announcements don't change `version`, and the app replaces its config only when `version` changes | see [architecture.md](architecture.md#client-configuration) |
+| New announcement takes up to about a minute to show in the phone app | the app refetches the client config every 60 s (and on resume; the response may be cached 15 s). Announcements don't change `version`, but the app also compares the announcement list (id/title/body), so it no longer waits for a restart (fixed 2026-10-27) | see [architecture.md](architecture.md#client-configuration); `apps/phone-app/lib/features/config/client_config_provider.dart` |

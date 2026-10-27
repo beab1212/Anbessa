@@ -269,6 +269,9 @@ export function createTripService(deps: TripServiceDeps) {
       }
       if (!quote || quote.requestedBy !== p.userId) throw badRequest("unknown quote", "invalid_quote");
       if (new Date(quote.expiresAt).getTime() <= now().getTime()) throw badRequest("the quote has expired, get a new one", "quote_expired");
+      // one trip per quote: re-booking after a cancellation is fine, a second live or finished trip isn't
+      const used = await db.trip.findFirst({ where: { quoteId: input.quoteId, status: { not: "cancelled" } }, select: { id: true } });
+      if (used) throw badRequest("this quote was already used, get a new one", "quote_used");
 
       const riderId = input.riderUserId ?? p.userId;
       const onBehalf = riderId !== p.userId;

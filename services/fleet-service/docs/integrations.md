@@ -11,12 +11,12 @@ All service-to-service HTTP calls use `Authorization: Bearer <INTERNAL_SERVICE_T
 | auth-service | `GET {AUTH_JWKS_URL}` (JWKS) | jose defaults | Token checks fail → 401 `invalid_token` |
 | auth-service | `GET /internal/organizations/:id` → `{ id, name, kind, cityId, legalName, status }` | 3 s | Network error / timeout / non-2xx except 404 → `503 dependency_unavailable`. 404 → treated as "no such organisation" |
 | auth-service | `GET /internal/organizations/:orgId/members/:userId` → `{ organizationId, userId, roles[], name, phoneNumber, banned }` | 3 s | Same. auth-service answers 404 for non-members and for memberships past their `validUntil` |
-| auth-service | `POST /internal/drivers/:userId/role { active: true }` | 3 s | `503` → the approval transaction rolls back. A 404 (user unknown to auth-service) is swallowed and the approval succeeds |
+| auth-service | `POST /internal/drivers/:userId/role { active }`: `true` on approve and reinstate, `false` on suspend | 3 s | `503` → the transaction (approve, suspend or reinstate) rolls back. A 404 (user unknown to auth-service) → `409 user_not_found`, also rolled back (`setDriverRole` in `src/lib/clients.ts`; it used to be swallowed) |
 | auth-service | `GET /internal/authz/snapshot` (permission matrix) | 3 s | Logged; the current (or built-in) matrix stays in force. Retried on `authz:changed` and every 30 s |
 | payment-service | `GET /internal/balances/state?type=INDIVIDUAL\|ORGANIZATION&ownerId=` → `{ state, cashAllowed }` | 2 s | Any error or non-2xx → `null`: the session starts with `balanceState: "OK"`, `cashAllowed: true` and a warning is logged |
 | platform-service | `GET /internal/settings/snapshot` | 3 s | Logged; current values (or env / registry defaults) stay. Retried on `settings:changed` and every 30 s |
 | Object storage (S3 / MinIO) | `PutObject` / `GetObject` presign (local computation), `HeadObject` on confirm, `HeadBucket` on `/internal/ops/storage` | AWS SDK defaults | `HeadObject` 404 → `upload_missing`; other errors → 500. `HeadBucket` errors → `{ ok: false }` |
-| Redis | `EXISTS deny:{id}`, `GET pv:{id}` per authenticated request; `SUBSCRIBE authz:changed`, `settings:changed` | ioredis, `maxRetriesPerRequest: 2` | A Redis error during a token check is not caught: the request fails with 500 |
+| Redis | `EXISTS deny:{id}`, `GET pv:{id}` per authenticated request; `SUBSCRIBE authz:changed`, `settings:changed` | ioredis, `maxRetriesPerRequest: 2` | A Redis error during a token check refuses the token as `TokenCheckUnavailable`: the request answers `503 auth_unavailable` with `retry-after: 5` |
 | Kafka | Produce (outbox relay), consume `driver.connection_lost` | kafkajs defaults | See [events.md](events.md) |
 | Postgres | Prisma over `pg` | — | `/health/ready` returns 503 |
 
@@ -98,7 +98,7 @@ sequenceDiagram
   Note over D: the app's next token refresh carries DRIVER (older tokens get 401 token_outdated)
 ```
 
-If auth-service fails at step "POST /internal/drivers/…/role", the transaction rolls back, the profile stays `PENDING_REVIEW` and the officer gets `503 dependency_unavailable` (covered by `tests/integration/fleet.test.ts`).
+If auth-service fails at step "POST /internal/drivers/…/role", the transaction rolls back, the profile stays `PENDING_REVIEW` and the officer gets `503 dependency_unavailable` (covered by `tests/integration/fleet.test.ts`), or `409 user_not_found` if auth-service answers 404. Suspend and reinstate call the same endpoint (`active: false` / `true`) inside their own transactions, with the same rollback.
 
 ## Sequence: document upload
 

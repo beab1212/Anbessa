@@ -46,12 +46,18 @@ class ClientConfigController extends AsyncNotifier<ClientConfig> {
     final mode = ref.read(effectiveModeProvider);
     try {
       final next = await _fetch(mode?.name ?? 'rider');
-      if (next.version != state.value?.version || state.value == null) state = AsyncData(next);
+      final current = state.value;
+      // announcements start and end on their own schedule without a settings version bump, so
+      // compare them too (a new one used to wait for the next app start)
+      if (current == null || next.version != current.version || !_sameAnnouncements(next, current)) state = AsyncData(next);
     } catch (_) {
       // keep what we have
     }
   }
 }
+
+bool _sameAnnouncements(ClientConfig a, ClientConfig b) =>
+    listEquals(a.announcements.map((x) => '${x.id}|${x.title}|${x.body}').toList(), b.announcements.map((x) => '${x.id}|${x.title}|${x.body}').toList());
 
 final clientConfigProvider = AsyncNotifierProvider<ClientConfigController, ClientConfig>(ClientConfigController.new);
 

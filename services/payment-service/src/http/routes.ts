@@ -12,6 +12,10 @@ import { withIdempotency } from "../lib/idempotency.js";
 import { badRequest, notFound, unauthorized } from "../lib/errors.js";
 import { assertFinanceView } from "../money/access.js";
 
+/** A query flag: "true"/"1" is on; anything else, "false" included, is off (z.coerce.boolean() reads "false" as true). */
+const queryFlag = z.enum(["true", "false", "1", "0"]).default("false").transform((v) => v === "true" || v === "1");
+
+
 const uuid = z.string().uuid();
 const cityId = z.string().regex(/^[a-z0-9-]{1,40}$/);
 const money = z.number().int().positive().max(100_000_000);
@@ -61,13 +65,13 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
   // ── drivers and fleet owners: the balance ───────────────────────────────────
   app.get("/api/payments/balances/me", async (req) => {
     const p = await principal(req);
-    const q = z.object({ cityId: cityId.default("addis-ababa"), open: z.coerce.boolean().default(false) }).parse(req.query);
+    const q = z.object({ cityId: cityId.default("addis-ababa"), open: queryFlag }).parse(req.query);
     return balances.mine(p, q.cityId, q.open);
   });
   app.get("/api/payments/balances/org/:orgId", async (req) => {
     const p = await principal(req);
     const { orgId } = z.object({ orgId: uuid }).parse(req.params);
-    const q = z.object({ cityId: cityId.default("addis-ababa"), open: z.coerce.boolean().default(false) }).parse(req.query);
+    const q = z.object({ cityId: cityId.default("addis-ababa"), open: queryFlag }).parse(req.query);
     return balances.org(p, orgId, q.cityId, q.open);
   });
   app.get("/api/payments/balances/:accountId", async (req) => balances.get(await principal(req), z.object({ accountId: uuid }).parse(req.params).accountId));

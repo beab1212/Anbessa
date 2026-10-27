@@ -18,10 +18,14 @@ interface SessionValue {
 
 const Ctx = createContext<SessionValue | null>(null);
 
+/** Public pages (a shared trip, /t/:token) need no session: visitors have none, so don't ask. */
+const onPublicPage = () => typeof window !== "undefined" && window.location.pathname.startsWith("/t/");
+
 /** Who is signed in on each surface: a fresh access token's claims, refreshed with the token. */
 function useClaims(surface: Surface) {
   return useQuery({
     queryKey: ["session", surface],
+    enabled: !onPublicPage(),
     queryFn: async () => {
       const t = await accessToken(surface, true).catch(() => null);
       return { claims: t?.claims ?? null };

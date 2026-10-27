@@ -31,6 +31,7 @@ location-service's verifier does **not** check the suspension deny list (`deny:{
 | 403 | `{ error: "forbidden", message: "missing permission … for this resource" }` | `authorize()` fails (ops map) |
 | 404 | `{ error: "not_found", message: "<what> not found" }` | unknown driver, trip not visible, no position, unknown route |
 | 4xx | `{ error: <fastify code or "bad_request">, message }` | other Fastify client errors, including 429 from the rate limiter |
+| 503 | `{ error: "auth_unavailable", message }` | `TokenCheckUnavailable` is mapped (503, `retry-after: 5`) but can't occur here: location-service's verifier has no deny-list / permission-version callbacks |
 | 500 | `{ error: "internal_error", message: "Something went wrong" }` | anything else (logged with the request id) |
 
 A `cityId` or `vehicleType` that passes the length check but not the key guards in `libs/shared-location/src/keys.ts` (`^[a-z0-9-]{1,40}$`, `^[a-z0-9_]{1,30}$`) throws a plain `Error` inside the key builder and answers **500**, not 400.

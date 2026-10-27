@@ -28,7 +28,7 @@ Validated fields (zod, `schemas` in `src/events/consumer.ts`):
 | `beneficiary` | `{ type: INDIVIDUAL \| ORGANIZATION, id: uuid }` |
 | `paymentMethod` | `CASH`, `MOBILE_MONEY`, `CARD`, `CORPORATE` |
 | `billingType` | `PERSONAL`, `CORPORATE` |
-| `billingOrgId` | uuid, optional |
+| `billingOrgId` | uuid, optional; **required** when `paymentMethod` is `CORPORATE` (zod `refine`) |
 | `fareMinor`, `waitingFeeMinor` | int ≥ 0 (`fareMinor` already includes the waiting fee; `waitingFeeMinor` is not used) |
 | `currency` | 3 chars |
 | `distanceMeters`, `durationSeconds` | number (not used) |
@@ -46,13 +46,13 @@ Validated fields (zod, `schemas` in `src/events/consumer.ts`):
 | `feeMinor`, `driverCompensationMinor` | int ≥ 0 |
 | `beneficiary` | optional |
 | `currency` | 3 chars |
-| `billingOrgId` | uuid, optional |
+| `billingOrgId` | uuid, optional; **required** when `paymentMethod` is `CORPORATE` |
 
 **Deduplication.** The handler's transaction starts with `INSERT INTO inbox (event_id, topic) … ON CONFLICT DO NOTHING`; a redelivered `eventId` does nothing. Settlement is also guarded by `trip_settlement (trip_id, purpose)` and the journal idempotency key, and `payment` is unique per `(trip_id, purpose)`.
 
 **Errors and retries.**
 
-- Invalid JSON or a zod failure: logged at error (`skipping invalid event` with topic, partition, offset) and skipped; the offset moves on.
+- Invalid JSON or a zod failure: logged at error (`skipping invalid event` with topic, partition, offset) and skipped; the offset moves on. This includes a `CORPORATE` trip without `billingOrgId` ("CORPORATE payment without billingOrgId"), which is not settled at all rather than settled as cash. Test: `tests/unit/consumer.test.ts`.
 - Any other error (database down, a bug): rethrown, so kafkajs doesn't commit the offset and retries with its default retry policy. There is no dead-letter topic in the code; a message that always fails blocks its partition.
 - The charge for a digital trip starts after the transaction commits. If the process dies in between, the `charges` job picks up `PENDING` payments without a `provider_ref` after 10 s.
 

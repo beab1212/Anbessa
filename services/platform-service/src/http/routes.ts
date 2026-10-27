@@ -11,6 +11,10 @@ import type { CatalogService } from "../catalog/service.js";
 import type { SettingsService } from "../settings/service.js";
 import type { SystemHealth } from "../system/health.js";
 
+/** A query flag: "true"/"1" is on; anything else, "false" included, is off (z.coerce.boolean() reads "false" as true). */
+const queryFlag = z.enum(["true", "false", "1", "0"]).default("false").transform((v) => v === "true" || v === "1");
+
+
 const uuid = z.string().uuid();
 const reason = z.string().trim().min(5).max(500);
 const cityIdParam = z.string().regex(/^[a-z0-9-]{1,40}$/);
@@ -118,7 +122,7 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
 
   // ── system ────────────────────────────────────────────────────────────────
   app.get("/api/platform/system", async (req, reply) => {
-    const { refresh } = z.object({ refresh: z.coerce.boolean().default(false) }).parse(req.query);
+    const { refresh } = z.object({ refresh: queryFlag }).parse(req.query);
     return reply.header("cache-control", "no-store").send(await system.check(await staff(req), refresh));
   });
 

@@ -16,8 +16,10 @@ flowchart TD
   J -->|any error| E1["TokenError invalid_token"]
   J --> D{"options.isDenied?(sub)"}
   D -->|true| E2["TokenError token_revoked"]
+  D -->|throws| E4["TokenCheckUnavailable 503"]
   D -->|false / not set| PV{"options.currentPermissionVersion?(sub)"}
   PV -->|"current defined and token pv < current"| E3["TokenError token_outdated"]
+  PV -->|throws| E4
   PV --> P["Principal"]
 ```
 
@@ -45,9 +47,11 @@ Throws `Error("createTokenVerifier needs jwksUrl or keySet")` at construction if
 The returned function `verifyAccessToken(token, audience)`:
 
 - verifies with `jose.jwtVerify` against `issuer`, the given `audience`, `algorithms`, the clock tolerance, and requires `sub`, `exp`, `iat`;
-- any jose failure (bad signature, wrong `iss`/`aud`, expired, missing claim, disallowed alg) becomes `TokenError("invalid_token", "invalid or expired access token")`. The original error is discarded;
+- a failure to get the key set (the fetch throws, `JWKSTimeout`, `JWKSInvalid`, or a non-200 from the JWKS endpoint) becomes `TokenCheckUnavailable` (503): it says nothing about the token;
+- any other jose failure (bad signature, wrong `iss`/`aud`, expired, missing claim, disallowed alg, malformed token) becomes `TokenError("invalid_token", "invalid or expired access token")`. The original error is discarded;
 - `isDenied(sub)` true → `TokenError("token_revoked", "account suspended")`;
 - `pv` claim: used if it's a number, else `0`. If `currentPermissionVersion(sub)` returns a number and `pv < current` → `TokenError("token_outdated", "roles changed, refresh the token")`;
+- if `isDenied` or `currentPermissionVersion` throws (e.g. Redis down) → `TokenCheckUnavailable` (the original error kept as `cause`). The token is still refused (fail closed), but as a temporary failure, not as a bad token;
 - returns the [`Principal`](#principal).
 
 ### `TokenError`
@@ -60,6 +64,19 @@ class TokenError extends Error {
 ```
 
 Services map it to `401 { error: err.code, message: err.message }` (e.g. `services/trip-service/src/middlewares/error-handler.ts`).
+
+### `TokenCheckUnavailable`
+
+```ts
+class TokenCheckUnavailable extends Error {
+  readonly statusCode = 503;
+  readonly code = "auth_unavailable";
+  readonly cause: unknown;   // the error the callback threw
+  // message: "cannot check the token right now, try again"
+}
+```
+
+Thrown when the deny-list or permission-version lookup fails. It is not a `TokenError`, so the audience fallback below doesn't retry it. Every service's `src/middlewares/error-handler.ts` maps it to `503` with `retry-after: 5` and `{ error: "auth_unavailable", message }`, and logs warn `token check unavailable (Redis)`. Clients treat it as "try again", not as signed out. Test: "a failed suspension / version lookup refuses the token as temporarily unavailable, not as invalid" in `tests/verify.test.ts`.
 
 ### Audiences
 
@@ -101,7 +118,7 @@ createTokenVerifier({
 });
 ```
 
-If the callbacks throw (e.g. Redis down), the error propagates out of `verifyAccessToken` unchanged; it is not turned into a `TokenError`. auth-service's own `SecuritySignals.isDenied` / `currentPermissionVersion` catch Redis errors and return a fallback; services that call Redis directly, like trip-service above, don't.
+If the callbacks throw (e.g. Redis down), `verifyAccessToken` throws [`TokenCheckUnavailable`](#tokencheckunavailable) (503 `auth_unavailable`), not a `TokenError`; the token is refused. auth-service's own `SecuritySignals.isDenied` / `currentPermissionVersion` catch Redis errors and return a fallback, so they never throw; services that call Redis directly, like trip-service above, get the 503.
 
 ## `bearerToken(header)`
 

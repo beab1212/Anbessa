@@ -49,7 +49,9 @@ export function authClient(baseUrl: string, token: string): AuthClient {
     organization: (id) => call<Organization>("GET", `/internal/organizations/${id}`),
     membership: (orgId, userId) => call<Membership>("GET", `/internal/organizations/${orgId}/members/${userId}`),
     async setDriverRole(userId, active) {
-      await call("POST", `/internal/drivers/${userId}/role`, { active });
+      // a 404 means auth-service has no such user: the change must not go through silently
+      const r = await call("POST", `/internal/drivers/${userId}/role`, { active });
+      if (r === null) throw new AppError(409, "auth-service has no account for this driver", "user_not_found");
     },
   };
 }

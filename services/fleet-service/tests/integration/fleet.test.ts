@@ -199,9 +199,11 @@ describe("vehicles and sessions (workflow 04)", () => {
     const dispatcher = await h.staff([{ r: "DISPATCHER", city: CITY }]);
     expect((await h.req("POST", `/api/fleet/drivers/${d.id}/suspend`, dispatcher, { reason: "Repeated complaints" })).statusCode).toBe(403);
     await h.ok(h.req("POST", `/api/fleet/drivers/${d.id}/suspend`, safety, { reason: "Repeated complaints from riders" }));
+    expect(h.roleCalls.at(-1)).toEqual({ userId: d.id, active: false }); // the DRIVER role goes with it
     expect((await h.outbox(d.id, "driver.offline")).at(-1)).toMatchObject({ reason: "SUSPENDED" });
     expect((await h.req("POST", "/api/fleet/sessions", d, { vehicleId: v.id })).json()).toMatchObject({ error: "driver_not_active" });
     await h.ok(h.req("POST", `/api/fleet/drivers/${d.id}/reinstate`, safety, { reason: "Investigation closed, no fault" }));
+    expect(h.roleCalls.at(-1)).toEqual({ userId: d.id, active: true });
     await h.ok(h.req("POST", "/api/fleet/sessions", d, { vehicleId: v.id }), 201);
   });
 });

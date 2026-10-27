@@ -49,6 +49,7 @@ pino, name `audit-service`. Fastify request logs on.
 | `skipping invalid audit event` | error | a producer sent something the schema refuses; that entry is lost |
 | `partition maintenance failed` | error | `ensure_audit_partitions` failed (permissions, default-partition conflict) |
 | `permission matrix refresh failed; keeping the current one` | warn | auth-service unreachable |
+| `token check unavailable (Redis)` | warn | Redis deny-list / permission-version lookup failed; the request got `503 auth_unavailable` |
 
 ## Failure modes
 

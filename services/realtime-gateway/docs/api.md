@@ -21,7 +21,7 @@ The method isn't checked. The `kafka` counters are process-local, since start; p
 | CORS | any origin (`cors: { origin: true }`) |
 | Max message size | 16 KiB (`maxHttpBufferSize`) |
 | Transports | server allows Socket.io defaults (HTTP long-polling and WebSocket); the phone app forces `websocket` |
-| Refusal | `connect_error` with message `unauthorized` for every failure (missing token, bad signature/issuer/audience/expiry, suspended, outdated permission version, Redis error during the checks). See [architecture.md §3](architecture.md#3-handshake-authentication-srcmiddlewaresauthmiddlewarets) |
+| Refusal | `connect_error` with message `unauthorized: <code>` when the token is refused (`missing_token`, `invalid_token` for bad signature/issuer/audience/expiry, `token_revoked` for suspended, `token_outdated` for an outdated permission version), or `unavailable` when the check itself failed (Redis error during the deny/pv lookups). Only `unauthorized` counts toward the app's sign-out. See [architecture.md §3](architecture.md#3-handshake-authentication-srcmiddlewaresauthmiddlewarets) |
 | On success | the socket is in room `user:{userId}` |
 
 There is no connection rate limit and no per-user connection cap in code.

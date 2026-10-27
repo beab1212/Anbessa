@@ -120,7 +120,7 @@ stateDiagram-v2
 
 | Transition | Function | Who | Guards | `trip_event` row | Outbox topic | Push |
 |---|---|---|---|---|---|---|
-| → `requested` | `request()` | see [API](api.md#post-apitrips) | quote exists, `requestedBy` = caller, not expired; corporate ⇔ `billingOrgId`; permission per channel; `maintenance.newTrips` off; channel flags; payment method allowed in city; no other active trip for the rider (unique index → `409 active_trip_exists`) | `to_status=requested`, `data={quoteId, approximate}` | `trip.requested` | `trip:status` |
+| → `requested` | `request()` | see [API](api.md#post-apitrips) | quote exists, `requestedBy` = caller, not expired, not used by another trip that isn't `cancelled` (`400 quote_used`); corporate ⇔ `billingOrgId`; permission per channel; `maintenance.newTrips` off; channel flags; payment method allowed in city; no other active trip for the rider (unique index → `409 active_trip_exists`) | `to_status=requested`, `data={quoteId, approximate}` | `trip.requested` | `trip:status` |
 | `requested → matched` | `accept()` / `assign()` → `matchDriver()` | offered driver / dispatcher | see diagram; `driver_active_trip` insert (PK violation → `409 driver_busy`) | `data={assignedBy}` for assign | `trip.matched` | `trip:status` |
 | `matched → en_route` | `enRoute()` | assigned driver | status `matched` | yes | `trip.driver_en_route` | `trip:status` |
 | `en_route → en_route` | `arrive()` | assigned driver | not `matched` (→ `409 invalid_state`); already arrived → returns the trip unchanged; position known (`409 position_unknown`); within radius (`409 too_far_from_pickup`) | `data={arrived:true, metersFromPickup}` | `trip.driver_arrived` | `trip:status` |
@@ -341,7 +341,7 @@ No trip data is cached; every read goes to Postgres.
 
 - Public routes: `Authorization: Bearer <access token>` issued by auth-service. Verified by `createTokenVerifier()` (`libs/shared-authz/src/verify.ts`): ES256 signature against `AUTH_JWKS_URL`, issuer `AUTH_ISSUER`, audience, expiry (30 s clock tolerance), required `sub`/`exp`/`iat`.
 - Both audiences are accepted: `ride-app` first, then `ride-admin` if the first fails with `invalid_token`. The audience matters later: `ride-admin` callers are treated as staff in `tripView()` (see flags), in `request()` (channel `PHONE`), in `cancel()` (`STAFF`) and in the parties view.
-- Revocation: a token is refused if Redis `deny:{userId}` exists (`401 token_revoked`) or its `pv` claim is lower than Redis `pv:{userId}` (`401 token_outdated`). Both keys are written by auth-service.
+- Revocation: a token is refused if Redis `deny:{userId}` exists (`401 token_revoked`) or its `pv` claim is lower than Redis `pv:{userId}` (`401 token_outdated`). Both keys are written by auth-service. If the Redis lookup itself fails, the token is refused with `503 auth_unavailable` (`retry-after: 5`).
 - `GET /api/trips/shared/:token` needs no token; the share token is the secret.
 - `/internal/*`: `Authorization: Bearer {INTERNAL_SERVICE_TOKEN}`, compared in constant time (`timingSafeEqual`), else `401 unauthorized`. Kong never routes `/internal/*`.
 

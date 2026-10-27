@@ -47,6 +47,7 @@ pino (`createLogger("pricing-service", …)`), `LOG_LEVEL` override.
 | warn | `settings refresh failed; keeping the current values` | platform-service unreachable |
 | warn | `can't subscribe to settings changes; polling only` | Redis subscribe failed |
 | warn | `location-service unavailable, no ETA on the quote` | ETA call failed (per vehicle type) |
+| warn | `token check unavailable (Redis)` | Redis deny-list / permission-version lookup failed; the request got `503 auth_unavailable` |
 | error | `unhandled error` | a 500 |
 
 ## Failure modes
@@ -61,3 +62,4 @@ pino (`createLogger("pricing-service", …)`), `LOG_LEVEL` override.
 | Estimate → 400 `outside_service_area` for a city that exists in the admin | pricing uses the static boxes in `libs/shared-location`, not the admin's city list | |
 | trip-service says the quote is gone | quote expired (`quote.ttlSeconds`) or Redis was flushed | `TTL quote:<id>` |
 | `/health/ready` 503 | Redis down | |
+| Every authenticated call → `503 auth_unavailable` (`retry-after: 5`) | Redis down: the deny-list / `pv` lookup fails, so the token is refused as temporarily unchecked | warn `token check unavailable (Redis)`; `/health/ready` |
