@@ -19,6 +19,11 @@ How trip-service is put together and why. Read [README.md](README.md) first for 
 - [Caching](#caching)
 - [Concurrency and idempotency](#concurrency-and-idempotency)
 - [Security model](#security-model)
+- [Scheduled rides](#scheduled-rides)
+- [Reassignment](#reassignment)
+- [GPS trace](#gps-trace)
+- [Company ride policies](#company-ride-policies)
+- [Regulatory report](#regulatory-report)
 
 ## Folders and modules
 
@@ -218,6 +223,8 @@ All amounts are in santim (minor units, `BIGINT` columns). The rules are in `src
 
 **Final fare** (`complete()`): `fare_final_minor = fare_estimate_minor + waiting_fee_minor`. `distance_m = est_distance_m`; `duration_s = completed_at − started_at`. If the driver's live position is known and farther than `completeFarFromDropoffMeters` from the drop-off, `FAR_FROM_DROPOFF` is added to `flags` (staff-only in the API). An unknown position does not block completion.
 
+**Promo discount** (workflow 15): `request()` copies the booked quote's `discountMinor` (clamped to 0 … fare, `quoteDiscount()` in `src/quotes.ts`) to `promo_discount_minor` and its code to `promo_code`; the `requested` history row records them. The fare stays the full fare (driver earnings, commission and corporate policy checks use it). At completion `trip.completed` carries `promoDiscountMinor = min(promo_discount_minor, fare_final_minor)` (`payableDiscount()`) and `quoteId`; the rider pays `fare − discount` (payment-service). `trip.cancelled` carries `quoteId` so pricing-service releases the reservation. Scheduled rides carry no promo.
+
 **Cancellation fee** (`cancellationFee()`):
 
 | Cancelled by | Situation | Fee | Compensation |
@@ -272,7 +279,7 @@ Compensation is computed as `fee × round(share × 100) / 100` in integer arithm
 - Loads the rider's and driver's `{ name, image }` from auth-service (`GET /internal/users/:id`) and the vehicle from fleet-service (`GET /internal/vehicles/:id`), in parallel.
 - A name that looks like a phone number (`/^\+?[\d\s-]{7,}$/`, the sign-up placeholder) is replaced with `null`. Phone numbers are never returned.
 - Each upstream failure is logged and becomes `null` (no error to the caller). The result is cached 60 s under `trip:parties:{tripId}:{driverId|-}:{vehicleId|-}`, so the key changes when a driver is matched.
-- `forTrip()`: the rider or booker sees the driver (name, photo, rating if ≥ 3 ratings, rating count) and the vehicle; the driver sees the rider (name, photo); staff (`ride-admin`) see both.
+- `forTrip()`: the rider or booker sees the driver (name, photo, rating if ≥ 3 ratings, rating count) and the vehicle; the driver sees the rider (name, photo); staff (`ride-admin`) see both. A partner holding `trip:read` @ ORG of the trip's `billingOrgId` (the billed company) sees all three; one holding it @ ORG of the `beneficiaryId` of an `ORGANIZATION` vehicle (the fleet) sees the driver and the car, not the rider.
 - `forShare()`: the driver's first name (first word of the name) and photo, and the vehicle.
 
 ## Quotes: pricing-service or builtin
@@ -298,8 +305,10 @@ All run inside the API process (`src/server.ts`); there is no separate worker.
 | Matcher tick | every 250 ms | [Matching](#matching) | per-trip errors logged, retried after 2 s |
 | Settings client | at start, on Redis `settings:changed`, every 30 s | reloads the platform-service snapshot | keeps the current values (env defaults if never loaded) |
 | Authz sync | at start, on Redis `authz:changed`, every 30 s | reloads the permission matrix from auth-service | keeps the current matrix (built-in matrix if never loaded) |
+| Scheduler tick | every `SCHEDULE_TICK_SECONDS` (15 s) | claims due bookings and creates their trips ([Scheduled rides](#scheduled-rides)) | logged (`scheduler tick failed`); a claim left by a crash is taken over after 2 min |
+| Event consumer | continuous, only when `KAFKA_BROKERS` is set | `driver.location` → `trip_trace`, `incident.opened` → `regulatory_incident` ([events.md](events.md#consumed-topics)) | kafkajs retries the message; a failed start is logged and the API keeps running |
 
-Shutdown order on `SIGTERM`/`SIGINT`: authz sync, settings client, daily timer, matcher, Fastify (in-flight requests finish), outbox relay (disconnects the producer), container (Prisma, Redis).
+Shutdown order on `SIGTERM`/`SIGINT`: authz sync, settings client, daily timer, matcher, scheduler, event consumer, Fastify (in-flight requests finish), outbox relay (disconnects the producer), container (Prisma, Redis).
 
 ## Caching
 
@@ -356,6 +365,7 @@ Permission checks use `authorize()` / `can()` from `libs/shared-authz` against t
 | Someone else books for a rider (`ride-app`) | `billingOrgId` required, `trip:create_on_behalf` with `orgId` |
 | Bill a company | additionally `trip:bill_corporate` with `orgId` |
 | Read a trip | `trip:read` with `ownerUserIds=[rider, booker, driver]`, `cityId`, `orgId=billingOrgId`; or, for `ORGANIZATION` vehicles, `trip:read` with `orgId=beneficiaryId` (the fleet) |
+| Read a trip's history (`GET /api/trips/:id/events`) | `ride-admin` token and `trip:read` with `cityId` of the trip; anyone else `404` |
 | Accept / decline | the offer belongs to you (`404` otherwise), then `trip:accept` @ SELF |
 | Assign | `trip:assign` with the trip's `cityId` |
 | Progress (en-route, arrive, start, complete) | you are the assigned driver (`404` otherwise), then `trip:update_status` @ SELF |
@@ -370,7 +380,7 @@ Permission checks use `authorize()` / `can()` from `libs/shared-authz` against t
 
 - `pin` only when the viewer is the rider or the booker.
 - `flags` only when the viewer's audience is `ride-admin`.
-- Socket `trip:status` pushes and `GET /internal/trips/:id` use `tripView(trip)` with no viewer: no PIN, no flags.
+- Socket `trip:status` pushes and `GET /internal/trips/:id` use `tripView(trip)` with no viewer: no PIN, no flags. The internal route adds `bookedByUserId` and `beneficiary` for support-service.
 
 ### 404, not 403
 
@@ -382,3 +392,50 @@ Unreadable trips, offers that aren't yours, trips you don't drive, places that a
 - 32 KB request body limit.
 - The share view sets `cache-control: no-store` and `referrer-policy: no-referrer`.
 - 5xx responses never include internal details; they are logged with the request id.
+
+## Scheduled rides
+
+Workflow 12, `src/trips/scheduled.ts`. **Design choice:** a booking is a row in `scheduled_trip`, not a trip with a `scheduled` status as the workflow page proposes. `TripStatus` (shared-types and the Dart mirror), the state machine, `ux_trip_rider_active`, the board and every trip query stay unchanged; the booking becomes a normal `requested` trip when matching should start.
+
+```mermaid
+stateDiagram-v2
+  [*] --> SCHEDULED: POST /api/trips/scheduled
+  SCHEDULED --> SCHEDULED: PATCH (time, quote, purpose), before match_at
+  SCHEDULED --> CANCELLED: cancel (free)
+  SCHEDULED --> DISPATCHING: scheduler claims it at match_at
+  DISPATCHING --> DISPATCHED: trip created (requested → matching)
+  DISPATCHING --> SCHEDULED: couldn't create the trip, retry next tick
+  DISPATCHING --> FAILED: still impossible at the pickup time
+```
+
+- **Booking** reuses the on-demand rules (`authorizeBooking` in `service.ts`: channel, on-behalf permissions, `trip:bill_corporate`, maintenance, channel flags, city payment methods), plus `features.scheduledRides`, the window (30 min – 7 days), at most 5 upcoming bookings per rider, none within 60 min of another, and the company policy at the **pickup** time. The quote must be fresh and unused; its fare, route and addresses are kept on the booking.
+- **Lead time:** `match_at = scheduled_for − SCHEDULE_LEAD_MINUTES` (15), or `SCHEDULE_NIGHT_LEAD_MINUTES` (30) when the pickup is 22:00–06:00 Addis time. Airport and low-supply lead times aren't distinguished yet.
+- **Dispatch** (every replica, every 15 s): `UPDATE … SET status = 'DISPATCHING' WHERE id IN (SELECT … WHERE (SCHEDULED AND match_at ≤ now) OR (DISPATCHING AND claimed_at < now − 2 min) … FOR UPDATE SKIP LOCKED LIMIT 20)`. For each claim: re-price (`QuoteProvider.reprice`, see [integrations.md](integrations.md#pricing-service)); the fare is the **lower** of the fresh and the booked quote, the route and waiting rate come from the fresh one (the booked quote if re-pricing isn't available). Then one transaction creates the trip (channel, booker, billing, purpose copied; `trip_event.actor_id` null with `scheduledTripId`), moves the booking to `DISPATCHED` (`version` checked) and writes `trip.requested`; matching starts as for any trip. If the rider still has an active trip (`ux_trip_rider_active`) or anything else fails, the booking goes back to `SCHEDULED` and is retried next tick until the pickup time, then `FAILED` + `trip.schedule_failed`.
+- **Escalation** (workflow 12 step 8): the matcher's timeout calls `matchTimedOut()`. For a trip created from a booking, before `scheduled_for + 10 min`, the first timeout adds the flag `DISPATCH_ESCALATED` (a `requested → requested` transition with `trip.dispatch_escalated`, `scheduled_trip.escalated_at`) and the matcher **restarts** the round instead of cancelling; dispatchers see the flag on the board and can `/assign`. After the grace period the trip is cancelled `NO_DRIVER_FOUND` like any other.
+- **Cancellation** before dispatch is always free (there is no trip to charge). From `DISPATCHING` on, the rider cancels the trip itself (normal fee policy). Workflow 12's "free until 60 min before" and driver reservations ahead of time are not implemented.
+- **Pushes:** `scheduled:status` to the rider and booker on every change.
+
+## Reassignment
+
+`reassign()` in `service.ts`, `trip:reassign` @ CITY. From `matched` or `en_route`:
+
+- to a named driver: the same availability checks as `/assign` (`assertAssignable`), then one transition `→ matched` that swaps the driver / vehicle / beneficiary snapshot, clears `arrived_at`, deletes the old and inserts the new `driver_active_trip` row (`P2002` → `409 driver_busy`), and writes `trip.matched` (new driver), `trip.reassigned` and `audit.recorded`;
+- back to matching: `→ requested` with the driver fields cleared, matching restarted and the old driver added to `match:{trip}:declined`.
+
+Both add the `REASSIGNED` flag. Afterwards trip-service releases the old driver in the live state shared with location-service (`releaseDriver`: `on_trip` → `available` if still on this trip, back into the available geo set, out of `trip:{id}:members`, `trip:{id}:last` deleted), pushes `trip:reassigned` to the old driver and `trip:status` to everyone on the trip. The new driver becomes `on_trip` when location-service consumes the `trip.matched`.
+
+## GPS trace
+
+`src/trips/trace.ts`. The recorder consumes `driver.location` ([events.md](events.md#consumed-topics)); per trip it keeps the last kept point in memory (falling back to the newest `trip_trace` row) and the trip's status and driver cached 10 s. A ping is kept when ≥ 5 s and ≥ 20 m passed since the last kept point, or ≥ 60 s. Points belong to the trip only while it is matched / en route / in progress and only from its current driver (so a reassigned driver's late pings are dropped).
+
+The reader (`GET /api/trips/:id/trace`) needs `trip:read_gps_trace` @ CITY and writes an `audit.recorded` per read. Each point's phase (`to_pickup`, `ride`, `after`) comes from the trip's `started_at` / `completed_at`, not from the recorded status. Distances are straight lines between points; legs implying more than 200 km/h are skipped as GPS jumps.
+
+**Actual distance.** `complete()` sets `trip.distance_m` (and `trip.completed.distanceMeters`) to the driven distance between `started_at` and the completion when the trace has ≥ 2 points in that window, else the planned distance as before. The fare is still the quote (+ waiting). Points still in Kafka when the driver taps Complete are not counted. OSRM `/match` is not used yet.
+
+## Company ride policies
+
+`src/trips/corporate.ts`. One `corporate_policy` row per company, saved by the corporate admin (`corporate:manage_policies` @ ORG). `check()` runs on every booking with a `billingOrgId` — `request()`, scheduled `book()` and `update()` — and throws `PolicyViolation` (422, with the `rule`), which the error handler sends as `{ error: "policy_violation", rule, message }`. Rules, in order: vehicle type; day of week and hours in Addis time (overnight windows allowed); the quote's fare ≤ `max_fare_minor`; `purpose` present when required; monthly budget (the company's non-cancelled trips created in the Addis month: final fare, else estimate; plus undispatched bookings for that month; plus this ride). No cache: one indexed read per booking (the workflow allows 60 s). Policies apply at request time; a dispatched scheduled ride isn't re-checked. Zones and per-employee budgets (workflow 11 step 4) are not implemented; the company's credit limit is payment-service's.
+
+## Regulatory report
+
+`src/trips/regulatory.ts`, `report:read_regulatory`. Three aggregate queries per request over `trip` (by request month: requested, cancelled, no driver; by drop-off month: completed, distinct drivers and vehicles, kilometres) and `regulatory_incident` (by opening month, serious = HIGH / CRITICAL), grouped by Addis month and city. Incident counts come from support-service's `incident.opened` events, copied by the consumer, because support-service has no internal count API; incidents opened before trip-service started consuming are missing.

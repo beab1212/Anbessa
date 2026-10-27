@@ -4,7 +4,7 @@
 // left out. Cached per trip for 60 s; an unreachable upstream degrades to nulls, not an error.
 
 import type { Redis } from "ioredis";
-import type { Principal } from "@ride-app/shared-authz";
+import { can, type Principal } from "@ride-app/shared-authz";
 import type { Logger } from "@ride-app/shared-utils";
 import type { Trip } from "../generated/prisma/client.js";
 import type { PartiesClient, PublicVehicle } from "../lib/clients.js";
@@ -67,13 +67,18 @@ export function createParties(deps: { redis: Redis; client: PartiesClient; logge
       const staff = p.audience === "ride-admin";
       const rider = p.userId === t.riderUserId || p.userId === t.bookedByUserId;
       const driver = !!t.driverUserId && p.userId === t.driverUserId;
+      // the company the trip is billed to sees what its rider sees (who's driving, which car);
+      // the fleet that owns the car sees its driver and car, not the rider
+      const company = !staff && !!t.billingOrgId && can(p, "trip:read", { orgId: t.billingOrgId });
+      const fleet = !staff && t.vehicleOwnerType === "ORGANIZATION" && !!t.beneficiaryId && can(p, "trip:read", { orgId: t.beneficiaryId });
+      const seesDriver = rider || staff || company || fleet;
       // the driver's average shows once it means something (three ratings)
-      const r = (rider || staff) && t.driverUserId && deps.ratingOf ? await deps.ratingOf(t.driverUserId).catch(() => null) : null;
+      const r = seesDriver && t.driverUserId && deps.ratingOf ? await deps.ratingOf(t.driverUserId).catch(() => null) : null;
       return {
         tripId: t.id,
-        driver: (rider || staff) && t.driverUserId ? { name: parties.driverName, photo: parties.driverPhoto, rating: r && r.count >= 3 ? r.average : null, ratingCount: r?.count ?? 0 } : null,
-        vehicle: (rider || staff) ? parties.vehicle : null,
-        rider: driver || staff ? { name: parties.riderName, photo: parties.riderPhoto } : null,
+        driver: seesDriver && t.driverUserId ? { name: parties.driverName, photo: parties.driverPhoto, rating: r && r.count >= 3 ? r.average : null, ratingCount: r?.count ?? 0 } : null,
+        vehicle: seesDriver ? parties.vehicle : null,
+        rider: driver || staff || company ? { name: parties.riderName, photo: parties.riderPhoto } : null,
       };
     },
   };

@@ -33,8 +33,11 @@ export interface MatcherDeps {
   mapping: MappingClient;
   realtime: Realtime;
   logger: Logger;
-  /** cancels the trip with reason NO_DRIVER_FOUND */
-  onTimeout: (tripId: string) => Promise<void>;
+  /**
+   * Matching ran out of time: cancels the trip (NO_DRIVER_FOUND), or — a scheduled ride before its
+   * pickup time — escalates it and returns true to keep searching from the smallest radius.
+   */
+  onTimeout: (tripId: string) => Promise<boolean | void>;
   /** read on every matching step, so settings changes apply to trips already searching */
   config: () => { timeoutSeconds: number; offerSeconds: number; radiiMeters: number[] };
   now?: () => number;
@@ -99,7 +102,10 @@ export function createMatcher(deps: MatcherDeps) {
     }
 
     if (now() - startedAt > config.timeoutSeconds * 1000) {
-      await deps.onTimeout(tripId);
+      if (await deps.onTimeout(tripId)) {
+        await redis.multi().hset(state(tripId), { startedAt: String(now()), radius: "0" }).expire(state(tripId), STATE_TTL_SECONDS).exec();
+        return now() + 1000;
+      }
       return null;
     }
 

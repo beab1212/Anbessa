@@ -13,6 +13,10 @@ import { createParties } from "./trips/parties.js";
 import { createPlaces } from "./trips/places.js";
 import { createShares } from "./trips/share.js";
 import { createTripService } from "./trips/service.js";
+import { createCorporatePolicies } from "./trips/corporate.js";
+import { createRegulatoryReport } from "./trips/regulatory.js";
+import { createScheduler, DEFAULT_SCHEDULE } from "./trips/scheduled.js";
+import { createTraceReader, createTraceRecorder } from "./trips/trace.js";
 import { createSettingsClient, fetchSettingsSnapshotFrom, type SettingsReader } from "@ride-app/shared-settings";
 
 export interface ContainerOptions {
@@ -62,7 +66,8 @@ export function createContainer(config: Config, logger: Logger, opts: ContainerO
   // (the timeout callback only runs later, after `trips` exists)
   const matcher = createMatcher({
     db, redis, location, mapping, realtime, logger,
-    onTimeout: async (tripId) => void (await trips.systemCancel(tripId, "NO_DRIVER_FOUND")),
+    // scheduled rides keep searching (escalated to dispatch); other trips are cancelled
+    onTimeout: (tripId) => trips.matchTimedOut(tripId),
     config: () => ({
       timeoutSeconds: settings.get<number>("match.timeoutSeconds"),
       offerSeconds: settings.get<number>("match.offerSeconds"),
@@ -70,9 +75,17 @@ export function createContainer(config: Config, logger: Logger, opts: ContainerO
     }),
     now: () => now().getTime(),
   });
+  const policies = createCorporatePolicies({ db, now });
+  const trace = createTraceReader({ db });
+  const traceRecorder = createTraceRecorder({ db, logger, now });
+  const regulatory = createRegulatoryReport({ db, now });
   const trips = createTripService({
     db, redis, quotes, location, realtime, logger, matching: matcher.control, now,
-    settings,
+    settings, policies, trace,
+  });
+  const scheduler = createScheduler({
+    db, quotes, trips, policies, settings, realtime, logger, now,
+    config: () => ({ ...DEFAULT_SCHEDULE, leadMinutes: config.SCHEDULE_LEAD_MINUTES, nightLeadMinutes: config.SCHEDULE_NIGHT_LEAD_MINUTES }),
   });
 
   // tokens of suspended users, and tokens older than a role change, are refused (Auth.md §9.5)
@@ -90,9 +103,11 @@ export function createContainer(config: Config, logger: Logger, opts: ContainerO
 
   return {
     config, db, redis, trips, parties, places, shares, matcher, devQuotes, verifyAccessToken, settings, settingsClient,
+    policies, trace, traceRecorder, regulatory, scheduler,
     internalToken: config.INTERNAL_SERVICE_TOKEN,
     async close() {
       matcher.stop();
+      scheduler.stop();
       await db.$disconnect();
       if (!opts.redis) redis.disconnect();
     },

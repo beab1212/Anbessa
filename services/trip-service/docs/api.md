@@ -14,10 +14,16 @@ Every HTTP route of trip-service, from `src/http/routes.ts` and `src/app.ts`, pl
 - [Cancellation](#cancellation)
 - [Ratings](#ratings)
 - [Reads](#reads)
+- [Search, company lists and reports](#search-company-lists-and-reports)
 - [Saved places](#saved-places)
 - [Share links](#share-links)
 - [Internal](#internal)
 - [Socket events](#socket-events)
+- [Scheduled rides](#scheduled-rides)
+- [Reassignment](#reassignment)
+- [GPS trace](#gps-trace)
+- [Company ride policies](#company-ride-policies)
+- [Regulatory report](#regulatory-report)
 
 ## Conventions
 
@@ -72,7 +78,7 @@ Returned by most routes. Built by `tripView()` in `src/trips/service.ts`; the Ty
 | `riderUserId` | uuid | |
 | `pickup`, `dropoff` | `{ lat, lng, address: string\|null }` | |
 | `driver` | `{ userId, vehicleId }` \| null | set at match |
-| `fare` | `{ estimateMinor, finalMinor\|null, waitingFeeMinor\|null, currency }` | final values set at completion |
+| `fare` | `{ estimateMinor, finalMinor\|null, waitingFeeMinor\|null, currency, promoDiscountMinor, promoCode\|null, payableMinor }` | final values set at completion. `promoDiscountMinor` = promo discount from the quote (0 = none, never above the fare); `payableMinor` = what the rider pays: (`finalMinor` once completed, else `estimateMinor`) − `promoDiscountMinor` |
 | `route` | `{ estDistanceMeters, estDurationSeconds, distanceMeters\|null, durationSeconds\|null, polyline\|null }` | `polyline` = encoded polyline, precision 6 |
 | `times` | `{ requestedAt, matchedAt, arrivedAt, startedAt, completedAt, cancelledAt }` | null until reached |
 | `cancellation` | `{ by: RIDER\|DRIVER\|SYSTEM\|STAFF, reason, feeMinor, driverCompensationMinor }` \| null | |
@@ -232,9 +238,18 @@ Who: same as `GET /api/trips/:id`. Response:
 }
 ```
 
-- `driver` and `vehicle`: for the rider, the booker and staff (`ride-admin`); `null` for others or before a match. `rating` is null below 3 ratings.
-- `rider`: for the driver and staff; `null` for others.
+- `driver` and `vehicle`: for the rider, the booker, staff (`ride-admin`), the company the trip is billed to (`trip:read` @ ORG `billingOrgId`) and the fleet that owns the car (`trip:read` @ ORG `beneficiaryId`, `ORGANIZATION` vehicles); `null` for others or before a match. `rating` is null below 3 ratings.
+- `rider`: for the driver, staff and the billed company; `null` for others (the fleet sees its driver and car, not the rider).
 - Names that are still a phone number come back as `null`. Upstream failures become `null` (no error). Cached 60 s.
+
+### `GET /api/trips/:id/events`
+
+The trip's history, oldest first: the timeline in the staff console (`apps/web/src/pages/staff/TripDetail.tsx`). Logic: `events()` in `src/trips/service.ts`.
+
+| | |
+|---|---|
+| Who | staff only: a `ride-admin` token with `trip:read` @ CITY of the trip (or GLOBAL). Everyone else, including the rider and driver: `404` |
+| Response | `200 { tripId, events: [{ at, from, to, actorId, data }] }` from `trip_event`, ordered by `at`, then `id`. `from` is null on the first row; `data` is the row's JSON or null (e.g. `{quoteId, approximate}`, `{assignedBy}`, `{arrived, metersFromPickup}`; see [architecture.md](architecture.md#trip-state-machine)) |
 
 ### `GET /api/trips/active`
 
@@ -268,6 +283,70 @@ Admin overview (`apps/web/src/pages/admin/Overview.tsx`).
 | Query | `cityId?` string 1–40 |
 | Response | `200 { since, requested, completed, cancelled, active, completionRate: number\|null, avgSecondsToMatch: number\|null, byChannel: { APP?: n, PHONE?: n, CORPORATE_PORTAL?: n } }` |
 | Notes | "Today" starts at midnight Addis Ababa time (UTC+3, hard-coded). `requested`/`completed`/`cancelled`/`byChannel`/`avgSecondsToMatch` count trips created since then; `active` counts all currently active trips regardless of creation date |
+
+## Search, company lists and reports
+
+Code: `src/trips/reports.ts`, routes in `src/http/routes.ts` (static paths, registered before `/api/trips/:id`).
+
+Shared rules:
+
+| Topic | Rule |
+|---|---|
+| Days | `from`, `to`: `YYYY-MM-DD` Addis Ababa days (UTC+3), **inclusive**. When both are given the range is 1–92 days, else `400 invalid_range`. Malformed dates → `400 invalid_range` |
+| Paging | Newest first by `(created_at, id)`. `next` is an opaque cursor `<created_at in microseconds>_<id>` (microseconds because Postgres keeps them and a JS date doesn't, so trips created in the same millisecond are neither skipped nor repeated); pass it back as `before`. A plain ISO date is also accepted as `before`. Anything else → `400 invalid_cursor`. `next` is `null` when the page isn't full |
+| `limit` | int 1–100, default 50 |
+
+### `GET /api/trips/search`
+
+Staff trip search.
+
+| | |
+|---|---|
+| Who | `trip:read` @ CITY for `cityId`. Without `cityId`: only holders who have `trip:read` everywhere (a `G` grant such as finance, or a city role assigned globally); city staff get `400 city_required`, callers without `trip:read` anywhere `403` |
+| Query | `cityId?` (1–40), `status?` (one of the six), `from?`, `to?`, `channel?` (`APP`, `PHONE`, `CORPORATE_PORTAL`), `paymentMethod?` (`CASH`, `MOBILE_MONEY`, `CARD`, `CORPORATE`), `riderUserId?` uuid, `driverUserId?` uuid, `vehicleId?` (1–100), `billingOrgId?` uuid, `q?` (start of a trip id: 1–36 hex characters, dashes ignored; matched as a uuid range on the primary key, else `400 invalid_query`), `before?`, `limit?` |
+| Response | `200 { trips: Trip[], next: string \| null }`. The trip view of the caller (`flags` for `ride-admin`) |
+| Errors | `400 city_required`, `invalid_range`, `invalid_query`, `invalid_cursor`, `validation_error`; `403 forbidden` (another city, no `trip:read`) |
+
+### `GET /api/trips/org/:orgId`
+
+A company's trips, for the partner portal.
+
+| | |
+|---|---|
+| Who | `trip:read` covering `{ orgId }`: CORPORATE_ADMIN, CORPORATE_COORDINATOR, FLEET_OWNER of that org (@ ORG), or anyone holding `trip:read` everywhere (finance, global city roles). Others (another org, CORPORATE_EMPLOYEE, FLEET_DRIVER, city staff) → `403` |
+| Query | `role` **required**: `billing` (trips billed to the org, `billing_org_id`) or `fleet` (trips driven in the org's vehicles: `vehicle_owner_type = ORGANIZATION` and `beneficiary_id` = the org); `status?`, `from?`, `to?`, `before?`, `limit?` |
+| Response | `200 { trips: Trip[], next }`. `ride-app` callers get the plain view: **no `pin`** (even for trips they booked) and no `flags`. `ride-admin` callers get their usual view |
+| Errors | `400 validation_error` (no or bad `role`, bad uuid), `400 invalid_range`, `invalid_cursor`; `403 forbidden` |
+
+### `GET /api/trips/reports/daily`
+
+| | |
+|---|---|
+| Who | `report:read` @ CITY for `cityId`; without `cityId`, only GLOBAL holders (as for `/stats`) |
+| Query | `cityId?`, `from?`, `to?`. Defaults: `to` = today (Addis), `from` = `to` − 6 days |
+| Response | `200 { cityId \| null, from, to, days: TripDay[], totals }` |
+| Errors | `400 invalid_range`, `403 forbidden` |
+
+Every day of the range is present (zero-filled), oldest first. A trip counts on the Addis day it was **requested** (`created_at`). `TripDay`:
+
+| Field | Meaning |
+|---|---|
+| `date` | `YYYY-MM-DD` |
+| `requested` | trips requested that day |
+| `completed`, `cancelled`, `active` | of those, by current status (`active` = not ended yet) |
+| `completionRate` | `completed / (completed + cancelled)`, `null` if none ended |
+| `avgSecondsToMatch` | mean of `matched_at − created_at` over matched trips, rounded; `null` if none |
+| `fareMinor` | Σ `fare_final_minor` of completed trips |
+| `cancelFeeMinor` | Σ `cancel_fee_minor` of cancelled trips |
+| `gmvMinor` | `fareMinor + cancelFeeMinor` (an estimate: refunds and unpaid charges are payment-service's) |
+| `cancellations` | `{ bySide: { RIDER?, DRIVER?, SYSTEM?, STAFF? }, byReason: { <reason>: n } }` |
+| `byChannel`, `byVehicleType` | `{ <key>: { requested, completed } }` |
+
+`totals` has the same fields without `date`; its `avgSecondsToMatch` is over all matched trips of the range (not a mean of daily means).
+
+### `GET /api/trips/reports/daily.csv`
+
+Same query, permission and data. `200 text/csv; charset=utf-8`, `content-disposition: attachment; filename="trips-<cityId|all>-<from>-<to>.csv"`, `cache-control: no-store`. CRLF lines: a header, one row per day, then a `total` row. Columns: `date, requested, completed, cancelled, active, completion_rate` (4 decimals, empty when null), `avg_seconds_to_match, fare_minor, cancel_fee_minor, gmv_minor`, `cancelled_by_<side>` (rider, driver, system, staff), `reason_<reason>` (reasons seen in the range), `channel_<channel>_requested/_completed` (app, phone, corporate_portal), `vehicle_<type>_requested/_completed` (types seen).
 
 ## Saved places
 
@@ -329,7 +408,7 @@ All routes under `/internal` need `Authorization: Bearer {INTERNAL_SERVICE_TOKEN
 
 | Route | Caller | Response | Notes |
 |---|---|---|---|
-| `GET /internal/trips/:id` | intended for support and payment (comment in code); no caller found in the repo | `200` trip via `tripView(trip)` (no `pin`, no `flags`); `404` | exempt from the rate limit |
+| `GET /internal/trips/:id` | support-service (`services/support-service/src/lib/trips.ts`: parties, city, status, drop-off time for tickets, lost items and SOS) | `200` trip via `tripView(trip)` (no `pin`, no `flags`) plus `bookedByUserId` and `beneficiary: { type: INDIVIDUAL\|ORGANIZATION, id } \| null`; `404` | exempt from the rate limit |
 | `GET /internal/ops/outbox` | platform-service system page (`services/platform-service/src/system/health.ts`) | `200 { pending: number, oldestAt: string\|null }` (unpublished outbox rows) | subject to the 300/min limit |
 
 ## Socket events
@@ -344,3 +423,94 @@ Pushed through the Socket.io Redis emitter (`src/lib/realtime.ts`) to room `user
 | `trip:status` | the rider, the booker and the driver (each once) | after every committed transition, including the initial request and arrival | `{ tripId, status, trip: Trip }` where `trip` has no `pin` and no `flags` |
 
 `etaToPickupSeconds` is the OSRM duration from mapping-service, or the straight-line estimate when mapping-service is down.
+
+## Scheduled rides
+
+Workflow 12. A booking lives in `scheduled_trip` (see [data-model.md](data-model.md#scheduled_trip)) until the scheduler turns it into a normal `requested` trip at `matchAt` (see [architecture.md](architecture.md#scheduled-rides)). `TripStatus` has no `scheduled` value; the booking has its own status: `SCHEDULED → DISPATCHING → DISPATCHED`, or `CANCELLED`, `FAILED`.
+
+The `ScheduledRide` object (`scheduledView` in `src/trips/scheduled.ts`):
+
+```ts
+{
+  id, status: "SCHEDULED"|"DISPATCHING"|"DISPATCHED"|"CANCELLED"|"FAILED",
+  cityId, channel: "APP"|"PHONE"|"CORPORATE_PORTAL", vehicleType, paymentMethod,
+  billing: { type: "PERSONAL"|"CORPORATE", orgId: string|null },
+  riderUserId, bookedByUserId, purpose: string|null,
+  pickup: { lat, lng, address }, dropoff: { lat, lng, address },
+  fare: { estimateMinor, currency },            // the booked quote: the most the rider pays
+  route: { estDistanceMeters, estDurationSeconds, polyline },
+  scheduledFor, matchAt,                         // ISO; matchAt = scheduledFor − lead time
+  tripId: string|null, tripStatus: string|null,  // the trip created at dispatch, and its status
+  dispatchedAt, cancelledAt, failReason, escalatedAt, createdAt,
+  editable: boolean                              // SCHEDULED and before matchAt
+}
+```
+
+| Route | Who | Body / query | Response | Errors |
+|---|---|---|---|---|
+| `POST /api/trips/scheduled` **idempotent** | as `POST /api/trips`: `trip:create` @ SELF, `trip:create_on_behalf` @ ORG (coordinator) or @ CITY (call center, `riderUserId` required), `trip:bill_corporate` @ ORG for company rides | `{ quoteId, paymentMethod, scheduledFor (ISO), riderUserId?, billingOrgId?, purpose? (≤ 200) }` | `201 ScheduledRide` | `403 feature_disabled` (`features.scheduledRides` off), `400 too_soon` (< 30 min ahead), `400 too_far_ahead` (> 7 days), `400 invalid_quote`/`quote_expired`/`quote_used`, `409 too_many_scheduled` (5 upcoming per rider), `409 schedule_conflict` (another booking of the rider within 60 min), `422 policy_violation` (company policy at the pickup time), plus the `POST /api/trips` switches (`maintenance`, `payment_method_unavailable` …) |
+| `GET /api/trips/scheduled` | mine (rider or booker); `orgId`: `trip:read` @ ORG; `cityId`: staff `trip:read` @ CITY | `orgId?, cityId?, status? = upcoming\|all\|<status>` (default `upcoming` = SCHEDULED + DISPATCHING, soonest first; otherwise newest pickup first), `from?, to?` (pickup time), `limit` 1–200 (100) | `{ scheduled: ScheduledRide[] }` | `403` |
+| `GET /api/trips/scheduled/:sid` | rider, booker, the billed company, staff of the city | | `ScheduledRide` | `404` |
+| `PATCH /api/trips/scheduled/:sid` | `trip:cancel` on the booking (rider, booker, company, staff) | `{ scheduledFor?, quoteId?, purpose?: string\|null }` (at least one) | `ScheduledRide` (new `matchAt`); `trip.scheduled` with `updated: true` | `409 invalid_state` (dispatching or later, or changed meanwhile), window and quote errors as above, `400` new quote in another city, `422 policy_violation` |
+| `POST /api/trips/scheduled/:sid/cancel` | as PATCH | | `ScheduledRide` (`CANCELLED`); always free | `409 invalid_state` once dispatching (cancel the trip instead) |
+
+Socket event `scheduled:status` to the rider and the booker on every change: `{ scheduledTripId, status, tripId, scheduledFor, failReason }`. Once dispatched, the trip's own `trip:status` events follow as for any trip.
+
+## Reassignment
+
+### `POST /api/trips/:id/reassign` **idempotent**
+
+`trip:reassign` @ the trip's city (dispatcher). Body `{ driverId?: uuid, reason?: string ≤ 300 }`. Only `matched` and `en_route` trips (before pickup; `arrived_at` is cleared).
+
+- With `driverId`: the driver must be available like for `/assign` (same city and vehicle type, not stale, balance not BLOCKED, cash allowed for cash trips) → trip `matched` with the new driver, vehicle and beneficiary snapshot; `driver_active_trip` moves. Events `trip.matched` (new driver) and `trip.reassigned`.
+- Without: back to `requested`, driver fields cleared, matching restarts with the old driver in the declined set. Event `trip.reassigned` (no `toDriverId`).
+
+Both add the review flag `REASSIGNED`, a `trip_event` row with `{ reassignedFrom, reassignedTo?, by, reason? }`, and an `audit.recorded` (`trip:reassign`, `EXECUTED`). The old driver is released in the shared live state (back to available, removed from the trip's watchers, the trip's last position cleared) and gets socket `trip:reassigned { tripId, reason }`; rider, booker and new driver get `trip:status`.
+
+Errors: `400 same_driver`, `400` (the rider as driver), `403`, `404`, `409 invalid_state` (`in_progress` or later), `409 driver_unavailable`, `409 driver_busy`.
+
+## GPS trace
+
+### `GET /api/trips/:id/trace` · `GET /api/trips/:id/trace.csv`
+
+`trip:read_gps_trace` @ the trip's city (dispatcher, safety officer). Query `reason?` (≤ 500, copied into the audit entry). Every read writes `audit.recorded` (`trip:read_gps_trace`, `ALLOWED`). `cache-control: no-store`.
+
+```ts
+{
+  tripId, cityId, status, driverUserId,
+  count, polyline6,                         // every kept point, Google polyline precision 6
+  points: { at, phase: "to_pickup"|"ride"|"after", speed, accuracy }[],   // same order as the polyline
+  from, to, startedAt, completedAt,
+  totalDistanceMeters, rideDistanceMeters,  // straight lines between points, GPS jumps (> 200 km/h) skipped
+  thinning: { minSeconds: 5, minMeters: 20, heartbeatSeconds: 60 }
+}
+```
+
+The CSV is `at,lat,lng,status,speed_mps,accuracy_m` (status = the trip status when recorded), file name `trip-<id>-trace.csv`. Errors: `403`, `404`.
+
+## Company ride policies
+
+Workflow 11 step 4. One policy per company (`corporate_policy`); empty lists and `null` mean no limit. Times are Addis Ababa local.
+
+| Route | Who | Body | Response |
+|---|---|---|---|
+| `GET /api/trips/corporate/:orgId/policy` | app: `trip:bill_corporate` @ ORG (employees, coordinators, admin); staff: `trip:read` @ ORG (global holders) | | `{ orgId, allowedVehicleTypes, allowedDays, startMinute, endMinute, maxFareMinor, monthlyBudgetMinor, requirePurpose, updatedAt, updatedByUserId, configured, month, spentThisMonthMinor }` |
+| `PUT /api/trips/corporate/:orgId/policy` | `corporate:manage_policies` @ ORG (corporate admin) | `{ allowedVehicleTypes: string[] ≤ 20, allowedDays: (0=Sun … 6=Sat)[], startMinute: 0–1440\|null, endMinute: 0–1440\|null, maxFareMinor: int > 0\|null, monthlyBudgetMinor: int > 0\|null, requirePurpose: boolean }` (all default to no limit) | the policy; events `corporate.policy_updated` + `audit.recorded` |
+
+`startMinute > endMinute` wraps past midnight (e.g. 1320–360 = 22:00–06:00). Both or neither must be set (`400`).
+
+**Enforcement.** `POST /api/trips` and `POST /api/trips/scheduled` (and PATCH) with a `billingOrgId` check, in order: vehicle type, day, hours (at the request time, or the scheduled pickup time), `maxFareMinor` against the quote, `purpose` when required, and the monthly budget (the company's non-cancelled trips created this Addis month, final fare or estimate, plus undispatched bookings for that month, plus this ride). A violation is `422 { error: "policy_violation", rule: "vehicle_type"|"day"|"hours"|"max_fare"|"purpose"|"monthly_budget", message }`, e.g. `"Your company allows rides 06:00–22:00 only"`. `POST /api/trips` accepts `purpose?` (≤ 200), stored on the trip and shown in the trip object (not to the driver).
+
+## Regulatory report
+
+### `GET /api/trips/reports/regulatory` · `GET /api/trips/reports/regulatory.csv`
+
+`report:read_regulatory` (REGULATOR and AUDITOR, global; without `cityId` only global holders, others get `400 city_required`). Query `cityId?`, `from?`, `to?` as `YYYY-MM` (Addis months, inclusive; default last month; at most 12 → `400 invalid_range`).
+
+```ts
+{ cityId, from, to, rows: { month, cityId, tripsRequested, tripsCompleted, tripsCancelled, tripsNoDriver,
+                             activeDrivers, activeVehicles, distanceKm, safetyIncidents, seriousIncidents }[] }
+```
+
+Requested and cancelled count by request month, completed / drivers / vehicles / km by drop-off month (`distance_m`, else the planned distance), incidents by `incident.opened` time (`seriousIncidents` = HIGH or CRITICAL). A requested city gets a row for every month even when empty. CSV columns: `month,city,trips_requested,trips_completed,trips_cancelled,trips_no_driver_found,active_drivers,active_vehicles,distance_km,safety_incidents,serious_safety_incidents`; file `regulatory-<city|all>-<from>-<to>.csv`.
+

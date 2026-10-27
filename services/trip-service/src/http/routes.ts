@@ -10,11 +10,17 @@ import type { builtinQuotes } from "../quotes.js";
 import type { PartiesService } from "../trips/parties.js";
 import type { PlacesService } from "../trips/places.js";
 import type { SharesService } from "../trips/share.js";
+import { createTripReports, tripReportCsv } from "../trips/reports.js";
 import { tripView, type TripService } from "../trips/service.js";
+import type { CorporatePolicies } from "../trips/corporate.js";
+import { regulatoryCsv, type RegulatoryReport } from "../trips/regulatory.js";
+import type { Scheduler } from "../trips/scheduled.js";
+import { traceCsv, type TraceReader } from "../trips/trace.js";
 
 const id = z.object({ id: z.string().uuid() });
 const point = z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) });
 const paymentMethod = z.enum(["CASH", "MOBILE_MONEY", "CARD", "CORPORATE"]);
+const purposeField = z.string().trim().max(200).optional();
 const CANCEL_REASONS = ["CHANGED_PLANS", "DRIVER_TOO_FAR", "DRIVER_ASKED_TO_CANCEL", "WRONG_PICKUP", "NO_SHOW", "SAFETY", "OTHER", "STAFF_DECISION"] as const;
 
 export interface RouteDeps {
@@ -27,6 +33,10 @@ export interface RouteDeps {
   internalToken: string;
   /** the development quote stand-in (PRICING=builtin) */
   devQuotes?: ReturnType<typeof builtinQuotes>;
+  policies: CorporatePolicies;
+  trace: TraceReader;
+  regulatory: RegulatoryReport;
+  scheduler: Scheduler;
 }
 
 export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
@@ -92,8 +102,64 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
       paymentMethod,
       riderUserId: z.string().uuid().optional(),
       billingOrgId: z.string().uuid().optional(),
+      purpose: purposeField,
     }).parse(req.body);
     return idempotent(req, reply, p, async () => ({ statusCode: 201, body: tripView(await trips.request(p, body), p) }));
+  });
+
+  // ── workflow 12: scheduled rides (static paths before /api/trips/:id) ─────────
+  const sid = z.object({ sid: z.string().uuid() });
+  app.post("/api/trips/scheduled", async (req, reply) => {
+    const p = await principal(req);
+    const body = z.object({
+      quoteId: z.string().min(1).max(100),
+      paymentMethod,
+      scheduledFor: z.coerce.date(),
+      riderUserId: z.string().uuid().optional(),
+      billingOrgId: z.string().uuid().optional(),
+      purpose: purposeField,
+    }).parse(req.body);
+    return idempotent(req, reply, p, async () => ({ statusCode: 201, body: await deps.scheduler.book(p, body) }));
+  });
+  app.get("/api/trips/scheduled", async (req) => {
+    const p = await principal(req);
+    const q = z.object({
+      orgId: z.string().uuid().optional(), cityId: cityQ,
+      status: z.enum(["upcoming", "all", "SCHEDULED", "DISPATCHING", "DISPATCHED", "CANCELLED", "FAILED"]).optional(),
+      from: z.coerce.date().optional(), to: z.coerce.date().optional(),
+      limit: z.coerce.number().int().min(1).max(200).default(100),
+    }).parse(req.query);
+    return { scheduled: await deps.scheduler.list(p, q) };
+  });
+  app.get("/api/trips/scheduled/:sid", async (req) => deps.scheduler.get(await principal(req), sid.parse(req.params).sid));
+  app.patch("/api/trips/scheduled/:sid", async (req) => {
+    const p = await principal(req);
+    const body = z.object({
+      scheduledFor: z.coerce.date().optional(),
+      quoteId: z.string().min(1).max(100).optional(),
+      purpose: z.string().trim().max(200).nullable().optional(),
+    }).refine((b) => b.scheduledFor || b.quoteId || b.purpose !== undefined, "nothing to change").parse(req.body);
+    return deps.scheduler.update(p, sid.parse(req.params).sid, body);
+  });
+  app.post("/api/trips/scheduled/:sid/cancel", async (req) => deps.scheduler.cancel(await principal(req), sid.parse(req.params).sid));
+
+  // ── workflow 11: company ride policies ───────────────────────────────────────
+  const orgParam = z.object({ orgId: z.string().uuid() });
+  app.get("/api/trips/corporate/:orgId/policy", async (req) => deps.policies.get(await principal(req), orgParam.parse(req.params).orgId));
+  app.put("/api/trips/corporate/:orgId/policy", async (req) => {
+    const p = await principal(req);
+    const minute = z.number().int().min(0).max(1440).nullable();
+    const money = z.number().int().positive().max(1e12).nullable();
+    const body = z.object({
+      allowedVehicleTypes: z.array(z.string().regex(/^[a-z0-9_]{1,30}$/)).max(20).default([]),
+      allowedDays: z.array(z.number().int().min(0).max(6)).max(7).default([]),
+      startMinute: minute.default(null),
+      endMinute: minute.default(null),
+      maxFareMinor: money.default(null),
+      monthlyBudgetMinor: money.default(null),
+      requirePurpose: z.boolean().default(false),
+    }).parse(req.body);
+    return deps.policies.put(p, orgParam.parse(req.params).orgId, body);
   });
 
   app.get("/api/trips/active", async (req) => {
@@ -148,9 +214,82 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
     return { trips: (await trips.board(p, cityId)).map((t) => tripView(t, p)) };
   });
 
+  // ── staff search, company/fleet lists, daily report (static paths before /:id) ──
+  const reports = createTripReports({ db });
+  const day = z.string().max(10).optional();
+  const listQuery = {
+    status: z.enum(["requested", "matched", "en_route", "in_progress", "completed", "cancelled"]).optional(),
+    from: day, to: day,
+    before: z.string().max(80).optional(),
+    limit: z.coerce.number().int().min(1).max(100).default(50),
+  };
+  const cityQ = z.string().min(1).max(40).optional();
+
+  app.get("/api/trips/search", async (req) => {
+    const p = await principal(req);
+    const { cityId, ...f } = z.object({
+      ...listQuery, cityId: cityQ,
+      channel: z.enum(["APP", "PHONE", "CORPORATE_PORTAL"]).optional(), paymentMethod: paymentMethod.optional(),
+      riderUserId: z.string().uuid().optional(), driverUserId: z.string().uuid().optional(),
+      vehicleId: z.string().min(1).max(100).optional(), billingOrgId: z.string().uuid().optional(),
+      q: z.string().trim().min(1).max(36).optional(),
+    }).parse(req.query);
+    const r = await reports.search(p, cityId, f);
+    return { trips: r.trips.map((t) => tripView(t, p)), next: r.next };
+  });
+
+  app.get("/api/trips/org/:orgId", async (req) => {
+    const p = await principal(req);
+    const { orgId } = z.object({ orgId: z.string().uuid() }).parse(req.params);
+    const { role, ...f } = z.object({ ...listQuery, role: z.enum(["billing", "fleet"]) }).parse(req.query);
+    const r = await reports.forOrg(p, orgId, role, f);
+    // partners get the plain view (no PIN, even for trips they booked; no review flags)
+    return { trips: r.trips.map((t) => (p.audience === "ride-admin" ? tripView(t, p) : tripView(t))), next: r.next };
+  });
+
+  const reportQuery = z.object({ cityId: cityQ, from: day, to: day });
+  app.get("/api/trips/reports/daily", async (req) => {
+    const p = await principal(req);
+    const { cityId, ...range } = reportQuery.parse(req.query);
+    return reports.daily(p, cityId, range);
+  });
+  app.get("/api/trips/reports/daily.csv", async (req, reply) => {
+    const p = await principal(req);
+    const { cityId, ...range } = reportQuery.parse(req.query);
+    const r = await reports.daily(p, cityId, range);
+    return reply
+      .header("content-type", "text/csv; charset=utf-8")
+      .header("content-disposition", `attachment; filename="trips-${cityId ?? "all"}-${r.from}-${r.to}.csv"`)
+      .header("cache-control", "no-store")
+      .send(tripReportCsv(r));
+  });
+
+  // regulator: monthly aggregates per city (report:read_regulatory)
+  const regulatoryQuery = z.object({ cityId: cityQ, from: z.string().max(7).optional(), to: z.string().max(7).optional() });
+  app.get("/api/trips/reports/regulatory", async (req) => {
+    const p = await principal(req);
+    const { cityId, ...range } = regulatoryQuery.parse(req.query);
+    return deps.regulatory.report(p, cityId, range);
+  });
+  app.get("/api/trips/reports/regulatory.csv", async (req, reply) => {
+    const p = await principal(req);
+    const { cityId, ...range } = regulatoryQuery.parse(req.query);
+    const r = await deps.regulatory.report(p, cityId, range);
+    return reply
+      .header("content-type", "text/csv; charset=utf-8")
+      .header("content-disposition", `attachment; filename="regulatory-${cityId ?? "all"}-${r.from}-${r.to}.csv"`)
+      .header("cache-control", "no-store")
+      .send(regulatoryCsv(r.rows));
+  });
+
   app.get("/api/trips/:id", async (req) => {
     const p = await principal(req);
     return tripView(await trips.readable(p, id.parse(req.params).id), p);
+  });
+
+  app.get("/api/trips/:id/events", async (req) => {
+    const p = await principal(req);
+    return trips.events(p, id.parse(req.params).id);
   });
 
   // names and the car, for whoever may read the trip (the rider sees the driver and car, the driver the rider)
@@ -176,6 +315,32 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
     const p = await principal(req);
     const { driverId } = z.object({ driverId: z.string().uuid() }).parse(req.body);
     return idempotent(req, reply, p, async () => ({ statusCode: 200, body: tripView(await trips.assign(p, id.parse(req.params).id, driverId), p) }));
+  });
+
+  // dispatcher: take a matched trip from its driver (to another driver, or back to matching)
+  app.post("/api/trips/:id/reassign", async (req, reply) => {
+    const p = await principal(req);
+    const body = z.object({ driverId: z.string().uuid().optional(), reason: z.string().trim().max(300).optional() }).parse(req.body ?? {});
+    return idempotent(req, reply, p, async () => ({ statusCode: 200, body: tripView(await trips.reassign(p, id.parse(req.params).id, body), p) }));
+  });
+
+  // GPS trace (trip:read_gps_trace: dispatch and safety; every read audited)
+  const traceQuery = z.object({ reason: z.string().trim().max(500).optional() });
+  app.get("/api/trips/:id/trace", async (req, reply) => {
+    const p = await principal(req);
+    const { raw: _raw, ...trace } = await deps.trace.read(p, id.parse(req.params).id, traceQuery.parse(req.query).reason);
+    reply.header("cache-control", "no-store");
+    return trace;
+  });
+  app.get("/api/trips/:id/trace.csv", async (req, reply) => {
+    const p = await principal(req);
+    const tripId = id.parse(req.params).id;
+    const t = await deps.trace.read(p, tripId, traceQuery.parse(req.query).reason);
+    return reply
+      .header("content-type", "text/csv; charset=utf-8")
+      .header("content-disposition", `attachment; filename="trip-${tripId}-trace.csv"`)
+      .header("cache-control", "no-store")
+      .send(traceCsv(t.raw));
   });
 
   // ── workflow 06: progress (the assigned driver) ─────────────────────────────
@@ -259,7 +424,13 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
     internal.get("/internal/trips/:id", { config: { rateLimit: false } }, async (req) => {
       const t = await db.trip.findUnique({ where: { id: id.parse(req.params).id } });
       if (!t) throw notFound("trip");
-      return tripView(t);
+      // support-service also needs the booker (who may report on the trip) and the fleet that
+      // earns it (lost items reach the fleet owner); internal callers only
+      return {
+        ...tripView(t),
+        bookedByUserId: t.bookedByUserId,
+        beneficiary: t.beneficiaryId && t.vehicleOwnerType ? { type: t.vehicleOwnerType, id: t.beneficiaryId } : null,
+      };
     });
   });
 }

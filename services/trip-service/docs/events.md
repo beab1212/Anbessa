@@ -4,8 +4,8 @@ Kafka topics trip-service produces, how they get to Kafka, who consumes them, an
 
 ## Summary
 
-- **Produced:** seven `trip.*` topics, always through the transactional outbox.
-- **Consumed:** none. trip-service has no Kafka consumer (not found in code). Anything it needs from other services it asks over HTTP or reads from live settings.
+- **Produced:** seven `trip.*` lifecycle topics, plus (phase 2C) `trip.scheduled`, `trip.schedule_cancelled`, `trip.schedule_failed`, `trip.dispatch_escalated`, `trip.reassigned`, `corporate.policy_updated` and `audit.recorded`, always through the transactional outbox (see [Phase 2C topics](#phase-2c-topics)).
+- **Consumed:** `driver.location` (GPS traces) and `incident.opened` (regulatory counts), consumer group `trip-service` (see [Consumed topics](#consumed-topics)).
 - **Redis pub/sub:** subscribes to `settings:changed` and `authz:changed`; publishes Socket.io emitter messages.
 
 ## Envelope and key
@@ -15,7 +15,7 @@ Kafka topics trip-service produces, how they get to Kafka, who consumes them, an
 | Outbox column | Value |
 |---|---|
 | `topic` | the topic name |
-| `key` | `tripId` (all topics) |
+| `key` | `tripId`; `scheduledTripId` for `trip.scheduled` / `trip.schedule_*`, `orgId` for `corporate.policy_updated`, the actor id for `audit.recorded` |
 | `payload` | `{ eventId: uuidv7, version: 1, at: <ISO time of the write>, ...fields }` |
 
 Because the key is the trip id, all events of one trip land on one partition and keep their order there.
@@ -47,7 +47,15 @@ Because the key is the trip id, all events of one trip land on one partition and
 
 ### `trip.matched` (`TripMatchedEvent`)
 
-`tripId`, `riderId`, `driverId`, `cityId`, `vehicleType`.
+| Field | Type | Notes |
+|---|---|---|
+| `tripId`, `riderId`, `driverId` | uuid | |
+| `cityId` | string | |
+| `vehicleType` | string | |
+| `bookedById` | uuid, optional | only when someone other than the rider booked it (phone or company booking) |
+| `billingOrgId` | uuid, optional | only for company-billed trips |
+
+location-service uses the last two to let the booker and the billed company's trip readers watch the car.
 
 ### `trip.driver_en_route`, `trip.driver_arrived`, `trip.started` (`TripProgressEvent`)
 
@@ -66,8 +74,10 @@ Everything payment-service needs to settle the trip.
 | `paymentMethod` | enum | |
 | `billingType` | `PERSONAL` \| `CORPORATE` | |
 | `billingOrgId` | uuid, optional | only for company-billed trips |
-| `fareMinor` | int | final fare, waiting fee included |
+| `fareMinor` | int | final fare, waiting fee included. The full fare: the driver's earning is computed on it |
 | `waitingFeeMinor` | int | |
+| `quoteId` | string, optional | the pricing-service quote the trip was booked with (absent only on trips without one); pricing-service finds the promo reservation by it |
+| `promoDiscountMinor` | int | promo discount from the quote (`trip.promo_discount_minor`), at most `fareMinor`; 0 = none. The rider pays `fareMinor − promoDiscountMinor` |
 | `currency` | string | `ETB` |
 | `distanceMeters` | int | currently the planned route distance |
 | `durationSeconds` | int | `started_at → completed_at` |
@@ -87,16 +97,18 @@ Everything payment-service needs to settle the trip.
 | `driverCompensationMinor` | int | credited to the beneficiary out of the fee |
 | `beneficiary` | `{ type, id }`, optional | present if matched |
 | `billingOrgId` | uuid, optional | company trips: the fee is billed to the company |
+| `quoteId` | string, optional | the quote the trip was booked with; pricing-service releases its promo reservation |
 | `currency` | string | |
 
 ## Consumers (in other services)
 
 | Topic | Consumer group | Service | What it does |
 |---|---|---|---|
-| `trip.matched` | `location-service` | location-service (`src/events/handlers.ts`) | `startTrip()`: driver → `on_trip`, moved from the `available` to the `busy` geo set, `trip:{id}:members` = rider + driver, `offer:driver:{id}` deleted |
+| `trip.matched` | `location-service` | location-service (`src/events/handlers.ts`) | `startTrip()`: driver → `on_trip`, moved from the `available` to the `busy` geo set, `trip:{id}:members` = rider + driver (+ `bookedById`), `trip:{id}:billing_org` = `billingOrgId` when set, `offer:driver:{id}` deleted |
 | `trip.completed`, `trip.cancelled` | `location-service` | location-service | `endTrip()`: driver back to `available` (if still on this trip), trip member/last-position keys expire after 300 s |
 | `trip.completed` | `payment-service` | payment-service (`src/events/consumer.ts`) | settles the trip per payment method (inbox dedupe on `eventId`) |
 | `trip.cancelled` | `payment-service` | payment-service | settles the cancellation fee when `feeMinor > 0` (inbox dedupe) |
+| `trip.completed`, `trip.cancelled` | `pricing-service` | pricing-service (`src/events/consumer.ts`) | promo: redeems the booked reservation (`promo.redeemed`) by `quoteId` with `promoDiscountMinor` / releases it on cancellation |
 | `trip.requested`, `trip.driver_en_route`, `trip.driver_arrived`, `trip.started` | — | none found in the repo | produced only |
 
 Consequence: **without the relay running, location-service never marks a matched driver as busy**, so the driver stays in the `available` set and can be offered other trips. Accepting a second one fails with `409 driver_busy` (the `driver_active_trip` key), but offers are wasted. Keep `KAFKA_BROKERS` set whenever you run location-service.
@@ -131,3 +143,28 @@ On shutdown the relay timer stops and the producer disconnects; there is no fina
 | `deny:{userId}`, `pv:{userId}` | read | token revocation and permission version, written by auth-service |
 
 Full Redis key list: [data-model.md](data-model.md#redis-keys).
+
+## Phase 2C topics
+
+| Topic | Type (`libs/shared-types`) | Key | Emitted by | When |
+|---|---|---|---|---|
+| `trip.scheduled` | `TripScheduledEvent` | scheduledTripId | `scheduler.book()`, `update()` (`updated: true`) | a ride is booked ahead or its time / route / purpose changes |
+| `trip.schedule_cancelled` | `TripScheduleCancelledEvent` | scheduledTripId | `scheduler.cancel()` | cancelled before dispatch (`by`: RIDER, BOOKER, STAFF) |
+| `trip.schedule_failed` | `TripScheduleFailedEvent` | scheduledTripId | scheduler tick | the trip couldn't be created by the pickup time (`reason`: `RIDER_HAS_ACTIVE_TRIP`, `DISPATCH_FAILED`) |
+| `trip.requested` | `TripRequestedEvent` | tripId | `createFromSchedule()` | a booking became a trip (same payload as an on-demand request; the `trip_event` row carries `scheduledTripId`) |
+| `trip.dispatch_escalated` | `TripDispatchEscalatedEvent` | tripId | `matchTimedOut()` | a scheduled trip's first matching round ran out with no driver; once per trip |
+| `trip.reassigned` | `TripReassignedEvent` | tripId | `reassign()` | a dispatcher moved a matched / en-route trip (`toDriverId` absent = back to matching); with a named driver a `trip.matched` for the new driver is written too |
+| `corporate.policy_updated` | `CorporatePolicyUpdatedEvent` | orgId | `policies.put()` | a company admin saved the ride policy |
+| `audit.recorded` | audit-service's schema (`services/audit-service/src/store.ts`) | actorId | reassign (`EXECUTED`), policy save (`EXECUTED`), GPS trace read (`ALLOWED`, with the reason) | `service: "trip-service"` |
+
+Consumers: `audit.recorded` → audit-service. notification-service pushes on `trip.scheduled`, `trip.schedule_cancelled`, `trip.schedule_failed`, `trip.dispatch_escalated` and `trip.reassigned` (no reminder push: no event marks one). location-service handles `trip.reassigned` (`reassignTrip` in `libs/shared-location`: old driver freed and out of the trip, live trip → new driver); trip-service still frees the old driver in Redis synchronously too (`releaseDriver`, [data-model.md](data-model.md#redis-keys)), so the two converge on the same state. `corporate.policy_updated` has no consumer.
+
+## Consumed topics
+
+`src/events/consumer.ts`, started in `src/server.ts` when `KAFKA_BROKERS` is set (a broker that's down at start is logged, the HTTP API still starts). Consumer group `trip-service`; missing topics are created at start. Payloads are validated with zod; invalid JSON or schema → logged `skipping invalid event` and skipped; database errors are thrown so kafkajs retries.
+
+| Topic | Producer | Handler | What it does |
+|---|---|---|---|
+| `driver.location` | realtime-gateway (key driverId, every accepted ping) | `traceRecorder.record()` (`src/trips/trace.ts`) | pings with a `tripId` of a trip that is matched / en route / in progress **and** whose driver is the pinging driver are thinned (≥ 5 s and ≥ 20 m since the last kept point, or ≥ 60 s) and inserted into `trip_trace`. Pings without a trip, of other drivers, of ended trips, out of order or > 5 min in the future are dropped |
+| `incident.opened` | support-service (key incidentId) | `regulatory.recordIncident()` | inserts `{incidentId, cityId, category, severity, tripId, openedAt}` into `regulatory_incident` (replays ignored) |
+

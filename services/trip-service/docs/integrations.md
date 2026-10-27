@@ -67,6 +67,8 @@ Failure of `table` is logged (`mapping-service unavailable, ranking by distance`
 
 - `GET /internal/quotes/{quoteId}` (URL-encoded). `200` → `Quote` (interface in `src/quotes.ts`, implemented by `services/pricing-service/src/quotes.ts`), `404` → unknown quote (`400 invalid_quote` to the rider), other status / timeout → `503 dependency_unavailable`.
 - Riders get quotes from pricing-service directly (`POST /api/pricing/estimates`); trip-service only reads one when the trip is requested and copies it onto the trip.
+- **Promo codes** (workflow 15): reading the quote books its promo discount at pricing-service; the quote then carries `discountMinor` (and `promo.code`), else none (the discount could no longer be given). `POST /api/trips` copies it to `trip.promo_discount_minor` / `promo_code` (clamped to 0 … fare). `trip.completed` carries `quoteId` and `promoDiscountMinor`, `trip.cancelled` `quoteId`; pricing-service redeems / releases the reservation from them and payment-service charges the rider `fare − discount` (driver earnings on the full fare, the discount to `PROMO_EXPENSE`). Scheduled rides don't carry a promo: dispatch re-prices without one.
+- **Re-pricing scheduled rides** (`reprice()`): `POST /internal/quotes { requestedBy, cityId, vehicleType, vehicleTypes: [vehicleType], pickup, dropoff, pickupAddress?, dropoffAddress? }` → `{ quotes: Quote[] }` or a `Quote`, 5 s timeout. pricing-service prices it like an estimate (fare rule in force, zones; never a promo) and stores it, so the trip's `quote_id` points at the fresh quote. A `404`/`405` (an older pricing-service without the route) means "not available" and the scheduler keeps the booked quote; other errors (e.g. `400 vehicle_type_unavailable`, `city_mismatch`, a no-pickup zone) are logged (`re-pricing failed, keeping the booked quote`). With `PRICING=builtin` the stand-in prices it in-process.
 
 ## auth-service
 
@@ -239,3 +241,13 @@ sequenceDiagram
   V->>T: GET /api/trips/shared/:token
   T-->>V: 404
 ```
+
+## Phase 2C: Kafka in, location state on reassignment
+
+| System | Direction | What | Failure behaviour |
+|---|---|---|---|
+| realtime-gateway | in (Kafka `driver.location`) | GPS pings with `tripId` → `trip_trace` | broker down: no trace points (the trip falls back to the planned distance); the API is unaffected |
+| support-service | in (Kafka `incident.opened`) | incident counts for the regulatory report | missing events → lower incident counts; support-service has no internal count API to reconcile against |
+| location-service state (Redis) | out (direct writes) | `reassign()` frees the old driver (`driver:{id}` status, geo sets, `trip:{id}:members`, `trip:{id}:last`) | Redis errors fail the request after the database change committed; the old driver then stays `on_trip` until their session or the next trip event. location-service should consume `trip.reassigned` and do this itself |
+| audit-service | out (Kafka `audit.recorded` through the outbox) | reassignments, policy saves, GPS trace reads | as any outbox event |
+

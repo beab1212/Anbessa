@@ -13,6 +13,10 @@ Reference documentation for `services/trip-service`, written from the code. Wher
 | Ratings (both directions) and the average a person received | `trip_rating`, `src/trips/service.ts` |
 | Saved places (Home, Work, others) | `saved_place`, `src/trips/places.ts` |
 | Share-my-trip links and the public shared view | `trip_share`, `src/trips/share.ts` |
+| Scheduled rides (booked ahead) and the scheduler that turns them into trips | `scheduled_trip`, `src/trips/scheduled.ts` |
+| Company ride policies, checked on company bookings | `corporate_policy`, `src/trips/corporate.ts` |
+| The GPS trace of trips (from `driver.location`) | `trip_trace`, `src/trips/trace.ts` |
+| The regulatory report (monthly aggregates per city) | `regulatory_incident`, `src/trips/regulatory.ts` |
 | The `trip.*` Kafka events (through a transactional outbox) | `outbox`, `src/outbox/` |
 | Trip history (state changes) | `trip_event`, partitioned by month |
 
@@ -29,7 +33,7 @@ Reference documentation for `services/trip-service`, written from the code. Wher
 | Socket connections | realtime-gateway | Socket.io Redis emitter (no HTTP hop) |
 | Charging money, ledgers, receipts | payment-service | consumes `trip.completed` / `trip.cancelled` |
 
-trip-service **consumes no Kafka topics**. It only produces.
+trip-service consumes `driver.location` (GPS traces) and `incident.opened` (regulatory incident counts); see [events.md](events.md#consumed-topics).
 
 ## One-screen overview
 
@@ -88,4 +92,4 @@ flowchart LR
 | [configuration.md](configuration.md) | Environment variables and the live settings read from platform-service |
 | [operations.md](operations.md) | Running locally, tests, build and deploy, health, logging, failure modes and troubleshooting |
 
-There is no `consumers` page because the service has no Kafka consumers (see [events.md](events.md)).
+The two Kafka consumers are described in [events.md](events.md#consumed-topics).

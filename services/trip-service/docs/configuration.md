@@ -34,6 +34,9 @@ A variable set to an empty string (`KEY=`) counts as **not set** (`loadConfig()`
 | `MATCH_RADII_METERS` | comma-separated numbers, each 100–20000 | `2000,4000,6000` | no | Default for `match.radiiMeters`. Validated in every environment |
 | `TRIP_PIN_REQUIRED` | `true` \| `false` | `false` | no | Default for `trip.pinRequired` |
 | `SHARE_BASE_URL` | URL | `http://localhost:5173` | **yes in production** (non-local) | Base of share links: `{SHARE_BASE_URL}/t/{token}`. Trailing `/` is stripped |
+| `SCHEDULE_LEAD_MINUTES` | int 5–120 | `15` | no | Scheduled rides: matching starts this long before a daytime pickup |
+| `SCHEDULE_NIGHT_LEAD_MINUTES` | int 5–120 | `30` | no | … before a pickup between 22:00 and 06:00 Addis time |
+| `SCHEDULE_TICK_SECONDS` | int 1–300 | `15` | no | How often the scheduler looks for due bookings |
 
 "In practice" means the default only works when every service runs on localhost; set it in any deployment.
 
@@ -84,3 +87,8 @@ Read through `@ride-app/shared-settings` (`createSettingsClient()` in `src/conta
 | `fares.{vehicleType}.baseMinor`, `.perKmMinor`, `.perMinMinor`, `.minFareMinor`, `.waitingPerMinMinor` | city, sensitive (owner pricing-service) | per type in the registry | 0–1000000 | builtin quotes | fare table of the stand-in |
 
 Unknown keys make `get()` throw (`unknown setting`), so a key must exist in the registry before the service reads it.
+
+## Phase 2C notes
+
+- `KAFKA_BROKERS` now also starts the event consumer (group `trip-service`: `driver.location`, `incident.opened`). Without it no GPS traces or incident counts are recorded.
+- The live setting `features.scheduledRides` (platform-service, default **off**) gates `POST /api/trips/scheduled`. The lead times are environment variables, not live settings: `libs/shared-settings` has no `schedule.*` keys yet.

@@ -316,6 +316,72 @@ describe("execution (workflow 06)", () => {
   });
 });
 
+describe("promo codes (workflow 15)", () => {
+  /** A quote whose promo discount pricing-service booked (the builtin quotes have none, so it is added to the stored quote). */
+  async function promoQuote(r: { token: string }, discountMinor: number) {
+    const q = await h.quote(r);
+    const raw = JSON.parse((await h.redis.get(`devquote:${q.id}`))!);
+    await h.redis.set(`devquote:${q.id}`, JSON.stringify({
+      ...raw, discountMinor, payableMinor: Math.max(0, raw.fareMinor - discountMinor),
+      promo: { promoId: uuid(), code: "WELCOME50", discountMinor, fundedBy: "PLATFORM" },
+    }), "EX", 600);
+    return q;
+  }
+
+  async function bookAndMatch(discountMinor: number, paymentMethod = "CASH") {
+    const r = await h.rider();
+    const d = await h.driver(near(BOLE, 20));
+    const q = await promoQuote(r, discountMinor);
+    const res = await h.req("POST", "/api/trips", r, { quoteId: q.id, paymentMethod });
+    expect(res.statusCode).toBe(201);
+    const tripId = res.json<{ id: string }>().id;
+    const offer = await h.offerFor(tripId);
+    expect((await h.req("POST", `/api/trips/${tripId}/accept`, d, { offerId: offer!.id })).statusCode).toBe(200);
+    return { r, d, q, tripId, created: res.json<{ fare: Record<string, unknown> }>() };
+  }
+
+  it("copies the quote's discount onto the trip; the completed event carries quoteId and the discount, the fare stays full", async () => {
+    const { r, d, q, tripId, created } = await bookAndMatch(2_000);
+    expect(created.fare).toMatchObject({ estimateMinor: q.fareMinor, promoDiscountMinor: 2_000, promoCode: "WELCOME50", payableMinor: q.fareMinor - 2_000 });
+    expect(await h.c.db.trip.findUniqueOrThrow({ where: { id: tripId } })).toMatchObject({ quoteId: q.id, promoDiscountMinor: 2_000n, promoCode: "WELCOME50" });
+
+    await h.req("POST", `/api/trips/${tripId}/en-route`, d);
+    await d.ping(near(BOLE, 10));
+    await h.req("POST", `/api/trips/${tripId}/arrive`, d);
+    await h.req("POST", `/api/trips/${tripId}/start`, d);
+    const done = (await h.req("POST", `/api/trips/${tripId}/complete`, d)).json<{ fare: { finalMinor: number; promoDiscountMinor: number; payableMinor: number } }>();
+    expect(done.fare.promoDiscountMinor).toBe(2_000);
+    expect(done.fare.payableMinor).toBe(done.fare.finalMinor - 2_000);
+
+    const [event] = await outbox(tripId, "trip.completed");
+    expect(event).toMatchObject({ tripId, riderId: r.id, quoteId: q.id, fareMinor: done.fare.finalMinor, promoDiscountMinor: 2_000 });
+  });
+
+  it("a discount above the fare is capped at the fare (the rider pays 0, never less)", async () => {
+    const { q, tripId, created } = await bookAndMatch(1_000_000, "MOBILE_MONEY");
+    expect(created.fare).toMatchObject({ promoDiscountMinor: q.fareMinor, payableMinor: 0 });
+    expect((await h.c.db.trip.findUniqueOrThrow({ where: { id: tripId } })).promoDiscountMinor).toBe(BigInt(q.fareMinor));
+  });
+
+  it("no promo: the completed event says promoDiscountMinor 0", async () => {
+    const { d, tripId } = await h.matchedTrip();
+    await h.req("POST", `/api/trips/${tripId}/en-route`, d);
+    await d.ping(near(BOLE, 10));
+    await h.req("POST", `/api/trips/${tripId}/arrive`, d);
+    await h.req("POST", `/api/trips/${tripId}/start`, d);
+    await h.req("POST", `/api/trips/${tripId}/complete`, d);
+    const [event] = await outbox(tripId, "trip.completed");
+    expect(event).toMatchObject({ promoDiscountMinor: 0, quoteId: expect.stringMatching(/^q_/) });
+  });
+
+  it("a cancelled trip's event carries the quoteId, so pricing releases the reservation", async () => {
+    const { r, q, tripId } = await bookAndMatch(2_000);
+    await h.req("POST", `/api/trips/${tripId}/cancel`, r, { reason: "CHANGED_PLANS" });
+    const [event] = await outbox(tripId, "trip.cancelled");
+    expect(event).toMatchObject({ tripId, quoteId: q.id });
+  });
+});
+
 describe("cancellations (workflow 07)", () => {
   const cancel = (tripId: string, who: { token: string }, reason = "CHANGED_PLANS") =>
     h.req("POST", `/api/trips/${tripId}/cancel`, who, { reason });
@@ -466,6 +532,33 @@ describe("reading trips", () => {
     expect((await h.req("GET", `/api/trips/${tripId}/parties`, await h.rider())).statusCode).toBe(404);
   });
 
+  it("parties: the fleet that owns the car sees its driver and car; the billed company also sees its rider", async () => {
+    const fleetOrgId = uuid();
+    const { r, d, tripId } = await h.matchedTrip({ driverOpts: { fleetOrgId } });
+    h.partiesState.names.set(d.id, "Dawit Bekele");
+    h.partiesState.names.set(r.id, "Sara Getachew");
+    const owner = await h.rider(uuid(), [{ r: "FLEET_OWNER", org: fleetOrgId }]);
+    expect((await h.req("GET", `/api/trips/${tripId}/parties`, owner)).json()).toMatchObject({ driver: { name: "Dawit Bekele" }, vehicle: { plateNumber: "3-A40402" }, rider: null });
+    expect((await h.req("GET", `/api/trips/${tripId}/parties`, await h.rider(uuid(), [{ r: "FLEET_OWNER", org: uuid() }]))).statusCode).toBe(404);
+
+    // the same trip billed to a company (set here directly): its admin sees driver, car and rider
+    const company = uuid();
+    await h.c.db.trip.update({ where: { id: tripId }, data: { billingType: "CORPORATE", billingOrgId: company, paymentMethod: "CORPORATE" } });
+    const admin = await h.rider(uuid(), [{ r: "CORPORATE_ADMIN", org: company }]);
+    expect((await h.req("GET", `/api/trips/${tripId}/parties`, admin)).json()).toMatchObject({ driver: { name: "Dawit Bekele" }, vehicle: { plateNumber: "3-A40402" }, rider: { name: "Sara Getachew" } });
+  });
+
+  it("events: staff of the city read a trip's history; nobody else", async () => {
+    const { r, d, tripId } = await h.matchedTrip();
+    await h.req("POST", `/api/trips/${tripId}/en-route`, d);
+    const support = await h.staff([{ r: "SUPPORT_AGENT", city: CITY }]);
+    const res = await h.req("GET", `/api/trips/${tripId}/events`, support);
+    expect(res.statusCode).toBe(200);
+    expect(res.json<{ events: { to: string }[] }>().events.map((e) => e.to)).toEqual(["requested", "matched", "en_route"]);
+    expect((await h.req("GET", `/api/trips/${tripId}/events`, r)).statusCode).toBe(404);
+    expect((await h.req("GET", `/api/trips/${tripId}/events`, await h.staff([{ r: "SUPPORT_AGENT", city: "hawassa" }]))).statusCode).toBe(404);
+  });
+
   it("parties: unreachable auth/fleet degrade to nulls, not an error", async () => {
     const { r, tripId } = await h.matchedTrip();
     h.partiesState.down = true;
@@ -551,5 +644,19 @@ describe("admin settings (platform-service), live", () => {
       h.settings.set("cancel.feeMinor", 3000, CITY);
       h.settings.set("cancel.freeSeconds", 120, CITY);
     }
+  });
+});
+
+describe("internal trip facts (support-service)", () => {
+  it("GET /internal/trips/:id adds the booker and the beneficiary; needs the service token", async () => {
+    const { r, d, tripId } = await h.matchedTrip();
+    expect((await h.app.inject({ method: "GET", url: `/internal/trips/${tripId}` })).statusCode).toBe(401);
+    const res = await h.app.inject({ method: "GET", url: `/internal/trips/${tripId}`, headers: { authorization: `Bearer ${"t".repeat(64)}` } });
+    expect(res.statusCode, res.body).toBe(200);
+    const body = res.json<Record<string, unknown>>();
+    expect(body).toMatchObject({ id: tripId, riderUserId: r.id, bookedByUserId: r.id, driver: { userId: d.id } });
+    expect(body).toHaveProperty("beneficiary");
+    expect(body).not.toHaveProperty("pin");
+    expect((await h.app.inject({ method: "GET", url: `/internal/trips/${uuid()}`, headers: { authorization: `Bearer ${"t".repeat(64)}` } })).statusCode).toBe(404);
   });
 });

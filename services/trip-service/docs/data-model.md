@@ -12,6 +12,10 @@ erDiagram
   trip ||--o{ trip_share : "links"
   trip ||..o{ trip_event : "history (no FK)"
   trip ||..o{ outbox : "events (no FK)"
+  trip ||--o{ trip_trace : "GPS points"
+  scheduled_trip |o--o| trip : "trip_id once dispatched"
+  corporate_policy }o..|| organization : "org_id (auth-service)"
+  regulatory_incident }o..o| trip : "trip_id (no FK)"
   saved_place }o..|| user : "user_id (auth-service)"
 ```
 
@@ -44,6 +48,8 @@ One row per trip. Created with `fillfactor = 85` (room for HOT updates).
 | `waiting_per_min_minor` | bigint | no | 0 | from the quote |
 | `fare_final_minor` | bigint | yes | | set at completion |
 | `waiting_fee_minor` | bigint | yes | | set at completion |
+| `promo_discount_minor` | bigint | no | 0 | promo discount from the booked quote (`discountMinor` as pricing-service served it at booking, clamped to 0 … fare). CHECK `ck_trip_promo_discount`: 0 ≤ discount ≤ `fare_estimate_minor`. The rider pays fare − discount; the driver earns on the full fare |
+| `promo_code` | text | yes | | the promo code applied (from the quote), null without a discount |
 | `currency` | char(3) | no | `ETB` | |
 | `est_distance_m`, `est_duration_s` | int | no | | from the quote |
 | `distance_m`, `duration_s` | int | yes | | set at completion (`distance_m` = `est_distance_m` for now) |
@@ -73,8 +79,11 @@ Indexes:
 | `ux_trip_rider_active` | unique `(rider_user_id)` WHERE status is active | **one active trip per rider** |
 | `ix_trip_driver_recent` | `(driver_user_id, created_at DESC)` WHERE driver set | my trips as driver |
 | `ix_trip_city_active` | `(city_id, status, created_at)` WHERE status is active | dispatcher board |
-| `ix_trip_billing_org` | `(billing_org_id, created_at)` WHERE org set | company trips |
+| `ix_trip_billing_org` | `(billing_org_id, created_at)` WHERE org set | company trips (`GET /api/trips/org/:orgId?role=billing`) |
 | `ix_trip_pickup_gix` | GiST `(pickup)` | zone and heatmap queries (no query in this service uses it yet) |
+| `ix_trip_city_recent` | `(city_id, created_at DESC)` | staff search by city, daily report (migration 5) |
+| `ix_trip_fleet_recent` | `(beneficiary_id, created_at DESC)` WHERE `vehicle_owner_type = 'ORGANIZATION'` | a fleet's trips (`GET /api/trips/org/:orgId?role=fleet`, migration 5) |
+| `ix_trip_vehicle_recent` | `(vehicle_id, created_at DESC)` WHERE `vehicle_id IS NOT NULL` | search by vehicle (migration 5) |
 
 ## `driver_active_trip`
 
@@ -200,6 +209,8 @@ Applied in order by `prisma migrate deploy` (`make db-migrate`). The `migration_
 | 2 | `20261027090000_saved_places` | `saved_place` with its label check, the `(user_id, created_at)` index and the partial unique index for HOME/WORK |
 | 3 | `20261027093000_rating_ratee_tags` | adds `trip_rating.ratee_user_id` and `tags`, backfills `ratee_user_id` from the trip (rider's rating → driver, driver's → rider), indexes `ratee_user_id` |
 | 4 | `20261030090000_trip_share` | `trip_share` with its index and the cascading FK to `trip` |
+| 5 | `20261031090000_trip_search_indexes` | `ix_trip_city_recent` (also an `@@index` in `schema.prisma`), the partial `ix_trip_fleet_recent` and `ix_trip_vehicle_recent` (SQL only) |
+| 6 | `20261101090000_scheduled_policies_trace` | `trip.purpose`; `scheduled_trip` (status and `match_at ≤ scheduled_for` checks, unique `trip_id` with `ON DELETE SET NULL`, the partial due-queue index and per rider / booker / org / city indexes); `corporate_policy` (minute, day and money checks); `ix_trip_billing_org_recent`; `trip_trace` (FK cascade); `regulatory_incident` with its `(city_id, opened_at)` index |
 
 Writing a new migration: the Makefile notes that `prisma migrate dev` sees the generated PostGIS columns as drift; use `pnpm exec prisma migrate dev --create-only` and edit the SQL.
 
@@ -217,7 +228,78 @@ trip-service uses one Redis (`REDIS_URL`), which must be the same Redis as locat
 | `rating:user:{userId}` | STRING (JSON `{average, count}`) | 300 s | `ratingOfUser()` | cached average received |
 | `trip:parties:{tripId}:{driverId\|-}:{vehicleId\|-}` | STRING (JSON) | 60 s | parties | names, photos, car |
 | `devquote:{quoteId}` | STRING (JSON `Quote`) | `quote.ttlSeconds` | builtin quotes only | development quotes |
+| `driver:{driverId}`, `geo:{city}:{type}:busy\|available`, `trip:{tripId}:members`, `trip:{tripId}:last` | (location-service's) | | `reassign()` only | the old driver of a reassigned trip is put back to available, removed from the trip's watchers, and the trip's last position cleared (`releaseDriver` in `src/trips/service.ts`) |
 | `deny:{userId}` | STRING | (auth-service) | auth-service | read: suspended user → `401 token_revoked` |
 | `pv:{userId}` | STRING (int) | (auth-service) | auth-service | read: permission version → `401 token_outdated` |
 
-Pub/sub channels are listed in [events.md](events.md#redis-pubsub-and-signalling-keys). Driver state (`driver:{id}`, geo sets) is location-service's; trip-service only reads it over HTTP.
+Pub/sub channels are listed in [events.md](events.md#redis-pubsub-and-signalling-keys). Driver state (`driver:{id}`, geo sets) is location-service's; trip-service reads it over HTTP and writes it only when a dispatcher reassigns a trip (location-service has no event for that yet).
+
+## `trip.purpose` (added in migration 6)
+
+`purpose text` nullable: the trip purpose / cost centre for company rides (≤ 200 chars at the API). Copied from the scheduled booking at dispatch. Shown in the trip object except to the driver.
+
+## `scheduled_trip`
+
+A ride booked ahead (workflow 12). Not a trip: the scheduler creates the `trip` at `match_at`.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | uuid | PK, `uuidv7()` |
+| `city_id`, `rider_user_id`, `booked_by_user_id`, `channel`, `billing_type`, `billing_org_id`, `payment_method`, `vehicle_type`, `purpose` | | as on `trip`; copied onto it at dispatch |
+| `quote_id` | text | the quote booked with (one booking or trip per quote) |
+| `pickup_lat/lng`, `dropoff_lat/lng`, `pickup_address`, `dropoff_address` | | from the quote |
+| `fare_estimate_minor`, `waiting_per_min_minor`, `currency`, `est_distance_m`, `est_duration_s`, `route_polyline` | | the booked quote; the fare is the ceiling at dispatch |
+| `scheduled_for` | timestamptz | pickup time |
+| `match_at` | timestamptz | `scheduled_for − lead`; check `match_at <= scheduled_for` |
+| `status` | text | default `SCHEDULED`; check: `SCHEDULED`, `DISPATCHING`, `DISPATCHED`, `CANCELLED`, `FAILED` |
+| `trip_id` | uuid | unique, FK → `trip.id` `ON DELETE SET NULL`; set at dispatch |
+| `claimed_at` | timestamptz | when a scheduler instance claimed it (stale after 2 min) |
+| `dispatched_at`, `cancelled_at`, `cancelled_by_user_id`, `fail_reason`, `escalated_at` | | |
+| `version` | int | optimistic concurrency (claim, edit, dispatch) |
+| `created_at`, `updated_at` | timestamptz | |
+
+Indexes: `ix_scheduled_trip_due (match_at) WHERE status IN ('SCHEDULED','DISPATCHING')` (the scheduler's queue), `ix_scheduled_trip_rider (rider_user_id, scheduled_for)`, `ix_scheduled_trip_booker (booked_by_user_id, scheduled_for)`, `ix_scheduled_trip_org (billing_org_id, scheduled_for) WHERE billing_org_id IS NOT NULL`, `ix_scheduled_trip_city (city_id, scheduled_for)`.
+
+## `corporate_policy`
+
+| Column | Type | Notes |
+|---|---|---|
+| `org_id` | uuid | PK: the company (auth-service organisation) |
+| `allowed_vehicle_types` | text[] | empty = any |
+| `allowed_days` | int[] | 0 = Sunday … 6 = Saturday, Addis time; empty = any; check `<@ {0..6}` |
+| `start_minute`, `end_minute` | int | minutes after Addis midnight; both null or both set (start 0–1439, end 1–1440, different); start > end wraps past midnight |
+| `max_fare_minor`, `monthly_budget_minor` | bigint | null = no limit; check > 0 |
+| `require_purpose` | boolean | default false |
+| `updated_by_user_id` | uuid | |
+| `version` | int | incremented on every save |
+| `created_at`, `updated_at` | timestamptz | |
+
+Index added on `trip` for the budget: `ix_trip_billing_org_recent (billing_org_id, created_at DESC) WHERE billing_org_id IS NOT NULL`.
+
+## `trip_trace`
+
+Thinned GPS points of a trip from `driver.location` ([architecture.md](architecture.md#gps-trace)).
+
+| Column | Type | Notes |
+|---|---|---|
+| `trip_id` | uuid | PK part, FK → `trip.id` `ON DELETE CASCADE` |
+| `at` | timestamptz | PK part: device time of the ping |
+| `lat`, `lng` | double | |
+| `speed`, `accuracy` | real | nullable, as the app reported them |
+| `status` | text | the trip status when recorded (cached up to 10 s, informational) |
+
+No retention job yet (Role.md Q5: retention with legal counsel; workflow 14: incident traces kept beyond 90 days).
+
+## `regulatory_incident`
+
+A copy of support-service `incident.opened` (counts only, no PII), for the regulatory report.
+
+| Column | Type | Notes |
+|---|---|---|
+| `incident_id` | uuid | PK (a replayed event is ignored) |
+| `city_id`, `category`, `severity` | text | |
+| `trip_id` | uuid | nullable, no FK |
+| `opened_at` | timestamptz | the event's `at` |
+
+Index `ix_regulatory_incident_city_opened (city_id, opened_at)`.
+

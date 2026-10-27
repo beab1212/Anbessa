@@ -44,6 +44,12 @@ export const envSchema = z
     /** where share-my-trip links point: the web app's public /t/:token page */
     SHARE_BASE_URL: z.string().url().default("http://localhost:5173"),
     TRIP_PIN_REQUIRED: z.enum(["true", "false"]).default("false").transform((v) => v === "true"),
+
+    // Scheduled rides (workflow 12): matching starts this many minutes before the pickup
+    // (longer at night, 22:00–06:00 Addis time); the scheduler looks for due bookings every N s
+    SCHEDULE_LEAD_MINUTES: z.coerce.number().int().min(5).max(120).default(15),
+    SCHEDULE_NIGHT_LEAD_MINUTES: z.coerce.number().int().min(5).max(120).default(30),
+    SCHEDULE_TICK_SECONDS: z.coerce.number().int().min(1).max(300).default(15),
   })
   .superRefine((env, ctx) => {
     const fail = (path: string, message: string) => ctx.addIssue({ code: "custom", path: [path], message });

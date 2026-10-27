@@ -2,11 +2,14 @@ import type { FastifyError, FastifyInstance } from "fastify";
 import { ZodError } from "zod";
 import { AuthorizationError, TokenCheckUnavailable, TokenError } from "@ride-app/shared-authz";
 import { AppError } from "@ride-app/shared-utils";
+import { PolicyViolation } from "../trips/corporate.js";
 
 // Registered before any route, so every route uses it. Internal details never
 // reach the client; they're logged with the request id.
 export function registerErrorHandler(app: FastifyInstance) {
   app.setErrorHandler((err: FastifyError | Error, req, reply) => {
+    // a company policy rule: say which one, so the app can offer personal payment
+    if (err instanceof PolicyViolation) return reply.status(422).send({ error: err.code, message: err.message, rule: err.rule });
     if (err instanceof AppError) return reply.status(err.statusCode).send({ error: err.code, message: err.message });
     if (err instanceof AuthorizationError) return reply.status(403).send({ error: "forbidden", message: err.message });
     if (err instanceof TokenError) return reply.status(401).send({ error: err.code, message: err.message });

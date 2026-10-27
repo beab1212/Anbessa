@@ -47,6 +47,10 @@ model Trip {
   waitingPerMinMinor BigInt  @default(0) @map("waiting_per_min_minor")
   fareFinalMinor     BigInt? @map("fare_final_minor")
   waitingFeeMinor    BigInt? @map("waiting_fee_minor")
+  /// promo discount from the booked quote (0 = none); the rider pays the fare minus this, the driver earns on the full fare
+  promoDiscountMinor BigInt  @default(0) @map("promo_discount_minor")
+  /// the promo code applied (from the quote), for receipts
+  promoCode          String? @map("promo_code")
   currency           String  @default("ETB") @db.Char(3)
 
   estDistanceM  Int     @map("est_distance_m")
@@ -68,7 +72,9 @@ model Trip {
   cancelFeeMinor          BigInt?   @map("cancel_fee_minor")
   driverCompensationMinor BigInt?   @map("driver_compensation_minor")
 
-  /// review flags, e.g. FAR_FROM_DROPOFF
+  /// trip purpose / cost centre (company account trips; a company policy may require it)
+  purpose   String?
+  /// review flags, e.g. FAR_FROM_DROPOFF, DISPATCH_ESCALATED, REASSIGNED
   flags     String[] @default([])
   version   Int      @default(0)
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
@@ -78,9 +84,12 @@ model Trip {
   active  DriverActiveTrip?
   ratings TripRating[]
   shares  TripShare[]
+  trace   TripTracePoint[]
+  scheduled ScheduledTrip?
 
   @@index([riderUserId, createdAt(sort: Desc)], map: "ix_trip_rider_recent")
   @@index([bookedByUserId, createdAt(sort: Desc)], map: "ix_trip_booked_by_recent")
+  @@index([cityId, createdAt(sort: Desc)], map: "ix_trip_city_recent")
   @@map("trip")
 }
 
@@ -200,4 +209,100 @@ model TripShare {
 
   @@index([tripId], map: "trip_share_trip_id_idx")
   @@map("trip_share")
+}
+
+/// A ride booked ahead (workflow 12). The scheduler creates the real trip at match_at (see the migration).
+model ScheduledTrip {
+  id                 String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  cityId             String    @map("city_id")
+  riderUserId        String    @map("rider_user_id") @db.Uuid
+  bookedByUserId     String    @map("booked_by_user_id") @db.Uuid
+  channel            String
+  billingType        String    @map("billing_type")
+  billingOrgId       String?   @map("billing_org_id") @db.Uuid
+  paymentMethod      String    @map("payment_method")
+  vehicleType        String    @map("vehicle_type")
+  purpose            String?
+  quoteId            String    @map("quote_id")
+  pickupLat          Float     @map("pickup_lat")
+  pickupLng          Float     @map("pickup_lng")
+  dropoffLat         Float     @map("dropoff_lat")
+  dropoffLng         Float     @map("dropoff_lng")
+  pickupAddress      String?   @map("pickup_address")
+  dropoffAddress     String?   @map("dropoff_address")
+  fareEstimateMinor  BigInt    @map("fare_estimate_minor")
+  waitingPerMinMinor BigInt    @default(0) @map("waiting_per_min_minor")
+  currency           String    @default("ETB") @db.Char(3)
+  estDistanceM       Int       @map("est_distance_m")
+  estDurationS       Int       @map("est_duration_s")
+  routePolyline      String?   @map("route_polyline")
+  scheduledFor       DateTime  @map("scheduled_for") @db.Timestamptz
+  matchAt            DateTime  @map("match_at") @db.Timestamptz
+  /// SCHEDULED | DISPATCHING | DISPATCHED | CANCELLED | FAILED
+  status             String    @default("SCHEDULED")
+  tripId             String?   @unique @map("trip_id") @db.Uuid
+  trip               Trip?     @relation(fields: [tripId], references: [id], onDelete: SetNull)
+  claimedAt          DateTime? @map("claimed_at") @db.Timestamptz
+  dispatchedAt       DateTime? @map("dispatched_at") @db.Timestamptz
+  cancelledAt        DateTime? @map("cancelled_at") @db.Timestamptz
+  cancelledByUserId  String?   @map("cancelled_by_user_id") @db.Uuid
+  failReason         String?   @map("fail_reason")
+  escalatedAt        DateTime? @map("escalated_at") @db.Timestamptz
+  version            Int       @default(0)
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@index([riderUserId, scheduledFor], map: "ix_scheduled_trip_rider")
+  @@index([bookedByUserId, scheduledFor], map: "ix_scheduled_trip_booker")
+  @@index([cityId, scheduledFor], map: "ix_scheduled_trip_city")
+  @@map("scheduled_trip")
+}
+
+/// A company's ride policy (workflow 11 step 4). Empty lists and nulls mean no limit.
+model CorporatePolicy {
+  orgId               String   @id @map("org_id") @db.Uuid
+  allowedVehicleTypes String[] @default([]) @map("allowed_vehicle_types")
+  /// 0 = Sunday … 6 = Saturday (Addis Ababa time)
+  allowedDays         Int[]    @default([]) @map("allowed_days")
+  /// minutes after midnight, Addis Ababa time; start > end wraps past midnight
+  startMinute         Int?     @map("start_minute")
+  endMinute           Int?     @map("end_minute")
+  maxFareMinor        BigInt?  @map("max_fare_minor")
+  monthlyBudgetMinor  BigInt?  @map("monthly_budget_minor")
+  requirePurpose      Boolean  @default(false) @map("require_purpose")
+  updatedByUserId     String   @map("updated_by_user_id") @db.Uuid
+  version             Int      @default(0)
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("corporate_policy")
+}
+
+/// Thinned GPS points of a trip, from driver.location (see src/trips/trace.ts).
+model TripTracePoint {
+  tripId   String   @map("trip_id") @db.Uuid
+  trip     Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  at       DateTime @db.Timestamptz
+  lat      Float
+  lng      Float
+  speed    Float?   @db.Real
+  accuracy Float?   @db.Real
+  /// the trip's status when the point was recorded (matched, en_route, in_progress)
+  status   String
+
+  @@id([tripId, at])
+  @@map("trip_trace")
+}
+
+/// support-service incident.opened, kept for the regulatory report (counts only).
+model RegulatoryIncident {
+  incidentId String   @id @map("incident_id") @db.Uuid
+  cityId     String   @map("city_id")
+  category   String
+  severity   String
+  tripId     String?  @map("trip_id") @db.Uuid
+  openedAt   DateTime @map("opened_at") @db.Timestamptz
+
+  @@index([cityId, openedAt], map: "ix_regulatory_incident_city_opened")
+  @@map("regulatory_incident")
 }
