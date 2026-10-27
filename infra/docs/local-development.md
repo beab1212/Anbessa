@@ -16,16 +16,17 @@ starts everything with `--build`.
 |-----------|---------------|-----------|---------|-----|------------|
 | `postgres` | `postgis/postgis:18-3.6-alpine` | 5432 | named volume `pg-data` at `/var/lib/postgresql` | `POSTGRES_USER=ride`, `POSTGRES_DB=ride_app` (password set in file) | |
 | `redis` | `redis:8-alpine` | 6379 | none (not persisted) | | |
-| `redpanda` | `redpandadata/redpanda:v26.2.6`, `--smp 1 --memory 512M --overprovisioned`, advertises `localhost:9092` | 9092 | none | | |
+| `redpanda` | `redpandadata/redpanda:v26.2.6`, `--smp 1 --memory 512M --overprovisioned`; two listeners: `external` advertised as `localhost:9092` (host processes), `internal` as `redpanda:29092` (containers of this file; not published) | 9092 | none | | |
 | `kong` | `kong:3.9`, DB-less, `KONG_DECLARATIVE_CONFIG=/kong/kong.yml` | 8000 | `../kong/kong.yml` read-only | `KONG_PROXY_LISTEN=0.0.0.0:8000` | auth-service, trip-service |
 | `auth-service` | `services/auth-service/Dockerfile`, context repo root | 3001 | | `env_file: ../../.env`, plus `DATABASE_URL` pointing at `postgres:5432/ride_app` | postgres, redpanda |
 | `trip-service` | own Dockerfile | 3002 | | `env_file: ../../.env` | postgres, redis, redpanda |
 | `location-service` | own Dockerfile | 3003 | | `env_file: ../../.env` | redis, redpanda |
-| `pricing-service` | own Dockerfile | 3004 | | `env_file: ../../.env` | redis |
+| `pricing-service` | own Dockerfile | 3004 | | `env_file: ../../.env`, plus in-network overrides: `DATABASE_URL` (`postgres:5432/pricing_service`), `REDIS_URL` (`redis:6379`), `KAFKA_BROKERS` (`redpanda:29092`), `AUTH_JWKS_URL` / `AUTH_INTERNAL_URL` (`auth-service:3001`), `MAPPING_INTERNAL_URL`, `LOCATION_INTERNAL_URL` (`location-service:3003`), `PLATFORM_INTERNAL_URL` | postgres, redis, redpanda |
 | `payment-service` | own Dockerfile | 3005 | | `env_file: ../../.env` | postgres, redis, redpanda |
 | `notification-service` | own Dockerfile | none published | | `env_file: ../../.env` | redpanda |
 | `mapping-service` | own Dockerfile | 3007 | | `env_file: ../../.env` | |
 | `fleet-service` | own Dockerfile | 3008 | | `env_file: ../../.env` | postgres, redis, redpanda |
+| `support-service` | own Dockerfile | 3009 | | `env_file: ../../.env` | postgres, redis, redpanda |
 | `audit-service` | own Dockerfile | 3010 | | `env_file: ../../.env` | postgres, redpanda |
 | `platform-service` | own Dockerfile | 3011 | | `env_file: ../../.env` | postgres, redis, redpanda |
 | `realtime-gateway` | own Dockerfile | 3000 | | `env_file: ../../.env` | redis, redpanda |
@@ -39,13 +40,15 @@ Things to know about the containerized stack as the files stand:
 
 - Every service container reads only the root `.env` (copied from the root `.env.example`). That
   file sets `DATABASE_URL`, `REDIS_URL` and `KAFKA_BROKERS` to `localhost`, which inside a container
-  is the container itself. Only auth-service gets an override (`DATABASE_URL` to the `postgres`
-  host, database `ride_app`).
+  is the container itself. auth-service gets an override (`DATABASE_URL` to the `postgres`
+  host, database `ride_app`); pricing-service gets in-network values for its database
+  (`pricing_service`), Redis, Kafka (`redpanda:29092`) and the services it calls. Containers that
+  should reach Kafka must use `redpanda:29092`, not `localhost:9092`.
 - The root `.env.example` has none of the per-service secrets (`BETTER_AUTH_SECRET`,
   `INTERNAL_SERVICE_TOKEN`, `PII_*`, webhook secrets, ...) or `AUTH_BASE_URL`, which the services'
   config schemas require (see [production-checklist.md](production-checklist.md)). The
   per-service `services/*/.env` files are not passed to the containers.
-- All services share one database name (`ride_app`) in this file, while the host workflow uses one
+- The other services share one database name (`ride_app`) in this file, while the host workflow uses one
   database per service (see [data-stores.md](data-stores.md)).
 - Kong's `depends_on` lists only auth-service and trip-service.
 
@@ -90,6 +93,7 @@ Each service has a minimal stack. All bind the same host ports as `infra/docker/
 | notification-service | yes, no DB name (Postgres creates `ride`) | yes | yes |
 | payment-service | `profiles: [default]` (`payment_service`) | yes | yes |
 | platform-service | yes (`platform_service`) | no | yes |
+| support-service | yes (`support_service`) | yes | yes |
 | pricing-service | `profiles: [db]`, no DB name | yes | yes |
 | realtime-gateway | `profiles: [db]`, no DB name | yes | yes |
 | trip-service | `profiles: [default]` (`trip_service`) | yes | yes |
@@ -104,8 +108,8 @@ dev stacks have none (their config treats `REDIS_URL` as optional outside produc
 
 `Makefile` uses `SHELL := /bin/bash`. Two lists drive the loops:
 
-- `SERVICES`: auth, trip, location, pricing, payment, notification, mapping, realtime-gateway, fleet, platform, audit.
-- `PRISMA_SERVICES`: auth, notification, trip, fleet, payment, platform, audit.
+- `SERVICES`: auth, trip, location, pricing, payment, notification, mapping, realtime-gateway, fleet, platform, audit, support.
+- `PRISMA_SERVICES`: auth, notification, trip, fleet, payment, platform, audit, support.
 
 | Target | What it runs |
 |--------|--------------|
@@ -195,7 +199,7 @@ Route details are in [kong.md](kong.md).
 | 3006 | notification-service (not published by `stack-up`) | `dev-services` |
 | 3007 | mapping-service | `dev-services`, `stack-up` |
 | 3008 | fleet-service | same |
-| 3009 | unused | |
+| 3009 | support-service | `dev-services`, `stack-up` |
 | 3010 | audit-service | `dev-services`, `stack-up` |
 | 3011 | platform-service | same |
 | 5173 | web app (Vite dev server, proxies `/api/*`) | `dev-web`, `dev-services` |

@@ -22,14 +22,15 @@ One database per service. Names are the defaults in each `services/<svc>/.env.ex
 | fleet-service | `fleet_service` | yes | 1 | |
 | platform-service | `platform_service` | yes | 1 | |
 | audit-service | `audit_service` | yes | 1 | |
+| support-service | `support_service` | yes | 1 | |
+| pricing-service | `pricing_service` | yes | 1 | |
 | location-service | none | | | |
-| pricing-service | none | | | |
 | mapping-service | none | | | |
 | realtime-gateway | none | | | |
 
-All seven databases live on one Postgres server locally (`make infra-up`). `prisma migrate deploy`
-creates a missing database. `make stack-up` is different: only auth-service gets a `DATABASE_URL`,
-pointing at `ride_app` (see [local-development.md](local-development.md)).
+All nine databases live on one Postgres server locally (`make infra-up`). `prisma migrate deploy`
+creates a missing database. `make stack-up` is different: auth-service gets a `DATABASE_URL` pointing at `ride_app`, pricing-service
+one pointing at `pricing_service`; the others keep the root `.env`'s (see [local-development.md](local-development.md)).
 
 Notes:
 
@@ -37,6 +38,8 @@ Notes:
   which loads `.env` through `dotenv/config` (Prisma 7).
 - audit-service: `audit_entry` is partitioned by month and write-once; a trigger refuses UPDATE and
   DELETE (`services/audit-service/.env.example`).
+- support-service: SOS alerts, incidents and their notes and actions are never deleted (legal hold);
+  a trigger refuses DELETE on `sos_alert`, `sos_note`, `incident`, `incident_note`, `incident_action`.
 - The trip-service PostGIS columns are generated columns; `prisma migrate dev` reports them as drift,
   which is why the Makefile uses `migrate deploy` (comment in `Makefile`, target `db-migrate`).
 
@@ -44,7 +47,7 @@ Notes:
 
 | Command | What it does |
 |---------|--------------|
-| `make db-migrate` | `pnpm --filter @ride-app/<svc> exec prisma migrate deploy` for auth, notification, trip, fleet, payment, platform, audit, in that order; stops on the first failure |
+| `make db-migrate` | `pnpm --filter @ride-app/<svc> exec prisma migrate deploy` for auth, notification, trip, fleet, payment, platform, audit, support, in that order; stops on the first failure |
 | `pnpm exec prisma migrate dev --create-only` (in a service) | Writes a new migration without applying it (Makefile comment) |
 | `make infra-reset` | Deletes the local Postgres volume, then `infra-up`, `db-migrate`, `db-seed` |
 
@@ -69,7 +72,7 @@ Whether `REDIS_URL` is required (from each `src/config/index.ts`):
 
 | Required always | Required in production | Optional |
 |-----------------|------------------------|----------|
-| trip, location, pricing, notification, realtime-gateway | auth, payment, fleet, platform, mapping | audit |
+| trip, location, pricing, notification, realtime-gateway | auth, payment, fleet, platform, mapping, support | audit |
 
 ### Key prefixes and channels by owner
 
@@ -98,10 +101,10 @@ ownership split between realtime-gateway and location-service for the shared-loc
 Local image `redpandadata/redpanda:v26.2.6`, one broker on `localhost:9092`. Production: MSK
 declared in Terraform. Client: `kafkajs@2.2.4`, patched (`patches/kafkajs@2.2.4.patch`).
 
-- Producers write through a transactional outbox table (auth, trip, fleet, payment, platform) and a
+- Producers write through a transactional outbox table (auth, trip, fleet, payment, platform, support) and a
   relay; realtime-gateway publishes `driver.location` directly.
 - Consumer groups (`groupId` in code): `location-service`, `notification-service`, `fleet-service`,
-  `payment-service`, `audit-service`. platform-service shows their lag (`CONSUMER_GROUPS`).
+  `payment-service`, `audit-service`, `support-service`. platform-service shows their lag (`CONSUMER_GROUPS`).
 - Consumers create missing topics only outside production (`createTopics: NODE_ENV !== "production"`
   in each `server.ts`). In production, topics must be created up front.
 
@@ -112,6 +115,7 @@ declared in Terraform. Client: `kafkajs@2.2.4`, patched (`patches/kafkajs@2.2.4.
 | fleet-service | `driver.*`, `vehicle.*`, `document.expiring`, `audit.recorded` |
 | payment-service | `balance.*`, `payment.*`, `payout.*`, `refund.*`, `trip.settled`, `audit.recorded` |
 | platform-service | `platform.settings_changed`, `audit.recorded` |
+| support-service | `ticket.*`, `lost_item.returned`, `sos.*`, `incident.*`, `audit.recorded` |
 | location-service | `driver.connection_lost` |
 | realtime-gateway | `driver.location` |
 

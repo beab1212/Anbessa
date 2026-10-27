@@ -2,3 +2,6 @@ resources:
   - deployment.yaml
   - service.yaml
   - hpa.yaml
+  - pricing-service.deployment.yaml
+  - pricing-service.service.yaml
+  - pricing-service.hpa.yaml

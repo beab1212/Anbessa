@@ -31,6 +31,7 @@ that service's routes.
 | trip-service | `http://trip-service:3002` | `trip-routes` | `/api/trips` | all | rate-limiting 60/min |
 | fleet-service | `http://fleet-service:3008` | `fleet-routes` | `/api/fleet` | all | rate-limiting 120/min |
 | platform-service | `http://platform-service:3011` | `platform-routes` | `/api/platform` | all | rate-limiting 120/min |
+| support-service | `http://support-service:3009` | `support-routes` | `/api/support` | all | rate-limiting 120/min |
 | audit-service | `http://audit-service:3010` | `audit-routes` | `/api/audit` | GET | rate-limiting 60/min |
 | pricing-service | `http://pricing-service:3004` | `pricing-routes` | `/api/pricing` | all | rate-limiting 120/min |
 | payment-service | `http://payment-service:3005` | `payment-routes` | `/api/payments` | all | rate-limiting 120/min; request-size-limiting 64 KB |
@@ -42,9 +43,9 @@ Plugin settings:
   Kong node's memory, so with several Kong replicas the effective limit is N per node. No `limit_by`
   is set, so Kong's default (by consumer, falling back to client IP) applies.
 - `request-size-limiting`: `allowed_payload_size` in kilobytes. Services without it (mapping,
-  location, trip, fleet, platform, audit, pricing) have no body limit at Kong. Every service also sets
+  location, trip, fleet, platform, audit, support, pricing) have no body limit at Kong. Every service also sets
   a Fastify `bodyLimit` in `src/app.ts`: 64 KB auth; 32 KB audit, fleet, payment, mapping, platform,
-  trip; 16 KB location, notification, pricing. fleet-service raises it to 10 MB only for
+  support, trip; 16 KB location, notification, pricing. fleet-service raises it to 10 MB only for
   `PUT /api/fleet/files/:ticket` (local storage uploads). realtime-gateway caps Socket.io messages at
   16 KB (`maxHttpBufferSize`).
 - Not used anywhere in `kong.yml`: `cors`, `jwt`, `key-auth`, `acl`, `proxy-cache`, `ip-restriction`,
@@ -65,6 +66,7 @@ Which paths each service actually serves (from the route registrations in `servi
 | `/api/fleet` | `drivers`, `vehicles`, `documents`, `sessions`, `files` (local storage only), `stats`, `review`, `organizations` |
 | `/api/platform` | `settings`, `announcements`, `cities`, `vehicle-types`, `system`, `client-config` |
 | `/api/audit` | `entries` |
+| `/api/support` | `tickets`, `lost-items`, `sos`, `incidents`, `me` |
 | `/api/pricing` | `fares`, `estimates` |
 | `/api/payments` | `balances`, `payments`, `top-ups`, `sim` (simulator checkout), `rules`, `payouts`, `refunds`, `me`, `webhooks`, `trips`, `settlements`, `overview`, `methods`, `ledger`, `gateways`, `earnings` |
 

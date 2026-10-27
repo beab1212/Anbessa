@@ -1,0 +1,38 @@
+# pricing-service, copied from the trip-service template (deployment.yaml).
+# envFrom: ConfigMap pricing-service-config (NODE_ENV, PORT=3004, REDIS_URL, KAFKA_BROKERS — required
+# in production —, AUTH_ISSUER, AUTH_JWKS_URL, AUTH_INTERNAL_URL, MAPPING_INTERNAL_URL,
+# LOCATION_INTERNAL_URL, PLATFORM_INTERNAL_URL, PROMO_APPROVAL_THRESHOLD_MINOR) and Secret
+# pricing-service-secrets (DATABASE_URL, INTERNAL_SERVICE_TOKEN). Neither object lives in the repo
+# (infra/docs/kubernetes.md §3). Migrations (`prisma migrate deploy`) run before rollout, as for
+# every Prisma service.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pricing-service
+  labels: { app: pricing-service }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: pricing-service }
+  template:
+    metadata:
+      labels: { app: pricing-service }
+    spec:
+      containers:
+        - name: pricing-service
+          image: registry.example.com/ride-app/pricing-service:latest
+          ports: [{ containerPort: 3004 }]
+          envFrom:
+            - configMapRef: { name: pricing-service-config }
+            - secretRef: { name: pricing-service-secrets }
+          resources:
+            requests: { cpu: "100m", memory: "128Mi" }
+            limits: { cpu: "500m", memory: "256Mi" }
+          readinessProbe:
+            httpGet: { path: /health, port: 3004 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health, port: 3004 }
+            initialDelaySeconds: 15
+            periodSeconds: 20

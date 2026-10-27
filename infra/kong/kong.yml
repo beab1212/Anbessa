@@ -115,6 +115,17 @@ services:
       - name: rate-limiting
         config: { minute: 60, policy: local }
 
+  - name: support-service
+    url: http://support-service:3009
+    routes:
+      # tickets, lost items, SOS, incidents (app and staff); /internal/* is never routed
+      - name: support-routes
+        paths: ["/api/support"]
+        strip_path: false
+    plugins:
+      - name: rate-limiting
+        config: { minute: 120, policy: local }
+
   - name: pricing-service
     url: http://pricing-service:3004
     routes:

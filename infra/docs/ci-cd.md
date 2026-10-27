@@ -33,7 +33,7 @@ Trigger: `push` to `main`. No `pull_request`, no `workflow_dispatch`.
 Images built: one per matrix entry, tagged only
 `registry.example.com/ride-app/<service>:${{ github.sha }}`. The matrix is auth-service,
 trip-service, location-service, pricing-service, payment-service, notification-service,
-mapping-service, realtime-gateway. **fleet-service, platform-service and audit-service are not
+mapping-service, realtime-gateway. **fleet-service, platform-service, audit-service and support-service are not
 built**, and the web app is not built or deployed by any workflow.
 
 Gaps in the deploy jobs as written:
@@ -98,4 +98,4 @@ Details:
 - The runtime image has no Prisma CLI (`prisma` is a devDependency), so it can't run
   `prisma migrate deploy` ([docs/production/README.md](../../docs/production/README.md) section 6).
 - Image ports: realtime-gateway 3000, auth 3001, trip 3002, location 3003, pricing 3004, payment
-  3005, notification 3006, mapping 3007, fleet 3008, audit 3010, platform 3011.
+  3005, notification 3006, mapping 3007, fleet 3008, support 3009, audit 3010, platform 3011.

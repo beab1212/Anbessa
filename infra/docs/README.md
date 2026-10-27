@@ -52,6 +52,7 @@ flowchart LR
     Notif["notification-service :3006"]
     Map["mapping-service :3007"]
     Fleet["fleet-service :3008"]
+    Support["support-service :3009"]
     Audit["audit-service :3010"]
     Platform["platform-service :3011"]
   end
@@ -78,11 +79,11 @@ flowchart LR
   Web -->|"PUT/GET pre-signed URLs"| S3
   Phone -->|"PUT/GET pre-signed URLs"| S3
 
-  Kong --> Auth & Trip & Loc & Pricing & Pay & Notif & Map & Fleet & Audit & Platform
+  Kong --> Auth & Trip & Loc & Pricing & Pay & Notif & Map & Fleet & Support & Audit & Platform
 
-  Auth & Trip & Pay & Notif & Fleet & Audit & Platform --> PG
-  Auth & Trip & Loc & Pricing & Pay & Notif & Map & Fleet & Audit & Platform & RT --> Redis
-  Auth & Trip & Loc & Pay & Notif & Fleet & Audit & Platform & RT --> Kafka
+  Auth & Trip & Pay & Notif & Fleet & Support & Audit & Platform --> PG
+  Auth & Trip & Loc & Pricing & Pay & Notif & Map & Fleet & Support & Audit & Platform & RT --> Redis
+  Auth & Trip & Loc & Pay & Notif & Fleet & Support & Audit & Platform & RT --> Kafka
   Fleet --> S3
   Map --> OSRM & Nom
 ```
@@ -96,7 +97,8 @@ Notes on the diagram:
 - Only mapping-service calls OSRM and Nominatim (`infra/mapping-stack/README.md`). The web app's
   default map style is OpenFreeMap (`apps/web/.env.example`, `VITE_MAP_STYLE_URL`), not the
   self-hosted tile server.
-- pricing-service and location-service have no database. realtime-gateway has no database.
+- location-service and realtime-gateway have no database. pricing-service has one since workflow 15
+  (`pricing_service`: zones, fare rules, promos, outbox).
 
 ## Index
 

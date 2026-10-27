@@ -16,12 +16,13 @@ taken from the config code.
 | auth-service | `OTP_DELIVERY=console`; missing `REDIS_URL`; missing `KAFKA_BROKERS`; missing `INTERNAL_SERVICE_TOKEN`; `AUTH_RATE_LIMIT=off`; `DEV_LOGIN=on`; `AUTH_BASE_URL` not `https://` | `DATABASE_URL`, `BETTER_AUTH_SECRET` (≥ 32 chars), `AUTH_BASE_URL`. `NOTIFICATION_INTERNAL_URL` and `INTERNAL_SERVICE_TOKEN` when `OTP_DELIVERY=notification`. `DEV_LOGIN=on` needs `OTP_DELIVERY=console` |
 | trip-service | `PRICING=builtin`; `SHARE_BASE_URL` starting with `http://localhost` or `http://127.` (its default is `http://localhost:5173`, so it **must be set** to the public web app URL); missing `KAFKA_BROKERS` | `DATABASE_URL`, `REDIS_URL`, `INTERNAL_SERVICE_TOKEN` (≥ 32). `MATCH_RADII_METERS` each 100–20000 |
 | location-service | missing `KAFKA_BROKERS` | `REDIS_URL`, `INTERNAL_SERVICE_TOKEN` |
-| pricing-service | none | `REDIS_URL`, `INTERNAL_SERVICE_TOKEN` |
+| pricing-service | missing `KAFKA_BROKERS` | `DATABASE_URL`, `REDIS_URL`, `INTERNAL_SERVICE_TOKEN` |
 | payment-service | `GATEWAY_MODE=simulated`; missing `KAFKA_BROKERS`; missing `REDIS_URL` | `DATABASE_URL`, `INTERNAL_SERVICE_TOKEN`, `TELEBIRR_WEBHOOK_SECRET`, `CBEBIRR_WEBHOOK_SECRET`, `CHAPA_WEBHOOK_SECRET` (each ≥ 32 and all different) |
 | notification-service | `SMS_PROVIDER=console`; `PUSH_PROVIDER=console`; missing `KAFKA_BROKERS`; with `telegram` in `OTP_CHANNELS`: missing `TELEGRAM_GATEWAY_TOKEN`, or `TELEGRAM_CALLBACK_URL` not `https://` | `DATABASE_URL`, `REDIS_URL`, `INTERNAL_SERVICE_TOKEN`, `PHONE_HASH_KEY` and `OTP_ENCRYPTION_KEY` (32 bytes hex). `TWILIO_ACCOUNT_SID` + `TWILIO_AUTH_TOKEN` + `TWILIO_FROM` for `SMS_PROVIDER=twilio`; `FCM_PROJECT_ID` + `FCM_CLIENT_EMAIL` + `FCM_PRIVATE_KEY` for `PUSH_PROVIDER=fcm` |
 | mapping-service | missing `REDIS_URL` | `INTERNAL_SERVICE_TOKEN` |
 | fleet-service | `STORAGE=local`; missing `KAFKA_BROKERS`; missing `REDIS_URL` | `DATABASE_URL`, `INTERNAL_SERVICE_TOKEN`, `PII_ENCRYPTION_KEY`, `PII_BLIND_INDEX_KEY`, `UPLOAD_SIGNING_KEY` (32 bytes hex each, all different). `S3_BUCKET` when `STORAGE=s3` |
 | audit-service | missing `KAFKA_BROKERS` | `DATABASE_URL`, `INTERNAL_SERVICE_TOKEN` |
+| support-service | missing `REDIS_URL`; missing `KAFKA_BROKERS` | `DATABASE_URL`, `INTERNAL_SERVICE_TOKEN` |
 | platform-service | missing `REDIS_URL`; missing `KAFKA_BROKERS` | `DATABASE_URL`, `INTERNAL_SERVICE_TOKEN` |
 | realtime-gateway | none (no production checks in `src/config/index.ts`) | `REDIS_URL`. `KAFKA_BROKERS` optional: without it `driver.location` is not published (a warning is logged) |
 
@@ -43,7 +44,7 @@ Other production behaviour in code:
 | Secret | Services | Format |
 |--------|----------|--------|
 | `INTERNAL_SERVICE_TOKEN` | all 11 (same value everywhere) | ≥ 32 chars |
-| `DATABASE_URL` | auth, trip, payment, notification, fleet, audit, platform (one database each) | Postgres URL |
+| `DATABASE_URL` | auth, trip, payment, notification, fleet, audit, platform, support (one database each) | Postgres URL |
 | `BETTER_AUTH_SECRET` | auth | ≥ 32 chars, unique per environment |
 | `PHONE_HASH_KEY`, `OTP_ENCRYPTION_KEY` | notification | 32 bytes hex |
 | `TELEGRAM_GATEWAY_TOKEN` | notification | ≥ 16 chars |
@@ -113,7 +114,7 @@ log shipper config.
 - [ ] Kafka topics created ahead of time.
 - [ ] Migrations applied before rollout (`prisma migrate deploy` per Prisma service).
 - [ ] Manifests for all 11 services, Kong and the mapping stack ([kubernetes.md](kubernetes.md)).
-- [ ] fleet-service, platform-service and audit-service added to the deploy matrix ([ci-cd.md](ci-cd.md)).
+- [ ] fleet-service, platform-service, audit-service and support-service added to the deploy matrix ([ci-cd.md](ci-cd.md)).
 - [ ] `.github/` removed from `.gitignore`.
 - [ ] Image tags set from the git SHA; cluster credentials in the deploy jobs.
 - [ ] Terraform modules written; S3 documents bucket, TLS and ingress defined somewhere.

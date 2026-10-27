@@ -2,16 +2,20 @@
 
 Kustomize manifests in `infra/k8s/`. Applied by `.github/workflows/deploy.yml`
 (`kubectl apply -k infra/k8s/overlays/staging`, then `.../production`) or by hand with the same
-commands. Only **trip-service** has manifests today; `infra/k8s/base/README.md` says the base is a
-template to copy per service.
+commands. **trip-service** (the template files) and **pricing-service** (`pricing-service.*.yaml`,
+copied from it) have manifests today; `infra/k8s/base/README.md` says the base is a template to copy
+per service.
 
 ```
 infra/k8s/
 ├── base/
-│   ├── kustomization.yaml   resources: deployment.yaml, service.yaml, hpa.yaml
+│   ├── kustomization.yaml   resources: the six files below
 │   ├── deployment.yaml      trip-service Deployment
 │   ├── service.yaml         trip-service Service
 │   ├── hpa.yaml             trip-service HorizontalPodAutoscaler
+│   ├── pricing-service.deployment.yaml   pricing-service Deployment (port 3004)
+│   ├── pricing-service.service.yaml      pricing-service Service
+│   ├── pricing-service.hpa.yaml          pricing-service HPA (2–6 at 70 % CPU)
 │   └── README.md
 └── overlays/
     ├── staging/kustomization.yaml
@@ -39,6 +43,15 @@ No Namespace, Ingress, NetworkPolicy, PodDisruptionBudget, ServiceAccount, Confi
 
 The image tag is `:latest`, while CI pushes `:<git sha>` and nothing in the overlays or the workflow
 sets the image (no `images:` block, no `kustomize edit set image`). See [ci-cd.md](ci-cd.md).
+
+### `pricing-service.*.yaml`
+
+Same shape as trip-service's: `pricing-service`, image `registry.example.com/ride-app/pricing-service:latest`,
+port 3004, `envFrom` ConfigMap `pricing-service-config` and Secret `pricing-service-secrets` (see §3:
+`KAFKA_BROKERS` in the ConfigMap, `DATABASE_URL` in the Secret), same requests / limits and `/health`
+probes. HPA 2–6 replicas at 70 % CPU. The overlays don't patch it (2 replicas everywhere, HPA
+permitting). Its database (`pricing_service`, workflow 15: zones, fare rules, promos, outbox) must
+be migrated (`prisma migrate deploy`) before a rollout, like every Prisma service; no Job does it.
 
 ### `service.yaml`
 
@@ -83,11 +96,12 @@ refusals are listed in [production-checklist.md](production-checklist.md).
 | auth-service | 3001 | `NODE_ENV`, `PORT`, `LOG_LEVEL`, `AUTH_BASE_URL` (https), `AUTH_ISSUER`, `AUTH_INTERNAL_URL`, `APP_TRUSTED_ORIGINS`, `ADMIN_TRUSTED_ORIGINS`, `REDIS_URL`, `KAFKA_BROKERS`, `OTP_DELIVERY=notification`, `NOTIFICATION_INTERNAL_URL` | `DATABASE_URL`, `BETTER_AUTH_SECRET`, `INTERNAL_SERVICE_TOKEN` |
 | trip-service | 3002 | `NODE_ENV`, `PORT`, `LOG_LEVEL`, `REDIS_URL` (same Redis as realtime-gateway), `KAFKA_BROKERS`, `AUTH_ISSUER`, `AUTH_JWKS_URL`, `AUTH_INTERNAL_URL`, `LOCATION_INTERNAL_URL`, `MAPPING_INTERNAL_URL`, `FLEET_INTERNAL_URL`, `PRICING=service`, `PRICING_INTERNAL_URL`, `PLATFORM_INTERNAL_URL`, `SHARE_BASE_URL` (**required in production**: the public web app URL; a `http://localhost` or `http://127.` value is refused), `MATCH_TIMEOUT_SECONDS`, `OFFER_SECONDS`, `MATCH_RADII_METERS`, `TRIP_PIN_REQUIRED` | `DATABASE_URL`, `INTERNAL_SERVICE_TOKEN` |
 | location-service | 3003 | `NODE_ENV`, `PORT`, `LOG_LEVEL`, `REDIS_URL`, `KAFKA_BROKERS`, `MAPPING_INTERNAL_URL`, `AUTH_ISSUER`, `AUTH_JWKS_URL`, `AUTH_INTERNAL_URL`, `SWEEP_INTERVAL_MS` | `INTERNAL_SERVICE_TOKEN` |
-| pricing-service | 3004 | `NODE_ENV`, `PORT`, `LOG_LEVEL`, `REDIS_URL`, `AUTH_ISSUER`, `AUTH_JWKS_URL`, `AUTH_INTERNAL_URL`, `MAPPING_INTERNAL_URL`, `LOCATION_INTERNAL_URL`, `PLATFORM_INTERNAL_URL` | `INTERNAL_SERVICE_TOKEN` |
+| pricing-service | 3004 | `NODE_ENV`, `PORT`, `LOG_LEVEL`, `REDIS_URL`, `KAFKA_BROKERS` (**required in production**: promo redemptions in, `pricing.*` / `promo.*` / `audit.recorded` out), `AUTH_ISSUER`, `AUTH_JWKS_URL`, `AUTH_INTERNAL_URL`, `MAPPING_INTERNAL_URL`, `LOCATION_INTERNAL_URL` (ETA on quotes), `PLATFORM_INTERNAL_URL`, `PROMO_APPROVAL_THRESHOLD_MINOR` | `DATABASE_URL`, `INTERNAL_SERVICE_TOKEN` |
 | payment-service | 3005 | `NODE_ENV`, `PORT`, `LOG_LEVEL`, `REDIS_URL`, `KAFKA_BROKERS`, `AUTH_ISSUER`, `AUTH_JWKS_URL`, `AUTH_INTERNAL_URL`, `PLATFORM_INTERNAL_URL`, `PUBLIC_URL`, `PAYMENT_PROVIDERS`, `GATEWAY_MODE`, `PAYMENT_RETRY_SECONDS`, `RECONCILE_AFTER_SECONDS`, `SETTLEMENT_SCHEDULE`, `SIM_*` | `DATABASE_URL`, `INTERNAL_SERVICE_TOKEN`, `TELEBIRR_WEBHOOK_SECRET`, `CBEBIRR_WEBHOOK_SECRET`, `CHAPA_WEBHOOK_SECRET` |
 | notification-service | 3006 | `NODE_ENV`, `PORT`, `LOG_LEVEL`, `REDIS_URL`, `KAFKA_BROKERS`, `AUTH_ISSUER`, `AUTH_JWKS_URL`, `AUTH_INTERNAL_URL`, `PLATFORM_INTERNAL_URL`, `OTP_CHANNELS`, `OTP_FALLBACK_SECONDS`, `TELEGRAM_GATEWAY_URL`, `TELEGRAM_SENDER_USERNAME`, `TELEGRAM_CALLBACK_URL`, `TELEGRAM_BALANCE_ALERT_USD`, `SMS_PROVIDER`, `TWILIO_FROM`, `PUSH_PROVIDER`, `FCM_PROJECT_ID`, `FCM_CLIENT_EMAIL` | `DATABASE_URL`, `INTERNAL_SERVICE_TOKEN`, `PHONE_HASH_KEY`, `OTP_ENCRYPTION_KEY`, `TELEGRAM_GATEWAY_TOKEN`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `FCM_PRIVATE_KEY` |
 | mapping-service | 3007 | `NODE_ENV`, `PORT`, `LOG_LEVEL`, `REDIS_URL`, `OSRM_URL`, `NOMINATIM_URL`, `ENGINE_TIMEOUT_MS`, `AUTH_ISSUER`, `AUTH_JWKS_URL` | `INTERNAL_SERVICE_TOKEN` |
 | fleet-service | 3008 | `NODE_ENV`, `PORT`, `LOG_LEVEL`, `REDIS_URL`, `KAFKA_BROKERS`, `AUTH_ISSUER`, `AUTH_JWKS_URL`, `AUTH_INTERNAL_URL`, `PAYMENT_INTERNAL_URL`, `PLATFORM_INTERNAL_URL`, `STORAGE=s3`, `S3_BUCKET`, `S3_REGION`, `S3_ENDPOINT`, `S3_FORCE_PATH_STYLE`, `EXPIRY_WARNING_DAYS` | `DATABASE_URL`, `INTERNAL_SERVICE_TOKEN`, `PII_ENCRYPTION_KEY`, `PII_BLIND_INDEX_KEY`, `UPLOAD_SIGNING_KEY` (S3 credentials come from the AWS SDK default chain; no key variables are read) |
+| support-service | 3009 | `NODE_ENV`, `PORT`, `LOG_LEVEL`, `REDIS_URL`, `KAFKA_BROKERS`, `AUTH_ISSUER`, `AUTH_JWKS_URL`, `AUTH_INTERNAL_URL`, `TRIP_INTERNAL_URL` | `DATABASE_URL`, `INTERNAL_SERVICE_TOKEN` |
 | audit-service | 3010 | `NODE_ENV`, `PORT`, `LOG_LEVEL`, `REDIS_URL`, `KAFKA_BROKERS`, `AUTH_ISSUER`, `AUTH_JWKS_URL`, `AUTH_INTERNAL_URL` | `DATABASE_URL`, `INTERNAL_SERVICE_TOKEN` |
 | platform-service | 3011 | `NODE_ENV`, `PORT`, `LOG_LEVEL`, `REDIS_URL`, `KAFKA_BROKERS`, `AUTH_ISSUER`, `AUTH_JWKS_URL`, `AUTH_INTERNAL_URL`, `SERVICE_URLS` (in-cluster URL of every service), `CONSUMER_GROUPS` | `DATABASE_URL`, `INTERNAL_SERVICE_TOKEN` |
 | realtime-gateway | 3000 | `NODE_ENV`, `PORT`, `REDIS_URL`, `KAFKA_BROKERS`, `AUTH_ISSUER`, `AUTH_JWKS_URL`, `AUTH_INTERNAL_URL` | `INTERNAL_SERVICE_TOKEN` |
@@ -110,7 +124,7 @@ Every service answers three health endpoints (`src/app.ts`, or `src/server.ts` f
 |------|-----------|
 | `/health` | always `200 {"status":"ok"}` |
 | `/health/live` | always `200` |
-| `/health/ready` | services with a database (auth, trip, payment, notification, fleet, audit, platform): `SELECT 1`, `503` on failure. location-service and realtime-gateway: Redis `PING`. pricing-service: its `ready()` check from the container. mapping-service: always `200`, with engine status in the body |
+| `/health/ready` | services with a database (auth, trip, payment, notification, fleet, audit, platform, support): `SELECT 1`, `503` on failure. location-service and realtime-gateway: Redis `PING`. pricing-service: its `ready()` check from the container. mapping-service: always `200`, with engine status in the body |
 
 The base Deployment uses `/health` for both readiness and liveness, so readiness does not reflect
 database or Redis outages. `/health/ready` is what platform-service's system page polls
@@ -139,5 +153,6 @@ Scaling notes from the code:
 
 Following `infra/k8s/base/README.md`: copy the three base files with the service's name, image,
 port and probes, add them to `base/kustomization.yaml`, add patches to the overlays if needed, and
-create the `<svc>-config` / `<svc>-secrets` objects in the cluster. Also add the service to the
+create the `<svc>-config` / `<svc>-secrets` objects in the cluster. pricing-service was added this
+way (`pricing-service.{deployment,service,hpa}.yaml`). Also add the service to the
 `build-and-push` matrix in `.github/workflows/deploy.yml`.

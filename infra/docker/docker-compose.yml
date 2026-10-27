@@ -19,7 +19,11 @@ services:
 
   redpanda:
     image: redpandadata/redpanda:v26.2.6
-    command: ["redpanda", "start", "--smp", "1", "--memory", "512M", "--overprovisioned", "--kafka-addr", "0.0.0.0:9092", "--advertise-kafka-addr", "localhost:9092"]
+    # two listeners: `localhost:9092` for services run on the host (pnpm dev), `redpanda:29092` for
+    # containers in this file (a single localhost listener sends them back to themselves)
+    command: ["redpanda", "start", "--smp", "1", "--memory", "512M", "--overprovisioned",
+              "--kafka-addr", "internal://0.0.0.0:29092,external://0.0.0.0:9092",
+              "--advertise-kafka-addr", "internal://redpanda:29092,external://localhost:9092"]
     ports: ["9092:9092"]
 
   kong:
@@ -54,7 +58,19 @@ services:
   pricing-service:
     build: { context: ../.., dockerfile: services/pricing-service/Dockerfile }
     env_file: ../../.env
-    depends_on: [redis]
+    # in-network addresses over the root .env's localhost ones. Its own database, as on the host
+    # (`make db-migrate` creates it; tables like outbox / idempotency_key would clash in ride_app).
+    # Secrets (INTERNAL_SERVICE_TOKEN) still come from the root .env.
+    environment:
+      DATABASE_URL: postgresql://ride:ride@postgres:5432/pricing_service
+      REDIS_URL: redis://redis:6379
+      KAFKA_BROKERS: redpanda:29092
+      AUTH_JWKS_URL: http://auth-service:3001/api/auth/jwks
+      AUTH_INTERNAL_URL: http://auth-service:3001
+      MAPPING_INTERNAL_URL: http://mapping-service:3007
+      LOCATION_INTERNAL_URL: http://location-service:3003
+      PLATFORM_INTERNAL_URL: http://platform-service:3011
+    depends_on: [postgres, redis, redpanda]
     ports: ["3004:3004"]
 
   payment-service:
@@ -90,6 +106,12 @@ services:
     env_file: ../../.env
     depends_on: [postgres, redpanda]
     ports: ["3010:3010"]
+
+  support-service:
+    build: { context: ../.., dockerfile: services/support-service/Dockerfile }
+    env_file: ../../.env
+    depends_on: [postgres, redis, redpanda]
+    ports: ["3009:3009"]
 
   realtime-gateway:
     build: { context: ../.., dockerfile: services/realtime-gateway/Dockerfile }
