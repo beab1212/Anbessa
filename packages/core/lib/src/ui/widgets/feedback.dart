@@ -39,7 +39,8 @@ abstract final class Haptics {
   static void offer() => sink(HapticKind.offer);
 }
 
-/// A short message that slides in from the top and leaves on its own.
+/// A short message that slides in from the top and leaves on its own. It leads with [icon], or the
+/// tone's icon when none is given.
 void showToast(BuildContext context, String text, {NoticeTone tone = NoticeTone.info, Duration duration = const Duration(milliseconds: 2500), IconData? icon}) {
   final overlay = Overlay.maybeOf(context, rootOverlay: true);
   if (overlay == null) return;
@@ -60,7 +61,7 @@ class _Toast extends StatefulWidget {
 }
 
 class _ToastState extends State<_Toast> with SingleTickerProviderStateMixin {
-  late final _c = AnimationController(vsync: this, duration: AnbessaMotion.slow);
+  late final _c = AnimationController(vsync: this, duration: AnbessaMotion.medium);
   Timer? _t;
   @override
   void initState() {
@@ -83,7 +84,7 @@ class _ToastState extends State<_Toast> with SingleTickerProviderStateMixin {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    final (fg, _, _) = widget.tone.of(c);
+    final (fg, bg, toneIcon) = widget.tone.of(c);
     final top = MediaQuery.paddingOf(context).top + 12;
     return Positioned(
       top: top,
@@ -97,10 +98,10 @@ class _ToastState extends State<_Toast> with SingleTickerProviderStateMixin {
             color: Colors.transparent,
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              decoration: BoxDecoration(color: c.surface, borderRadius: BorderRadius.circular(AnbessaRadius.md), border: Border.all(color: c.border), boxShadow: AnbessaElevation.floating(c.brightness)),
+              decoration: BoxDecoration(color: c.surface, borderRadius: BorderRadius.circular(AnbessaRadius.lg), border: c.isDark ? Border.all(color: c.border) : null, boxShadow: AnbessaElevation.floating(c.brightness)),
               child: Row(
                 children: [
-                  Container(width: 4, height: 24, decoration: BoxDecoration(color: fg, borderRadius: BorderRadius.circular(2))),
+                  Container(width: 32, height: 32, decoration: BoxDecoration(color: bg, shape: BoxShape.circle), child: Icon(widget.icon ?? toneIcon, size: 18, color: fg)),
                   const SizedBox(width: 12),
                   Expanded(child: Text(widget.text, style: AnbessaType.body2.copyWith(color: c.text, fontWeight: FontWeight.w500))),
                 ],

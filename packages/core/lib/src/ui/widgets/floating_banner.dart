@@ -6,6 +6,8 @@ import '../theme/anbessa_theme.dart';
 import '../theme/tokens.dart';
 import 'basics.dart';
 
+/// A banner over the map: the tone's icon (or [icon]) in a soft circle, an optional title, the
+/// text, an action and a close button. [pulse] swaps the icon for a pulsing dot.
 class FloatingBanner extends StatelessWidget {
   const FloatingBanner({super.key, required this.text, this.title, this.tone = NoticeTone.info, this.action, this.actionLabel, this.onDismiss, this.pulse = false, this.icon});
   final String text;
@@ -20,17 +22,22 @@ class FloatingBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    final (fg, bg, _) = tone.of(c);
+    final (fg, bg, toneIcon) = tone.of(c);
     return Material(
       color: Colors.transparent,
       child: Container(
         padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
-        decoration: BoxDecoration(color: c.surface, borderRadius: BorderRadius.circular(AnbessaRadius.md), border: Border.all(color: c.border), boxShadow: AnbessaElevation.floating(c.brightness)),
+        decoration: BoxDecoration(color: c.surface, borderRadius: BorderRadius.circular(AnbessaRadius.lg), border: c.isDark ? Border.all(color: c.border) : null, boxShadow: AnbessaElevation.floating(c.brightness)),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            // a coloured bar says the tone; no icon
-            if (pulse) PulsingDot(color: fg, size: 10) else Container(width: 4, height: 32, decoration: BoxDecoration(color: fg, borderRadius: BorderRadius.circular(2))),
+            Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(color: bg, shape: BoxShape.circle),
+              alignment: Alignment.center,
+              child: pulse ? PulsingDot(color: fg, size: 10) : Icon(icon ?? toneIcon, size: 18, color: fg),
+            ),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -43,7 +50,7 @@ class FloatingBanner extends StatelessWidget {
               ),
             ),
             if (action != null && actionLabel != null) TextButton(onPressed: action, style: TextButton.styleFrom(foregroundColor: c.text, visualDensity: VisualDensity.compact), child: Text(actionLabel!)),
-            if (onDismiss != null) IconButton(onPressed: onDismiss, icon: const Icon(Icons.close, size: 18), visualDensity: VisualDensity.compact, tooltip: ''),
+            if (onDismiss != null) IconButton(onPressed: onDismiss, icon: const Icon(Icons.close_rounded, size: 18), visualDensity: VisualDensity.compact, tooltip: ''),
           ],
         ),
       ),

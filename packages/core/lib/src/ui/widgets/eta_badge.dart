@@ -5,6 +5,7 @@ import '../theme/anbessa_theme.dart';
 import '../theme/tokens.dart';
 import 'animated_counter.dart';
 
+/// "4 min" in a rounded pill, with an optional leading [icon]; the number rolls when it changes.
 class EtaBadge extends StatelessWidget {
   const EtaBadge({super.key, required this.seconds, required this.minuteLabel, this.approximate = false, this.onDark = false, this.large = false, this.icon});
   /// null = unknown ("—")
@@ -15,6 +16,7 @@ class EtaBadge extends StatelessWidget {
   /// the badge sits on the map (solid surface + shadow)
   final bool onDark;
   final bool large;
+  /// drawn before the time (e.g. `Icons.schedule_rounded`)
   final IconData? icon;
 
   @override
@@ -26,13 +28,14 @@ class EtaBadge extends StatelessWidget {
       padding: EdgeInsets.symmetric(horizontal: large ? 12 : 8, vertical: large ? 6 : 3),
       decoration: BoxDecoration(
         color: onDark ? c.surface : c.surface2,
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(AnbessaRadius.pill),
         border: onDark ? null : Border.all(color: c.border),
-        boxShadow: onDark ? AnbessaElevation.card(c.brightness) : null,
+        boxShadow: onDark ? AnbessaElevation.floating(c.brightness) : null,
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
+          if (icon != null) ...[Icon(icon, size: large ? 18 : 13, color: c.text2), SizedBox(width: large ? 6 : 4)],
           if (mins == null)
             Text('—', style: style)
           else

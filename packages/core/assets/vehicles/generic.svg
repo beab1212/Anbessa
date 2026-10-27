@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 64" width="160" height="64">
+  <!-- Anbessa generic car: a simple rounded silhouette, side view facing right. Authored for this project. -->
+  <ellipse cx="80" cy="59" rx="68" ry="3.5" fill="#000000" fill-opacity="0.12"/>
+  <path d="M12 47 L12 35 Q12 29 18 28 L36 26 L52 14 Q55 12 60 12 L92 12 Q97 12 101 15 L116 27 L140 30 Q148 32 148 40 L148 47 Q148 48 147 48 L13 48 Q12 48 12 47 Z" fill="#D5D9DE"/>
+  <rect x="12" y="40" width="136" height="8" fill="#BAC0C7"/>
+  <path d="M44 26 L55 16 Q57 15 60 15 L92 15 Q96 15 98 17 L107 26 Z" fill="#3A434D"/>
+  <rect x="75.5" y="14" width="3" height="13" fill="#D5D9DE"/>
+  <path d="M77 28 L77 44" stroke="#BAC0C7" stroke-width="1.5"/>
+  <rect x="141" y="33" width="7" height="4" rx="2" fill="#FFC53D"/>
+  <rect x="12" y="31" width="4" height="6" rx="1.5" fill="#E5484D"/>
+  <circle cx="40" cy="48" r="11" fill="#23272C"/>
+  <circle cx="40" cy="48" r="5" fill="#A3AAB2"/>
+  <circle cx="122" cy="48" r="11" fill="#23272C"/>
+  <circle cx="122" cy="48" r="5" fill="#A3AAB2"/>
+</svg>

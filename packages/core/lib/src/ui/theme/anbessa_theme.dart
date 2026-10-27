@@ -1,7 +1,7 @@
-// The design system: warm paper surfaces, near-black ink for text and primary actions, amber only
-// for the live thing (the car, the active trip), red only for what needs a person now. Flat: hairline
-// borders instead of shadows. One palette per
-// brightness; rider and driver share it (the shell says which mode you're in).
+// The design system: warm paper surfaces, near-black ink for text, one bold amber for the main
+// action and the live thing (the car, the active trip), red only for what needs a person now.
+// Lists are flat with hairline borders; what floats over the map gets a soft shadow. One palette
+// per brightness; rider and driver share it (the shell says which mode you're in).
 
 import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
@@ -83,12 +83,11 @@ class AnbessaColors extends ThemeExtension<AnbessaColors> {
   bool get isDark => canvas.computeLuminance() < 0.2;
   Brightness get brightness => isDark ? Brightness.dark : Brightness.light;
 
-  /// What a primary control is filled with: ink (the text colour). Light mode: near-black with
-  /// white text; dark mode: near-white with ink text. Amber stays for what's live on the map.
-  Color get primaryFill => text;
+  /// What a primary control (the main call to action) is filled with: amber, in both modes.
+  Color get primaryFill => accent;
 
-  /// The text colour that reads on [primaryFill].
-  Color get onAccent => isDark ? const Color(0xFF17191D) : Colors.white;
+  /// The text colour that reads on [primaryFill]: ink, in both modes.
+  Color get onAccent => const Color(0xFF17191D);
 
   /// The text colour that reads on [accent] (amber): always ink.
   Color get onAmber => const Color(0xFF17191D);
@@ -250,13 +249,14 @@ ThemeData anbessaTheme({Brightness brightness = Brightness.light, String? fontFa
       elevation: 0,
       margin: EdgeInsets.zero,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AnbessaRadius.lg), side: BorderSide(color: c.border)),
+      clipBehavior: Clip.antiAlias,
     ),
-    // primary: ink-filled, 56 tall, 12 px corners, bold label (no icons needed)
+    // primary: amber-filled with ink text, 56 tall, rounded, bold label (an optional leading icon)
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
         backgroundColor: c.primaryFill,
         foregroundColor: c.onAccent,
-        disabledBackgroundColor: c.border,
+        disabledBackgroundColor: c.isDark ? c.surface2 : c.border,
         disabledForegroundColor: c.muted,
         minimumSize: const Size(48, 56),
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
@@ -265,7 +265,7 @@ ThemeData anbessaTheme({Brightness brightness = Brightness.light, String? fontFa
         textStyle: AnbessaType.body.copyWith(fontSize: 17, fontWeight: FontWeight.w600, fontFamily: fontFamily, fontFamilyFallback: fontFamilyFallback),
       ),
     ),
-    // secondary: a 2 px ink-grey outline on the surface
+    // secondary: ink words with a 2 px outline on the surface
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
         foregroundColor: c.text,
@@ -334,7 +334,7 @@ ThemeData anbessaTheme({Brightness brightness = Brightness.light, String? fontFa
       secondarySelectedColor: c.text,
       side: BorderSide(color: c.border, width: 1.5),
       labelStyle: TextStyle(color: c.text, fontWeight: FontWeight.w600, fontFamily: fontFamily, fontFamilyFallback: fontFamilyFallback),
-      secondaryLabelStyle: TextStyle(color: c.onAccent, fontWeight: FontWeight.w600, fontFamily: fontFamily, fontFamilyFallback: fontFamilyFallback),
+      secondaryLabelStyle: TextStyle(color: c.canvas, fontWeight: FontWeight.w600, fontFamily: fontFamily, fontFamilyFallback: fontFamilyFallback),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AnbessaRadius.sm)),
       showCheckmark: false,
     ),
@@ -347,7 +347,7 @@ ThemeData anbessaTheme({Brightness brightness = Brightness.light, String? fontFa
     listTileTheme: ListTileThemeData(iconColor: c.text2, textColor: c.text, minVerticalPadding: 12),
     progressIndicatorTheme: ProgressIndicatorThemeData(color: c.text, linearTrackColor: c.border, circularTrackColor: c.border),
     switchTheme: SwitchThemeData(
-      thumbColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? c.onAccent : c.surface),
+      thumbColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? Colors.white : c.surface),
       trackColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? c.primaryFill : c.borderStrong),
       trackOutlineColor: const WidgetStatePropertyAll(Colors.transparent),
     ),

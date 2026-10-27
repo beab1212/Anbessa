@@ -30,6 +30,22 @@ void main() {
     expect(AnbessaColors.light.isDark, isFalse);
   });
 
+  test('the main action is amber with ink words in both modes', () {
+    for (final b in Brightness.values) {
+      final t = anbessaTheme(brightness: b);
+      final c = t.extension<AnbessaColors>()!;
+      expect(c.primaryFill, const Color(0xFFFFB300));
+      expect(c.onAccent, const Color(0xFF17191D));
+      expect(contrast(c.onAccent, c.primaryFill), greaterThanOrEqualTo(7.0));
+      expect(t.filledButtonTheme.style!.backgroundColor!.resolve({}), c.accent);
+      expect(t.outlinedButtonTheme.style!.foregroundColor!.resolve({}), c.text);
+      expect(t.colorScheme.primary, c.accent);
+    }
+    expect(AnbessaRadius.sheet, 28);
+    expect(AnbessaElevation.card(Brightness.light), isEmpty);
+    expect(AnbessaElevation.floating(Brightness.dark), isNotEmpty);
+  });
+
   test('both themes build with the extension and the font', () {
     for (final b in Brightness.values) {
       final t = anbessaTheme(brightness: b);

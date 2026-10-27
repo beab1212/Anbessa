@@ -5,6 +5,7 @@ import '../theme/anbessa_theme.dart';
 import '../theme/tokens.dart';
 import 'basics.dart';
 
+/// A small stat card: an icon (or a tone bar) and label, the value on one line, a sub line.
 class StatTile extends StatelessWidget {
   const StatTile({super.key, required this.label, required this.value, this.icon, this.tone, this.sub});
   final String label;
@@ -23,10 +24,11 @@ class StatTile extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          // the label in words; the tone, if any, is a small bar (no icons)
+          // the label, led by the icon in the tone colour (or a small tone bar with no icon)
           Row(
             children: [
-              if (tone != null) ...[Container(width: 3, height: 12, decoration: BoxDecoration(color: fg, borderRadius: BorderRadius.circular(2))), const SizedBox(width: 6)],
+              if (icon != null) ...[Icon(icon, size: 16, color: tone == null ? c.text2 : fg), const SizedBox(width: 6)]
+              else if (tone != null) ...[Container(width: 3, height: 12, decoration: BoxDecoration(color: fg, borderRadius: BorderRadius.circular(2))), const SizedBox(width: 6)],
               Expanded(child: Text(label, style: AnbessaType.caption.copyWith(color: c.muted, fontWeight: FontWeight.w500), maxLines: 1, overflow: TextOverflow.ellipsis)),
             ],
           ),
@@ -44,6 +46,7 @@ class StatTile extends StatelessWidget {
   }
 }
 
+/// [StatTile]s side by side, equal widths.
 class StatRow extends StatelessWidget {
   const StatRow({super.key, required this.children, this.gap = 8});
   final List<Widget> children;

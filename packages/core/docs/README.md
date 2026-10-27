@@ -29,7 +29,7 @@ packages/core/
   lib/src/ui/theme/               tokens.dart, anbessa_theme.dart, dark_palette.dart
   lib/src/ui/widgets/             one file per widget family, re-exported by widgets.dart
   assets/illustrations/           8 two-tone SVGs used by Illustration / IllustratedEmpty
-  test/                           api_client, models, polyline, promo_schedule, support, theme, widgets tests
+  test/                           api_client, models, perf_widgets, polyline, promo_schedule, ride_widgets, support, theme, widgets tests
   test/fixtures/                  balance.json, client_config.json, driver_home.json, trip.json, ticket.json, lost_item.json, sos_alert.json,
                                   estimates_promo.json, scheduled_trip.json
 ```
@@ -52,6 +52,7 @@ packages/core/
 |---|---|
 | `test/api_client_test.dart` | Host-mode routing and the bearer header; one refresh and replay on a token 401, a second 401 ends the session; a refresh that fails for lack of network surfaces the network error and keeps the session; idempotent POSTs get a key and are retried on a connection error while plain POSTs are not; error code, message and validation issues on `AppError` |
 | `test/models_test.dart` | `trip.json` parses and gives the right rider and driver stages; every status literal maps and an unknown one becomes `unknown`; the free-cancel window; client config (cities by point, vehicle types per city, flag defaults, fallback); balance and driver home fixtures; JWT claims decode; every registered socket event parses and unknown names are ignored; phone, money, version, Addis time and geometry helpers |
+| `test/perf_widgets_test.dart` | `AvatarImage`'s decoded-picture cache (the same data URL gives the same `MemoryImage`, broken or non-data URLs aren't cached, least recently used out first, a rebuild keeps the image provider, https goes to the installed `networkBuilder`); `Countdown` ticks down by itself without rebuilding its parent, stops at zero and calls `onDone` once; `ElapsedText` counts up and pauses in a muted `TickerMode` |
 | `test/polyline_test.dart` | polyline6 round trip, a known precision-5 polyline, distances and bearings in Addis, `lerpAngleDeg`, projection onto a polyline, `pointAlong` |
 | `test/promo_schedule_test.dart` | pricing-service promo contracts (each quote's discount and payable amount, the outcome, a refusal's reason, the code format), a trip's payable fare, the scheduled booking view and the 30 min – 7 day window with its suggested time, company policy, incentives and marketing preferences, a 422 `policy_violation` keeping its `rule`, the request bodies of `estimatesWithRoute(promoCode)`, `request(purpose)`, `schedule`, `scheduled`, `cancelScheduled`, `corporatePolicy`, `myIncentives`, `setMarketing` (checked against the routes), and `trip:reassigned` / `scheduled:status` parsing |
 | `test/support_test.dart` | support-service: the ticket, lost-item and SOS fixtures parse (internal messages dropped, unknown enum values degrade); what each side may do with a lost item; the SOS (30 min) and lost-item (7 days) windows; `SupportApi` sends `/api/support` to port 3009 in host mode and unchanged in gateway mode, and every request body and `Idempotency-Key` matches `routes.ts` |

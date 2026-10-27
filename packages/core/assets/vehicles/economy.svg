@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 64" width="160" height="64">
+  <!-- Anbessa economy: a compact hatchback, side view facing right. Authored for this project. -->
+  <ellipse cx="80" cy="59" rx="66" ry="3.5" fill="#000000" fill-opacity="0.12"/>
+  <path d="M16 48 L16 31 Q16 25 21 23 L38 13 Q41 11 46 11 L88 11 Q93 11 97 15 L112 27 L136 30 Q146 32 146 41 L146 48 Z" fill="#D5D9DE"/>
+  <rect x="16" y="40" width="130" height="8" fill="#BAC0C7"/>
+  <path d="M30 26 L42 16 L66 16 L66 26 Z" fill="#3A434D"/>
+  <path d="M70 16 L88 16 Q91 16 93 18 L103 26 L70 26 Z" fill="#3A434D"/>
+  <path d="M68 27 L68 43" stroke="#BAC0C7" stroke-width="1.5"/>
+  <rect x="74" y="30" width="7" height="2" rx="1" fill="#BAC0C7"/>
+  <rect x="139" y="33" width="7" height="4" rx="2" fill="#FFC53D"/>
+  <rect x="16" y="28" width="4" height="7" rx="1.5" fill="#E5484D"/>
+  <circle cx="42" cy="48" r="11" fill="#23272C"/>
+  <circle cx="42" cy="48" r="5" fill="#A3AAB2"/>
+  <circle cx="122" cy="48" r="11" fill="#23272C"/>
+  <circle cx="122" cy="48" r="5" fill="#A3AAB2"/>
+</svg>

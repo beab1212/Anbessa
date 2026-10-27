@@ -77,6 +77,32 @@ class AnimatedSwitcherX extends StatelessWidget {
       );
 }
 
+/// Switches between keyed children with a shared-axis transition: the new child slides in along
+/// [axis] while the old one slides out the other way, cross-fading through. Set [reverse] when
+/// going back a step. Children must have distinct keys. A plain swap when motion is reduced.
+class SharedAxisSwitcher extends StatelessWidget {
+  const SharedAxisSwitcher({super.key, required this.child, this.axis = Axis.horizontal, this.reverse = false, this.duration = AnbessaMotion.medium, this.distance = 30, this.alignment = Alignment.topCenter});
+  final Widget child;
+  final Axis axis;
+  final bool reverse;
+  final Duration duration;
+  /// how far (px) the children travel
+  final double distance;
+  final Alignment alignment;
+
+  @override
+  Widget build(BuildContext context) {
+    if (AnbessaMotion.reduced(context)) return child;
+    return AnimatedSwitcher(
+      duration: duration,
+      // the curves live in AnbessaMotion.sharedAxis; the switcher runs linear
+      transitionBuilder: (w, a) => AnbessaMotion.sharedAxis(w, a, axis: axis, reverse: reverse, outgoing: w.key != child.key, distance: distance),
+      layoutBuilder: (current, previous) => Stack(alignment: alignment, children: [...previous, ?current]),
+      child: child,
+    );
+  }
+}
+
 /// Expanding rings from a point: "finding a driver" at the pickup, going online.
 class RadarPulse extends StatefulWidget {
   const RadarPulse({super.key, required this.color, this.size = 120, this.rings = 3});

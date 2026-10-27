@@ -19,13 +19,13 @@ extension ToneColors on Tone {
       };
 }
 
-/// A status label with a dot. Small rounded corners, no icons (the [icon] parameter is ignored).
+/// A status label in a tinted pill: an [icon] when given, otherwise a dot (pulsing when [pulse]).
 class StatusPill extends StatelessWidget {
   const StatusPill(this.label, {super.key, this.tone = Tone.grey, this.pulse = false, this.icon});
   final String label;
   final Tone tone;
   final bool pulse;
-  /// kept for older call sites; not drawn
+  /// drawn before the label in the tone colour (instead of the dot)
   final IconData? icon;
 
   @override
@@ -35,13 +35,15 @@ class StatusPill extends StatelessWidget {
     return Semantics(
       label: label,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-        decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(6)),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(AnbessaRadius.pill)),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             if (pulse)
               PulsingDot(color: fg)
+            else if (icon != null)
+              Icon(icon, size: 14, color: fg)
             else
               Container(width: 7, height: 7, decoration: BoxDecoration(color: fg, shape: BoxShape.circle)),
             const SizedBox(width: 6),
@@ -137,15 +139,15 @@ enum NoticeTone { info, ok, warning, error }
 
 extension NoticeToneColors on NoticeTone {
   (Color fg, Color bg, IconData icon) of(AnbessaColors c) => switch (this) {
-        NoticeTone.info => (c.info, c.infoSoft, Icons.info_outline),
-        NoticeTone.ok => (c.success, c.successSoft, Icons.check_circle_outline),
-        NoticeTone.warning => (c.warning, c.warningSoft, Icons.warning_amber_outlined),
-        NoticeTone.error => (c.danger, c.dangerSoft, Icons.error_outline),
+        NoticeTone.info => (c.info, c.infoSoft, Icons.info_rounded),
+        NoticeTone.ok => (c.success, c.successSoft, Icons.check_circle_rounded),
+        NoticeTone.warning => (c.warning, c.warningSoft, Icons.warning_rounded),
+        NoticeTone.error => (c.danger, c.dangerSoft, Icons.error_rounded),
       };
 }
 
-/// A tinted panel for information, success, a warning or an error: the tone colours the border
-/// and the tint; the words stay ink so they read.
+/// A tinted panel for information, success, a warning or an error: the tone colours the icon, the
+/// border and the tint; the words stay ink so they read.
 class Notice extends StatelessWidget {
   const Notice(this.text, {super.key, this.tone = NoticeTone.info, this.action});
   final String text;
@@ -154,13 +156,15 @@ class Notice extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    final (fg, bg, _) = tone.of(c);
+    final (fg, bg, icon) = tone.of(c);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(AnbessaRadius.md), border: Border.all(color: fg.withValues(alpha: 0.35), width: 1.5)),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
+          ExcludeSemantics(child: Icon(icon, size: 20, color: fg)),
+          const SizedBox(width: 10),
           Expanded(child: Text(text, style: AnbessaType.body2.copyWith(color: c.text, fontWeight: FontWeight.w500))),
           if (action != null) ...[const SizedBox(width: 8), action!],
         ],
@@ -217,12 +221,12 @@ class CountdownRing extends StatelessWidget {
   }
 }
 
-/// Nothing here yet: a heading, a line and an action. No pictures.
+/// Nothing here yet: an icon in a soft circle, a heading, a line and an action.
 class EmptyState extends StatelessWidget {
-  const EmptyState({super.key, required this.title, this.body, this.icon = Icons.inbox_outlined, this.action});
+  const EmptyState({super.key, required this.title, this.body, this.icon = Icons.inbox_rounded, this.action});
   final String title;
   final String? body;
-  /// kept for older call sites; not drawn
+  /// drawn in a 64 px tinted circle above the title
   final IconData icon;
   final Widget? action;
   @override
@@ -234,6 +238,15 @@ class EmptyState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            ExcludeSemantics(
+              child: Container(
+                width: 64,
+                height: 64,
+                decoration: BoxDecoration(color: c.accentSoft, shape: BoxShape.circle),
+                child: Icon(icon, size: 30, color: c.isDark ? c.accent : c.text),
+              ),
+            ),
+            const SizedBox(height: 16),
             Text(title, textAlign: TextAlign.center, style: AnbessaType.h2.copyWith(color: c.text)),
             if (body != null) ...[const SizedBox(height: 8), Text(body!, textAlign: TextAlign.center, style: AnbessaType.body.copyWith(color: c.text2))],
             if (action != null) ...[const SizedBox(height: 16), action!],
@@ -244,13 +257,13 @@ class EmptyState extends StatelessWidget {
   }
 }
 
-/// The main action: ink-filled, a word or two, no icon (the [icon] parameter is ignored).
+/// The main action: amber-filled with ink words, an optional leading [icon], a busy spinner.
 class PrimaryButton extends StatelessWidget {
   const PrimaryButton({super.key, required this.label, this.onPressed, this.busy = false, this.icon, this.danger = false, this.trailing});
   final String label;
   final VoidCallback? onPressed;
   final bool busy;
-  /// kept for older call sites; not drawn
+  /// drawn before the label (hidden while busy)
   final IconData? icon;
   final bool danger;
   /// e.g. the price on the right of a request button
@@ -264,7 +277,8 @@ class PrimaryButton extends StatelessWidget {
       child: Row(
         mainAxisSize: trailing == null ? MainAxisSize.min : MainAxisSize.max,
         children: [
-          if (busy) ...[SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: danger ? Colors.white : c.onAccent)), const SizedBox(width: 10)],
+          if (busy) ...[SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: danger ? Colors.white : c.onAccent)), const SizedBox(width: 10)]
+          else if (icon != null) ...[Icon(icon, size: 20), const SizedBox(width: 10)],
           Flexible(child: Text(label, overflow: TextOverflow.ellipsis)),
           if (trailing != null) ...[const Spacer(), Text(trailing!, style: const TextStyle(fontFeatures: AnbessaType.tabular))],
         ],

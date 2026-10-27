@@ -1,14 +1,18 @@
-// Settings-style lists: a titled group of rows in one rounded card.
+// Settings-style lists: a titled group of rows in one rounded card. Rows lead with their icon in
+// a soft rounded square.
 
 import 'package:flutter/material.dart';
 import '../theme/anbessa_theme.dart';
 import '../theme/tokens.dart';
 
+/// A titled group of rows in one rounded card, separated by hairlines that start at the text.
 class SectionGroup extends StatelessWidget {
-  const SectionGroup({super.key, this.title, required this.children, this.margin = const EdgeInsets.only(bottom: 16)});
+  const SectionGroup({super.key, this.title, required this.children, this.margin = const EdgeInsets.only(bottom: 16), this.dividerIndent = 64});
   final String? title;
   final List<Widget> children;
   final EdgeInsets margin;
+  /// where the hairline between rows starts (64 = after the icon column; 16 for rows without icons)
+  final double dividerIndent;
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
@@ -24,7 +28,7 @@ class SectionGroup extends StatelessWidget {
             child: Column(
               children: [
                 for (final (i, w) in children.indexed) ...[
-                  if (i > 0) Divider(indent: 16, color: c.border), // rows start at 16 (no icon column)
+                  if (i > 0) Divider(indent: dividerIndent, color: c.border),
                   w,
                 ],
               ],
@@ -36,6 +40,26 @@ class SectionGroup extends StatelessWidget {
   }
 }
 
+/// The leading icon of a settings row: 36 px soft rounded square on `surface2`.
+class SettingsIcon extends StatelessWidget {
+  const SettingsIcon(this.icon, {super.key, this.color});
+  final IconData icon;
+  final Color? color;
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return ExcludeSemantics(
+      child: Container(
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(color: color == null ? (c.isDark ? c.border : c.canvas) : color!.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(AnbessaRadius.sm)),
+        child: Icon(icon, size: 20, color: color ?? c.text2),
+      ),
+    );
+  }
+}
+
+/// A settings row: icon, title, subtitle, and a chevron or a trailing widget.
 class SettingsTile extends StatelessWidget {
   const SettingsTile({
     super.key,
@@ -49,13 +73,14 @@ class SettingsTile extends StatelessWidget {
     this.chevron = true,
     this.badge,
   });
-  /// kept for older call sites; not drawn (no decorative icons)
+  /// drawn in a [SettingsIcon] at the start of the row
   final IconData icon;
   final String title;
   final String? subtitle;
   final Widget? trailing;
   final VoidCallback? onTap;
   final bool destructive;
+  /// tints the icon square (e.g. `c.success`); [destructive] rows use danger
   final Color? iconTone;
   final bool chevron;
   /// a short pill after the title ("Coming soon", "3")
@@ -72,6 +97,8 @@ class SettingsTile extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           child: LayoutBuilder(builder: (context, box) => Row(
             children: [
+              SettingsIcon(icon, color: destructive ? c.danger : iconTone),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -97,6 +124,7 @@ class SettingsTile extends StatelessWidget {
   }
 }
 
+/// A settings row with a switch; tapping the row flips it.
 class SettingsSwitchTile extends StatelessWidget {
   const SettingsSwitchTile({super.key, required this.icon, required this.title, this.subtitle, required this.value, required this.onChanged});
   final IconData icon;
@@ -115,6 +143,7 @@ class SettingsSwitchTile extends StatelessWidget {
       );
 }
 
+/// A settings row showing the current value (language, theme).
 class SettingsValueTile extends StatelessWidget {
   const SettingsValueTile({super.key, required this.icon, required this.title, required this.value, this.onTap});
   final IconData icon;
@@ -156,8 +185,9 @@ class ChoiceRow extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         child: Row(
           children: [
-            // a bare icon is decoration and isn't drawn; other leading widgets (an avatar) are
-            if (leading != null && leading is! Icon) ...[leading!, const SizedBox(width: 12)],
+            // a bare icon goes in the settings square; other leading widgets (an avatar) as they are
+            if (leading case final Icon i when i.icon != null) ...[SettingsIcon(i.icon!, color: i.color), const SizedBox(width: 12)]
+            else if (leading != null) ...[leading!, const SizedBox(width: 12)],
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -172,7 +202,7 @@ class ChoiceRow extends StatelessWidget {
               width: 22,
               height: 22,
               decoration: BoxDecoration(shape: BoxShape.circle, color: selected ? c.primaryFill : Colors.transparent, border: Border.all(color: selected ? c.primaryFill : c.borderStrong, width: 2)),
-              child: selected ? Icon(Icons.check, size: 14, color: c.onAccent) : null,
+              child: selected ? Icon(Icons.check_rounded, size: 14, color: c.onAccent) : null,
             ),
           ],
         ),

@@ -1,9 +1,11 @@
-// Shortcut tiles: Home, Work, add a place. Words only (the [icon] isn't drawn).
+// Shortcut tiles: Home, Work, add a place. The icon sits before the label so the tile keeps its
+// height in a 96 px strip.
 
 import 'package:flutter/material.dart';
 import '../theme/anbessa_theme.dart';
 import '../theme/tokens.dart';
 
+/// A square-ish shortcut tile (Home, Work, add a place): icon + label, a muted sublabel.
 class IconTile extends StatelessWidget {
   const IconTile({super.key, required this.icon, required this.label, this.sublabel, this.onTap, this.onLongPress, this.selected = false, this.dashed = false, this.width = 96});
   final IconData icon;
@@ -33,13 +35,27 @@ class IconTile extends StatelessWidget {
           decoration: BoxDecoration(
             color: c.surface,
             borderRadius: BorderRadius.circular(AnbessaRadius.md),
-            border: Border.all(color: selected ? c.text : c.border, width: selected ? 2 : 1.5),
+            border: Border.all(color: selected ? c.accent : c.border, width: selected ? 2 : 1.5),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(dashed ? '+ $label' : label, style: AnbessaType.body.copyWith(fontWeight: FontWeight.w700, color: dashed ? c.text2 : c.text), maxLines: 1, overflow: TextOverflow.ellipsis),
+              Row(
+                children: [
+                  ExcludeSemantics(
+                    child: Container(
+                      width: 26,
+                      height: 26,
+                      decoration: BoxDecoration(color: dashed ? c.surface2 : c.accentSoft, borderRadius: BorderRadius.circular(8)),
+                      child: Icon(icon, size: 16, color: dashed ? c.text2 : (c.isDark ? c.accent : c.text)),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text(label, style: AnbessaType.body2.copyWith(fontWeight: FontWeight.w700, color: dashed ? c.text2 : c.text), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                ],
+              ),
+              const SizedBox(height: 4),
               if (sublabel != null) Text(sublabel!, style: AnbessaType.caption.copyWith(color: c.muted), maxLines: 1, overflow: TextOverflow.ellipsis),
             ],
           ),

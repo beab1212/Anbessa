@@ -21,6 +21,7 @@ extension on AnbessaIllustration {
       };
 }
 
+/// One of the two-tone SVG illustrations, recoloured for the theme.
 class Illustration extends StatelessWidget {
   const Illustration(this.kind, {super.key, this.size = 140});
   final AnbessaIllustration kind;
@@ -56,8 +57,7 @@ class _ThemeColors extends ColorMapper {
   }
 }
 
-/// An empty or finished state: a heading, a line and an action. The [illustration] is kept for
-/// older call sites but no longer drawn (the design is text-first, no pictures).
+/// An empty or finished state: a small illustration, a heading, a line and an action.
 class IllustratedEmpty extends StatelessWidget {
   const IllustratedEmpty({super.key, required this.illustration, required this.title, this.body, this.action, this.compact = false});
   final AnbessaIllustration illustration;
@@ -74,6 +74,8 @@ class IllustratedEmpty extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            ExcludeSemantics(child: Illustration(illustration, size: compact ? 72 : 112)),
+            SizedBox(height: compact ? 8 : 16),
             Text(title, textAlign: TextAlign.center, style: (compact ? AnbessaType.title : AnbessaType.h2).copyWith(color: c.text)),
             if (body != null) ...[const SizedBox(height: 8), Text(body!, textAlign: TextAlign.center, style: AnbessaType.body.copyWith(color: c.text2))],
             if (action != null) ...[const SizedBox(height: 20), action!],
