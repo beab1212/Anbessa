@@ -33,6 +33,8 @@ export const keys = {
   tripLast: (tripId: string) => `trip:${tripId}:last`,
   /** set: the rider and driver of a trip (who may watch its live location) */
   tripMembers: (tripId: string) => `trip:${tripId}:members`,
+  /** string: the company a trip is billed to (its bookers may watch the car too) */
+  tripBillingOrg: (tripId: string) => `trip:${tripId}:billing_org`,
   /** hash: the last balance state payment-service published for a beneficiary (driver or fleet company) */
   balance: (beneficiaryId: string) => `balance:${beneficiaryId}`,
   /** set: online drivers earning for a beneficiary (a fleet's cars, or the owner-driver) */

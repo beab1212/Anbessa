@@ -130,8 +130,10 @@ Base interface for `TripCompletedEvent` and `TripCancelledEvent`; not used direc
 | `paymentMethod` | `PaymentMethod` | |
 | `billingType` | `"PERSONAL" \| "CORPORATE"` | |
 | `billingOrgId` | `string?` | company account trips |
-| `fareMinor` | `number` | final fare, waiting fee included |
+| `fareMinor` | `number` | final fare, waiting fee included; the full fare (the driver's earning is computed on it) |
 | `waitingFeeMinor` | `number` | |
+| `quoteId` | `string?` | the pricing-service quote the trip was booked with |
+| `promoDiscountMinor` | `number?` | promo discount given to the rider, 0 ≤ discount ≤ `fareMinor`; absent = 0. The rider pays `fareMinor − promoDiscountMinor` |
 | `currency` | `string` | |
 | `distanceMeters`, `durationSeconds` | `number` | |
 | `completedAt` | `string` | ISO 8601 |
@@ -151,6 +153,7 @@ Base interface for `TripCompletedEvent` and `TripCancelledEvent`; not used direc
 | `driverCompensationMinor` | `number` | credited to the beneficiary out of the fee |
 | `beneficiary` | `Beneficiary?` | |
 | `billingOrgId` | `string?` | company account trips: the fee is billed to the company |
+| `quoteId` | `string?` | the pricing-service quote the trip was booked with (pricing releases its promo reservation) |
 | `currency` | `string` | |
 
 ---
@@ -213,6 +216,7 @@ Key: `tripId`. The ledger entry for a trip, any payment method ("the receipt").
 | `paymentMethod` | `PaymentMethod` | |
 | `fareMinor`, `commissionMinor`, `vatMinor` | `number` | |
 | `earningsMinor` | `number` | what the beneficiary's balance moved by (negative on cash trips) |
+| `promoDiscountMinor` | `number?` | promo discount booked to `PROMO_EXPENSE`; the rider paid `fareMinor − promoDiscountMinor`. Absent = 0 |
 | `currency` | `string` | |
 
 ### `BalanceMoneyEvent` → `balance.topped_up`, `balance.payment_due`, `payout.sent`, `payout.failed`
@@ -241,6 +245,17 @@ Key: `riderId`.
 | `amountMinor` | `number` |
 | `currency` | `string` |
 
+### Money controls → `balance.adjusted`, `balance.written_off`, `incentive.awarded`, `invoice.issued`, `invoice.paid`
+
+Topic names are exported as `PAYMENT_CONTROL_TOPICS` (type `PaymentControlTopic`).
+
+| Type | Topic (key) | Fields |
+|---|---|---|
+| `BalanceAdjustedEvent` | `balance.adjusted` (beneficiary owner id) | `adjustmentId`, `accountId`, `beneficiary`, `direction` (`"CREDIT" \| "DEBIT"`), `amountMinor` (positive), `category` (`GOODWILL`, `FEE_REVERSAL`, `CORRECTION`, `LOST_ITEM_RETURN`, `OTHER`), `balanceMinor`, `currency`, `tripId?`, `ticketId?` |
+| `BalanceWrittenOffEvent` | `balance.written_off` (beneficiary owner id) | `writeOffId`, `accountId`, `beneficiary`, `amountMinor`, `balanceMinor`, `currency` |
+| `IncentiveAwardedEvent` | `incentive.awarded` (beneficiary owner id) | `awardId`, `programId`, `programName`, `cityId`, `driverId`, `accountId`, `beneficiary`, `trips`, `amountMinor`, `balanceMinor`, `currency` |
+| `InvoiceEvent` | `invoice.issued`, `invoice.paid` (`orgId`) | `invoiceId`, `orgId`, `number`, `period` (YYYY-MM), `totalMinor`, `paidMinor`, `currency`, `dueAt`, `paidAt?` (`invoice.paid`) |
+
 ---
 
 ## User events
@@ -257,6 +272,24 @@ Key: `riderId`.
 auth-service doesn't import this type; it declares the same shape in `services/auth-service/src/outbox/outbox.ts`.
 
 ---
+
+## Support events (support-service)
+
+Producer: `services/support-service/src/outbox/outbox.ts` (the outbox union uses these types minus the envelope). `SUPPORT_TOPICS` maps a short name to each topic string (`SUPPORT_TOPICS.sosTriggered === "sos.triggered"`); `SupportTopic` is the union of the values. No consumer yet (see [event-catalog.md](event-catalog.md)).
+
+| Type | Topic | Key | Notes |
+|---|---|---|---|
+| `TicketCreatedEvent` | `ticket.created` | ticketId | `ref` is the human number (#1042); `firstResponseDueAt` from the category SLA |
+| `TicketResolvedEvent` | `ticket.resolved` | ticketId | `byUserId: null` when the 72 h no-reply timer resolved it |
+| `TicketClosedEvent` | `ticket.closed` | ticketId | `automatic: true` from the 7-day timer |
+| `LostItemReturnedEvent` | `lost_item.returned` | lostItemId | |
+| `SosTriggeredEvent` | `sos.triggered` | alertId | `tripVerified: false` when trip-service was down and the app's `cityId` was used |
+| `SosAcknowledgedEvent` | `sos.acknowledged` | alertId | |
+| `SosResolvedEvent` | `sos.resolved` | alertId | `outcome`: `FALSE_ALARM` \| `ASSISTED` \| `ESCALATED` |
+| `IncidentOpenedEvent` | `incident.opened` | incidentId | `source`: `SOS` \| `TICKET` \| `MANUAL`; `byUserId: null` for the automatic incident of a SAFETY ticket |
+| `IncidentResolvedEvent` | `incident.resolved` | incidentId | suspensions themselves are auth-service's `user.suspended` |
+
+Shared unions: `TicketCategory`, `TicketPriority`, `TicketResolution`, `IncidentCategory`, `IncidentSeverity`, `IncidentOutcome`.
 
 ## Shared enums
 

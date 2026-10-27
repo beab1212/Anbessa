@@ -28,7 +28,17 @@ export interface Trip {
   dropoff: TripPlace;
   driver: { userId: string; vehicleId: string | null } | null;
   /** minor units (santim) */
-  fare: { estimateMinor: number; finalMinor: number | null; waitingFeeMinor: number | null; currency: string };
+  fare: {
+    estimateMinor: number;
+    finalMinor: number | null;
+    waitingFeeMinor: number | null;
+    currency: string;
+    /** promo discount taken off what the rider pays (the driver is paid on the full fare) */
+    promoDiscountMinor?: number;
+    promoCode?: string | null;
+    /** what the rider pays: final (or estimate) minus the discount */
+    payableMinor?: number;
+  };
   route: {
     estDistanceMeters: number;
     estDurationSeconds: number;

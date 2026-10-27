@@ -20,7 +20,8 @@ From [`src/keys.ts`](../src/keys.ts). City keys use a hash tag (`{city}`) so all
 | `driver(driverId)` | `driver:{driverId}` | hash | the driver's live state ([fields](#driver-state)) | `goOnline`, `recordPing`, `goOffline`, `startTrip`, `endTrip`, `applyBalanceState`, sweeper | `EXPIRE 900` (15 min) on `goOnline`, `recordPing`, `goOffline` |
 | `offer(driverId)` | `offer:driver:{driverId}` | string (trip id) | soft lock: trip currently offered to the driver | **trip-service** matcher (`SET … EX offerSeconds NX`) | trip-service `DEL`; `startTrip` `DEL`s it |
 | `tripLast(tripId)` | `trip:{tripId}:last` | hash `{ driverId, lat, lng, at, stale, heading? }` | last driver position for the rider screen | `recordPing` while on trip | `EXPIRE 3600` per ping; `300` s after `endTrip` |
-| `tripMembers(tripId)` | `trip:{tripId}:members` | set | rider and driver (who may watch the trip live) | `startTrip` | `EXPIRE 43200` (12 h); `300` s after `endTrip` |
+| `tripMembers(tripId)` | `trip:{tripId}:members` | set | rider, driver and booker (who may watch the trip live) | `startTrip`, `reassignTrip` (old driver removed, new one added) | `EXPIRE 43200` (12 h); `300` s after `endTrip` |
+| `tripBillingOrg(tripId)` | `trip:{tripId}:billing_org` | string | the company a trip is billed to (its `trip:read` holders may watch the car) | `startTrip` (only with `billingOrgId`) | `EX 43200` (12 h); `300` s after `endTrip` |
 | `balance(beneficiaryId)` | `balance:{beneficiaryId}` | hash `{ state, cashAllowed: "1"/"0", at }` | last balance state payment-service published | `applyBalanceState` | `EXPIRE 2592000` (30 days) |
 | `beneficiaryDrivers(beneficiaryId)` | `beneficiary:{beneficiaryId}:drivers` | set | online drivers earning for a beneficiary | `goOnline` | `EXPIRE 86400`; `SREM` on offline or beneficiary change |
 | `sweepLock(cityId)` | `lock:sweep:{city}` | string | one sweeper per city | location-service `sweeper.ts` (`SET NX PX`) | `PX max(1000, interval − 500)` |
@@ -82,7 +83,7 @@ Stored as a Redis hash of strings. Parsing rules (`parseState`, internal):
 stateDiagram-v2
   [*] --> available: goOnline (driver.online)
   available --> on_trip: startTrip (trip.matched)
-  on_trip --> available: endTrip (trip.completed / trip.cancelled, same tripId)
+  on_trip --> available: endTrip (trip.completed / trip.cancelled, same tripId) or reassignTrip (old driver)
   available --> offline: goOffline (driver.offline)
   on_trip --> offline: goOffline
   offline --> available: goOnline
@@ -120,7 +121,7 @@ Notes:
 | `staleAfterMs` | `20_000` | no ping for this long → out of the geo index (workflow 04, step 13) |
 | `lostAfterMs` | `600_000` (10 min) | stale this long without a trip → reported as connection lost (step 14) |
 | `stateTtlSeconds` | `900` (15 min) | driver hash TTL; longer than `lostAfterMs` so the sweeper still knows city and vehicle type |
-| `tripMembersTtlSeconds` | `43_200` (12 h) | `trip:{id}:members` |
+| `tripMembersTtlSeconds` | `43_200` (12 h) | `trip:{id}:members`, `trip:{id}:billing_org` |
 | `tripLastTtlSeconds` | `3600` | `trip:{id}:last` |
 
 Hard-coded elsewhere in `drivers.ts`: 300 s grace after `endTrip`, 30-day `balance:*` TTL, 1-day `beneficiary:*:drivers` TTL.
@@ -217,13 +218,22 @@ Handler for `balance.state_changed`. Writes `balance:{beneficiaryId}` (`state`, 
 
 Handler for `driver.offline`. No state → no-op. Otherwise `ZREM` from `available`, `busy` and `seen` of its city/vehicle type, `SREM` from its beneficiary set, then `HSET status "offline", tripId ""` and `EXPIRE 900`. Pings are ignored (`not_online`) until the next `goOnline`.
 
-### `startTrip(redis, { tripId, driverId, riderId }): Promise<void>`
+### `startTrip(redis, { tripId, driverId, riderId, bookedById?, billingOrgId? }): Promise<void>`
 
-Handler for `trip.matched`. One `MULTI`: `SADD trip:{tripId}:members riderId driverId`, `EXPIRE 43200`, `DEL offer:driver:{driverId}`; if the driver has a non-offline state: `HSET status "on_trip", tripId`, and if it has a position and isn't stale: `ZREM` from `available`, `GEOADD` into `busy` at the stored position.
+Handler for `trip.matched`. One `MULTI`: `SADD trip:{tripId}:members riderId driverId` (plus `bookedById` when given and different from the rider), `EXPIRE 43200`, `DEL offer:driver:{driverId}`; with `billingOrgId`: `SET trip:{tripId}:billing_org billingOrgId EX 43200`; if the driver has a non-offline state: `HSET status "on_trip", tripId`, and if it has a position and isn't stale: `ZREM` from `available`, `GEOADD` into `busy` at the stored position.
 
 ### `endTrip(redis, { tripId, driverId }): Promise<void>`
 
-Handler for `trip.completed` and `trip.cancelled` (only when the event has a `driverId`). One `MULTI`: `EXPIRE trip:{tripId}:members 300`, `EXPIRE trip:{tripId}:last 300` (grace period so the rider screen can show the final position); if the driver is `on_trip` with this `tripId`: `HSET status "available", tripId ""`, and if it has a fresh position: `ZREM busy`, `GEOADD available`.
+Handler for `trip.completed` and `trip.cancelled` (only when the event has a `driverId`). One `MULTI`: `EXPIRE trip:{tripId}:members 300`, `EXPIRE trip:{tripId}:billing_org 300`, `EXPIRE trip:{tripId}:last 300` (grace period so the rider screen can show the final position); if the driver is `on_trip` with this `tripId`: `HSET status "available", tripId ""`, and if it has a fresh position: `ZREM busy`, `GEOADD available`.
+
+### `reassignTrip(redis, { tripId, riderId, fromDriverId, toDriverId? }): Promise<void>`
+
+Handler for `trip.reassigned` (a dispatcher took a matched trip from its driver). Reads both drivers' state and `HGET trip:{tripId}:last driverId`, then one `MULTI`:
+
+- old driver: `SREM trip:{tripId}:members fromDriverId`; `DEL trip:{tripId}:last` if that position was theirs; if `on_trip` with this `tripId`: `HSET status "available", tripId ""` and, with a fresh position, `ZREM busy` / `GEOADD available`.
+- with `toDriverId`: `SADD trip:{tripId}:members riderId toDriverId`, `EXPIRE 43200`, `DEL offer:driver:{toDriverId}`; if the new driver is online and not on **another** trip: `HSET status "on_trip", tripId`, with a fresh position `ZREM available` / `GEOADD busy` and `HSET trip:{tripId}:last` from that position (unless the last position is already theirs), `EXPIRE 3600`.
+
+Idempotent, and correct whether or not `trip.matched` for the new driver (which trip-service writes just before, same key) was handled first. Booker and `billing_org` are left as they are (they don't change on reassignment).
 
 ---
 
@@ -232,6 +242,10 @@ Handler for `trip.completed` and `trip.cancelled` (only when the event has a `dr
 ### `isTripMember(redis, tripId, userId): Promise<boolean>`
 
 `SISMEMBER trip:{tripId}:members userId`. Used by realtime-gateway before letting a socket join a trip room, and by location-service for live trip views.
+
+### `tripBillingOrg(redis, tripId): Promise<string | null>`
+
+`GET trip:{tripId}:billing_org`: the company a trip is billed to, or `null`. Used by location-service (`tripDriver()`) to let that company's `trip:read` holders see the driver's position.
 
 ### `nearbyAvailable(redis, q, now = Date.now()): Promise<NearbyDriver[]>`
 

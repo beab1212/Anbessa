@@ -209,12 +209,15 @@ export async function goOffline(redis: Redis, driverId: string): Promise<void> {
 }
 
 /** trip.matched: the driver moves to the busy set; rider and driver may watch the trip. */
-export async function startTrip(redis: Redis, input: { tripId: string; driverId: string; riderId: string }): Promise<void> {
+export async function startTrip(redis: Redis, input: { tripId: string; driverId: string; riderId: string; bookedById?: string; billingOrgId?: string }): Promise<void> {
   const state = await getDriverState(redis, input.driverId);
+  // who may watch the car: the rider, the driver, whoever booked it (phone or company booking)
+  const members = [input.riderId, input.driverId, ...(input.bookedById && input.bookedById !== input.riderId ? [input.bookedById] : [])];
   const p = redis.multi()
-    .sadd(keys.tripMembers(input.tripId), input.riderId, input.driverId)
+    .sadd(keys.tripMembers(input.tripId), ...members)
     .expire(keys.tripMembers(input.tripId), LOCATION_TIMING.tripMembersTtlSeconds)
     .del(keys.offer(input.driverId));
+  if (input.billingOrgId) p.set(keys.tripBillingOrg(input.tripId), input.billingOrgId, "EX", LOCATION_TIMING.tripMembersTtlSeconds);
   if (state && state.status !== "offline") {
     p.hset(keys.driver(input.driverId), { status: "on_trip", tripId: input.tripId });
     if (state.lat !== undefined && state.lng !== undefined && !state.stale) {
@@ -231,6 +234,7 @@ export async function endTrip(redis: Redis, input: { tripId: string; driverId: s
   const p = redis.multi()
     // a short grace period so the rider screen can show the final position
     .expire(keys.tripMembers(input.tripId), 300)
+    .expire(keys.tripBillingOrg(input.tripId), 300)
     .expire(keys.tripLast(input.tripId), 300);
   if (state && state.status === "on_trip" && state.tripId === input.tripId) {
     p.hset(keys.driver(input.driverId), { status: "available", tripId: "" });
@@ -242,8 +246,58 @@ export async function endTrip(redis: Redis, input: { tripId: string; driverId: s
   await p.exec();
 }
 
+/**
+ * trip.reassigned: a dispatcher took the trip from `fromDriverId`. The old driver stops watching the
+ * trip and is back to available (if still on this trip and online); the last position is dropped if
+ * it was theirs so the rider's map doesn't keep showing the old car. With `toDriverId` the new
+ * driver becomes a member and, unless they are already on another trip, on_trip with this trip;
+ * their current position seeds the trip's last position. Idempotent, and safe after the
+ * trip.matched for the new driver (which trip-service writes just before trip.reassigned).
+ */
+export async function reassignTrip(redis: Redis, input: { tripId: string; riderId: string; fromDriverId: string; toDriverId?: string }): Promise<void> {
+  const { tripId, fromDriverId, toDriverId } = input;
+  const [from, to, lastDriver] = await Promise.all([
+    getDriverState(redis, fromDriverId),
+    toDriverId ? getDriverState(redis, toDriverId) : Promise.resolve(null),
+    redis.hget(keys.tripLast(tripId), "driverId"),
+  ]);
+  const p = redis.multi().srem(keys.tripMembers(tripId), fromDriverId);
+  if (lastDriver === fromDriverId) p.del(keys.tripLast(tripId));
+  if (from && from.status === "on_trip" && from.tripId === tripId) {
+    p.hset(keys.driver(fromDriverId), { status: "available", tripId: "" });
+    if (from.lat !== undefined && from.lng !== undefined && !from.stale) {
+      p.zrem(keys.geo(from.cityId, from.vehicleType, "busy"), fromDriverId)
+        .geoadd(keys.geo(from.cityId, from.vehicleType, "available"), from.lng, from.lat, fromDriverId);
+    }
+  }
+  if (toDriverId) {
+    p.sadd(keys.tripMembers(tripId), input.riderId, toDriverId)
+      .expire(keys.tripMembers(tripId), LOCATION_TIMING.tripMembersTtlSeconds)
+      .del(keys.offer(toDriverId));
+    const free = !to?.tripId || to.tripId === tripId;
+    if (to && to.status !== "offline" && free) {
+      p.hset(keys.driver(toDriverId), { status: "on_trip", tripId });
+      if (to.lat !== undefined && to.lng !== undefined && to.at !== undefined && !to.stale) {
+        p.zrem(keys.geo(to.cityId, to.vehicleType, "available"), toDriverId)
+          .geoadd(keys.geo(to.cityId, to.vehicleType, "busy"), to.lng, to.lat, toDriverId);
+        if (lastDriver !== toDriverId) {
+          const fields: Record<string, string> = { driverId: toDriverId, lat: String(to.lat), lng: String(to.lng), at: String(to.at), stale: "0" };
+          if (to.heading !== undefined && Number.isFinite(to.heading)) fields.heading = String(to.heading);
+          p.hset(keys.tripLast(tripId), fields).expire(keys.tripLast(tripId), LOCATION_TIMING.tripLastTtlSeconds);
+        }
+      }
+    }
+  }
+  await p.exec();
+}
+
 export async function isTripMember(redis: Redis, tripId: string, userId: string): Promise<boolean> {
   return (await redis.sismember(keys.tripMembers(tripId), userId)) === 1;
+}
+
+/** The company a live trip is billed to, if any. */
+export async function tripBillingOrg(redis: Redis, tripId: string): Promise<string | null> {
+  return redis.get(keys.tripBillingOrg(tripId));
 }
 
 // ── reads (location-service) ──────────────────────────────────────────────────
