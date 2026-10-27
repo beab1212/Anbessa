@@ -35,14 +35,17 @@ class DriverTripScreen extends ConsumerStatefulWidget {
   ConsumerState<DriverTripScreen> createState() => _DriverTripScreenState();
 }
 
-class _DriverTripScreenState extends ConsumerState<DriverTripScreen> {
+class _DriverTripScreenState extends ConsumerState<DriverTripScreen> with SingleTickerProviderStateMixin {
   Timer? _tick;
   DateTime _now = DateTime.now().toUtc();
   bool _busy = false;
   Object? _error;
   String? _completeKey;
   String? _cancelKey;
-  double _sheetHeight = 0;
+  // the sheet height goes straight to the map (no rebuild of this screen while it's dragged)
+  final _sheetHeight = ValueNotifier<double>(0);
+  // the driver's own car, glided between fixes along the guidance route
+  late final MarkerAnimator _car = MarkerAnimator(vsync: this);
   bool _overview = false;
   bool _devOpen = false;
   NavTarget? _navTarget;
@@ -53,11 +56,16 @@ class _DriverTripScreenState extends ConsumerState<DriverTripScreen> {
     super.initState();
     _tick = Timer.periodic(const Duration(seconds: 1), (_) => setState(() => _now = DateTime.now().toUtc()));
     if (ref.read(navPrefsProvider).keepAwake) WakelockPlus.enable().catchError((_) {});
+    ref.listenManual(lastPositionProvider, (_, p) {
+      if (p != null) _car.push((lat: p.lat, lng: p.lng), heading: p.heading, speed: p.speed, at: p.at);
+    }, fireImmediately: true);
   }
 
   @override
   void dispose() {
     _tick?.cancel();
+    _car.dispose();
+    _sheetHeight.dispose();
     WakelockPlus.disable().catchError((_) {});
     super.dispose();
   }
@@ -178,7 +186,8 @@ class _DriverTripScreenState extends ConsumerState<DriverTripScreen> {
       }
       nav = ref.watch(navigationProvider(navTarget));
     }
-    final mePose = me == null ? null : AnimatedPose(lat: me.lat, lng: me.lng, heading: me.heading ?? (nav != null && nav.hasRoute ? bearingAt(nav.route, 0) : 0), stale: false);
+    // the car moves along the guidance route (no corner cutting, no jumping to a side street)
+    _car.route = nav != null && nav.hasRoute ? nav.route : null;
     final metersToPickup = me == null ? null : metersBetween(me, t.pickup.lat, t.pickup.lng);
     final waiting = waitingAtPickup(t, _now);
     const noShowAfter = Duration(minutes: 5);
@@ -199,16 +208,20 @@ class _DriverTripScreenState extends ConsumerState<DriverTripScreen> {
         children: [
           AnbessaMap(
             fit: follow == FollowMode.none ? [if (me != null) LatLng(me.lat, me.lng), toPickup ? pickup : dropoff, if (!t.isActive) pickup] : const [],
+            // the overview is fitted when it is chosen or the stage changes, not on every fix
+            fitKey: (_overview, stage),
             pickup: pickup,
             dropoff: dropoff,
-            driverPose: mePose,
+            driverCar: _car,
             routes: routes,
             follow: follow,
             followZoom: 17,
-            onUserGesture: () => setState(() => _overview = true),
-            onRecenter: () => setState(() => _overview = false),
+            // a gesture frees the camera (the map shows "Recenter"); recenter goes back to guidance
+            onRecenter: () {
+              if (_overview) setState(() => _overview = false);
+            },
             topInset: top + (navigating ? 120 : 64),
-            bottomInset: _sheetHeight,
+            sheetHeight: _sheetHeight,
             callouts: [
               if (nav != null && nav.remainingSeconds != null && navigating) MapCallout(point: toPickup ? pickup : dropoff, label: l.etaMinutes((nav.remainingSeconds! / 60).ceil().clamp(1, 999)), tone: Tone.amber, icon: Icons.schedule, offsetY: -56),
             ],
@@ -256,9 +269,7 @@ class _DriverTripScreenState extends ConsumerState<DriverTripScreen> {
           ),
           AppSheet(
             snaps: const [0.34, 0.74],
-            onHeightChanged: (h) {
-              if ((h - _sheetHeight).abs() > 2) setState(() => _sheetHeight = h);
-            },
+            onHeightChanged: (h) => _sheetHeight.value = h,
             padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
             builder: (context, _) => AnimatedSwitcherX(
               child: KeyedSubtree(

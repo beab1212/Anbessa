@@ -26,14 +26,15 @@ class RiderHomeScreen extends ConsumerStatefulWidget {
 
 class _RiderHomeScreenState extends ConsumerState<RiderHomeScreen> with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late final CarsAnimator _cars = CarsAnimator(vsync: this);
-  double _sheetHeight = 0;
+  // the sheet height goes straight to the map (no rebuild of this screen while it's dragged)
+  final _sheetHeight = ValueNotifier<double>(0);
   bool _following = true;
+  bool? _visible;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _cars.addListener(_onCars);
     Future.microtask(_locate);
   }
 
@@ -44,8 +45,16 @@ class _RiderHomeScreenState extends ConsumerState<RiderHomeScreen> with SingleTi
     if (p != null && mounted) ref.read(lastPositionProvider.notifier).set(p);
   }
 
-  void _onCars() {
-    if (mounted) setState(() {});
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // covered by another screen (or another tab): no polling, no animation
+    final visible = TickerMode.valuesOf(context).enabled;
+    if (visible == _visible) return;
+    _visible = visible;
+    _cars.paused = !visible;
+    final nearby = ref.read(nearbyCarsProvider.notifier);
+    Future.microtask(() => visible ? nearby.resume() : nearby.pause());
   }
 
   @override
@@ -61,8 +70,8 @@ class _RiderHomeScreenState extends ConsumerState<RiderHomeScreen> with SingleTi
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _cars.removeListener(_onCars);
     _cars.dispose();
+    _sheetHeight.dispose();
     super.dispose();
   }
 
@@ -84,8 +93,6 @@ class _RiderHomeScreenState extends ConsumerState<RiderHomeScreen> with SingleTi
       WidgetsBinding.instance.addPostFrameCallback((_) => ref.read(nearbyCarsProvider.notifier).watch(me.lat, me.lng));
     }
     final mePose = me == null ? null : MePose(position: LatLng(me.lat, me.lng), heading: me.heading, accuracy: me.accuracy);
-    final poses = _cars.poses;
-    final nearest = poses.isEmpty ? null : poses.first;
     final eta = nearby.data.etaSeconds;
     final firstName = session?.displayName.split(' ').first ?? '';
 
@@ -93,16 +100,14 @@ class _RiderHomeScreenState extends ConsumerState<RiderHomeScreen> with SingleTi
       children: [
         AnbessaMap(
           mePose: mePose,
-          cars: poses,
+          nearbyCars: _cars.frames,
+          nearbyLabel: eta == null ? null : l.minutesAway((eta / 60).ceil().clamp(1, 99)),
           follow: _following ? FollowMode.me : FollowMode.none,
           followZoom: 15,
           onUserGesture: () => setState(() => _following = false),
           onRecenter: () => setState(() => _following = true),
           topInset: bannerH + 64,
-          bottomInset: _sheetHeight,
-          callouts: [
-            if (nearest != null && eta != null) MapCallout(point: nearest.position, label: l.minutesAway((eta / 60).ceil().clamp(1, 99)), icon: Icons.directions_car_filled, tone: Tone.amber),
-          ],
+          sheetHeight: _sheetHeight,
         ),
         // greeting
         Positioned(
@@ -142,9 +147,7 @@ class _RiderHomeScreenState extends ConsumerState<RiderHomeScreen> with SingleTi
         ),
         AppSheet(
           snaps: const [0.34, 0.62, 0.92],
-          onHeightChanged: (h) {
-            if ((h - _sheetHeight).abs() > 2) setState(() => _sheetHeight = h);
-          },
+          onHeightChanged: (h) => _sheetHeight.value = h,
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
           builder: (context, _) => const _HomeSheet(),
         ),

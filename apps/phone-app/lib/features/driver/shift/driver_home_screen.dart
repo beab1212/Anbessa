@@ -29,11 +29,29 @@ class DriverHomeScreen extends ConsumerStatefulWidget {
   ConsumerState<DriverHomeScreen> createState() => _DriverHomeScreenState();
 }
 
-class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> {
+class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> with SingleTickerProviderStateMixin {
   String? _vehicleId;
-  double _sheetHeight = 0;
+  // the driver's own car, glided between fixes; the map draws it every frame and follows it
+  late final MarkerAnimator _car = MarkerAnimator(vsync: this);
+  // the sheet height goes straight to the map (no rebuild of this screen while it's dragged)
+  final _sheetHeight = ValueNotifier<double>(0);
   bool _following = true;
   bool _devOpen = false;
+
+  @override
+  void initState() {
+    super.initState();
+    ref.listenManual(lastPositionProvider, (_, p) {
+      if (p != null) _car.push((lat: p.lat, lng: p.lng), heading: p.heading, speed: p.speed, at: p.at);
+    }, fireImmediately: true);
+  }
+
+  @override
+  void dispose() {
+    _car.dispose();
+    _sheetHeight.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -58,10 +76,12 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> {
       body: Stack(
         children: [
           AnbessaMap(
-            driverPose: me == null ? null : AnimatedPose(lat: me.lat, lng: me.lng, heading: me.heading ?? 0, stale: false),
-            follow: _following && o == null ? FollowMode.me : FollowMode.none,
+            driverCar: _car,
+            follow: _following && o == null ? FollowMode.driver : FollowMode.none,
             followZoom: 15,
             fit: o == null ? const [] : [if (me != null) LatLng(me.lat, me.lng), LatLng(o.pickup.lat, o.pickup.lng), LatLng(o.dropoff.lat, o.dropoff.lng)],
+            // fitted once per offer, not on every fix
+            fitKey: o?.offerId,
             pickup: o == null ? null : LatLng(o.pickup.lat, o.pickup.lng),
             dropoff: o == null ? null : LatLng(o.dropoff.lat, o.dropoff.lng),
             routes: [
@@ -76,7 +96,8 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> {
             onUserGesture: () => setState(() => _following = false),
             onRecenter: () => setState(() => _following = true),
             topInset: top + 56,
-            bottomInset: o == null ? _sheetHeight : 320,
+            sheetHeight: o == null ? _sheetHeight : null,
+            bottomInset: o == null ? 0 : 320,
           ),
           // status and health
           Positioned(
@@ -134,9 +155,7 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> {
           if (o == null)
             AppSheet(
               snaps: const [0.32, 0.6],
-              onHeightChanged: (h) {
-                if ((h - _sheetHeight).abs() > 2) setState(() => _sheetHeight = h);
-              },
+              onHeightChanged: (h) => _sheetHeight.value = h,
               builder: (context, _) => AnimatedSwitcherX(
                 child: KeyedSubtree(
                   key: ValueKey(shift.online),

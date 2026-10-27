@@ -2,13 +2,20 @@
 // covered by sheets and banners, and whether to follow someone; the engine draws it.
 //
 // Two engines with the same behaviour:
-//   - vector_map.dart: MapLibre (vector tiles, 2D / 3D / satellite) on Android and iOS
+//   - vector_map.dart: MapLibre (vector tiles, 2D / 3D / satellite) on Android and iOS. Cars,
+//     pins, the person and routes are native layers owned by a MapScene (scene/map_scene.dart);
+//     only overlays and a few callouts are Flutter widgets.
 //   - raster_map.dart: flutter_map (raster tiles, 2D / satellite) on the desktop and in tests
-// Both draw the same pins (built here), keep their subject inside the uncovered part, animate
-// camera moves, and can follow the car (north up, or turned the way it's going for navigation).
+// Both hand camera decisions to a CameraDirector (scene/camera_director.dart) through a
+// MapBinding: follow and navigation glide with the car, fits happen only when the screen's
+// intent changes, and a gesture frees the camera and shows a "Recenter" pill.
+//
+// Things that move every frame (the animated car, nearby cars, the sheet height) come in as
+// ValueListenables, so the screen never rebuilds per frame.
 
 import 'dart:math';
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart' show LatLng;
@@ -21,13 +28,15 @@ import 'marker_animator.dart';
 import 'me_marker.dart';
 import 'raster_map.dart';
 import 'route_layer.dart';
+import 'scene/scene_geojson.dart';
 import 'vector_map.dart';
 
 export 'callouts.dart' show MapCallout;
 export 'map_mode.dart' show MapMode, mapModeProvider;
-export 'marker_animator.dart' show AnimatedPose;
+export 'marker_animator.dart' show AnimatedPose, MarkerAnimator;
 export 'me_marker.dart' show MePose;
 export 'route_layer.dart' show RouteLine, RouteKind;
+export 'scene/scene_geojson.dart' show NearbyCarFrame;
 
 /// Tiles failed to load (the tile server is down, or no network).
 final mapTilesDownProvider = valueProvider<bool>(false);
@@ -62,15 +71,21 @@ class AnbessaMap extends ConsumerWidget {
     this.dropoff,
     this.driver,
     this.driverPose,
+    this.driverCar,
+    this.driverCarLabel,
     this.me,
     this.mePose,
     this.line = const [],
     this.routes = const [],
     this.cars = const [],
+    this.nearbyCars,
+    this.nearbyLabel,
     this.callouts = const [],
     this.overlays = const [],
     this.topInset = 0,
     this.bottomInset = 0,
+    this.sheetHeight,
+    this.fitKey,
     this.follow = FollowMode.none,
     this.followZoom = 16,
     this.showControls = true,
@@ -83,28 +98,47 @@ class AnbessaMap extends ConsumerWidget {
     this.interactive = true,
   });
 
-  /// Points to keep in view. Empty: [center] or the city.
+  /// Points to show when nothing is followed. Empty: [center] or the city. The camera fits them
+  /// when [fitKey] changes (or, without a key, when the points change), when the insets settle,
+  /// and on recenter; never because the screen rebuilt.
   final List<LatLng> fit;
+  /// Identifies what [fit] shows (a stage, a route): a new key fits again, even after the person
+  /// moved the map. Points that change under the same key (a moving car) don't refit.
+  final Object? fitKey;
   final LatLng? center;
   final double zoom;
   final LatLng? pickup;
   final LatLng? dropoff;
   /// a static car (older screens); prefer [driverPose]
   final DriverMarkerData? driver;
-  /// the animated car (from a [MarkerAnimator])
+  /// a car pose (redrawn when the screen rebuilds); prefer [driverCar]
   final AnimatedPose? driverPose;
+  /// the animated car: a [MarkerAnimator] (or any listenable pose), drawn every frame without
+  /// rebuilding the screen; takes precedence over [driverPose]
+  final ValueListenable<AnimatedPose?>? driverCar;
+  /// a label above the car ("4 min")
+  final String? driverCarLabel;
   /// the person's position as a point (older screens); prefer [mePose]
   final LatLng? me;
   final MePose? mePose;
   /// a straight dotted line (older screens); prefer [routes]
   final List<LatLng> line;
   final List<RouteLine> routes;
+  /// still cars around the rider (older form); prefer [nearbyCars]
   final List<CarPose> cars;
+  /// the animated cars around the rider (from a CarsAnimator)
+  final ValueListenable<List<NearbyCarFrame>>? nearbyCars;
+  /// a label above the nearest of [nearbyCars] ("4 min")
+  final String? nearbyLabel;
+  /// labels at fixed points (Flutter widgets: keep to two or three)
   final List<MapCallout> callouts;
   final List<MapOverlay> overlays;
   /// pixels covered at the top (banners) and bottom (the sheet)
   final double topInset;
   final double bottomInset;
+  /// the live sheet height; when given it replaces [bottomInset], and the screen doesn't need to
+  /// rebuild while the sheet is dragged
+  final ValueListenable<double>? sheetHeight;
   final FollowMode follow;
   final double followZoom;
   final bool showControls;
@@ -126,14 +160,23 @@ class AnbessaMap extends ConsumerWidget {
 
   MePose? get mePoseOrPoint => mePose ?? (me == null ? null : MePose(position: me!));
 
-  /// Who the camera follows, if anyone.
-  LatLng? get subject => switch (follow) {
-        FollowMode.me => mePose?.position ?? me,
-        FollowMode.driver || FollowMode.driverBearing => driverPose == null ? driver?.position : LatLng(driverPose!.lat, driverPose!.lng),
-        FollowMode.none => null,
-      };
+  /// The car as drawn now (animated, a pose, or a static car).
+  AnimatedPose? get carNow {
+    final live = driverCar?.value ?? driverPose;
+    if (live != null) return live;
+    final d = driver;
+    return d == null ? null : AnimatedPose(lat: d.position.latitude, lng: d.position.longitude, heading: d.heading ?? 0, stale: d.stale);
+  }
 
-  double get subjectHeading => driverPose?.heading ?? driver?.heading ?? 0;
+  /// Who the camera follows now, if anyone (the car when following "me" without a position).
+  LatLng? get subject {
+    LatLng? car() => carNow == null ? null : LatLng(carNow!.lat, carNow!.lng);
+    return switch (follow) {
+      FollowMode.me => mePose?.position ?? me ?? car(),
+      FollowMode.driver || FollowMode.driverBearing => car(),
+      FollowMode.none => null,
+    };
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) => ref.watch(vectorMapsProvider) ? VectorMap(spec: this) : RasterMap(spec: this);
@@ -150,24 +193,31 @@ class MapPin {
   final Alignment alignment;
 }
 
-/// The pins for a map, in drawing order. [mapRotation] gives the map's rotation in degrees
-/// (clockwise) where the pin is drawn, so headings stay true when the camera turns.
-List<MapPin> pinsFor(AnbessaMap w, double Function(BuildContext) mapRotation) {
+/// The pins for a map drawn as Flutter widgets, in drawing order. [mapRotation] gives the map's
+/// rotation in degrees (clockwise) where the pin is drawn, so headings stay true when the camera
+/// turns. With [native] false (the vector engine, which draws cars, pins and the person as
+/// native layers) only the overlays and callouts are returned. The animated car and nearby cars
+/// ([AnbessaMap.driverCar], [AnbessaMap.nearbyCars]) are never in the list: the raster engine
+/// draws them in their own listening layers.
+List<MapPin> pinsFor(AnbessaMap w, double Function(BuildContext) mapRotation, {bool native = true}) {
   final me = w.mePoseOrPoint;
-  final pose = w.driverPose;
-  final still = w.driver;
+  final pose = w.driverCar == null ? w.driverPose : null;
+  final still = w.driverCar == null ? w.driver : null;
   Widget turning(Widget Function(double rot) child) => Builder(builder: (ctx) => child(mapRotation(ctx)));
   return [
     for (final o in w.overlays) MapPin(point: o.point, size: o.size, alignment: o.alignment, child: o.child),
-    for (final car in w.cars) MapPin(point: car.position, size: const Size(26, 26), child: turning((r) => NearbyCarGlyph(heading: car.heading, mapRotation: r))),
-    if (w.pickup != null) MapPin(point: w.pickup!, size: const Size(36, 44), alignment: Alignment.bottomCenter, child: const PinMarker(tone: PinTone.pickup)),
-    if (w.dropoff != null) MapPin(point: w.dropoff!, size: const Size(36, 44), alignment: Alignment.bottomCenter, child: const PinMarker(tone: PinTone.dropoff)),
-    if (me != null) MapPin(point: me.position, size: const Size(48, 48), child: turning((r) => MeDot(heading: me.heading == null ? null : me.heading! + r))),
-    if (pose != null)
-      MapPin(point: LatLng(pose.lat, pose.lng), size: const Size(44, 44), child: turning((r) => CarMarker(heading: pose.heading, stale: pose.stale, mapRotation: r)))
-    else if (still != null)
-      MapPin(point: still.position, size: const Size(44, 44), child: turning((r) => CarMarker(heading: still.heading ?? 0, stale: still.stale, onTrip: still.onTrip, mapRotation: r))),
-    for (final m in w.callouts) MapPin(point: m.point, size: const Size(240, 34), alignment: Alignment(0, -m.offsetY / 17), child: Center(child: MapCalloutChip(callout: m))),
+    if (native) ...[
+      if (w.nearbyCars == null)
+        for (final car in w.cars) MapPin(point: car.position, size: const Size(26, 26), child: turning((r) => NearbyCarGlyph(heading: car.heading, mapRotation: r))),
+      if (w.pickup != null) MapPin(point: w.pickup!, size: const Size(36, 44), alignment: Alignment.bottomCenter, child: const PinMarker(tone: PinTone.pickup)),
+      if (w.dropoff != null) MapPin(point: w.dropoff!, size: const Size(36, 44), alignment: Alignment.bottomCenter, child: const PinMarker(tone: PinTone.dropoff)),
+      if (me != null) MapPin(point: me.position, size: const Size(48, 48), child: turning((r) => MeDot(heading: me.heading == null ? null : me.heading! + r))),
+      if (pose != null)
+        MapPin(point: LatLng(pose.lat, pose.lng), size: const Size(44, 44), child: turning((r) => CarMarker(heading: pose.heading, stale: pose.stale, mapRotation: r)))
+      else if (still != null)
+        MapPin(point: still.position, size: const Size(44, 44), child: turning((r) => CarMarker(heading: still.heading ?? 0, stale: still.stale, onTrip: still.onTrip, mapRotation: r))),
+    ],
+    for (final m in w.callouts.take(3)) MapPin(point: m.point, size: const Size(240, 34), alignment: Alignment(0, -m.offsetY / 17), child: Center(child: FadeSlideIn(key: ValueKey('callout:${m.point.latitude.toStringAsFixed(5)},${m.point.longitude.toStringAsFixed(5)}'), offset: 0.3, child: MapCalloutChip(callout: m)))),
   ];
 }
 

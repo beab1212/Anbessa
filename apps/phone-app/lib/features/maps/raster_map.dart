@@ -1,5 +1,8 @@
 // The raster engine (flutter_map): the map on the desktop and in tests. Flat or satellite; 3D
-// needs the vector engine and shows flat here.
+// needs the vector engine and shows flat here. Same AnbessaMap interface and the same
+// CameraDirector as the vector engine; markers are Flutter widgets, and the animated car and
+// nearby cars are drawn by layers that listen to their animators (no screen rebuilds). Gaps:
+// no tilt, no native layers.
 
 import 'dart:async';
 
@@ -9,13 +12,18 @@ import 'package:flutter_map_animations/flutter_map_animations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart' show LatLng;
 import 'package:ride_app_core/ride_app_core.dart';
+import '../../core/l10n/l10n.dart';
 import '../config/client_config_provider.dart';
 import 'anbessa_map.dart';
-import 'fit.dart';
+import 'callouts.dart';
 import 'map_mode.dart';
 import 'map_styles.dart';
 import 'map_tiles.dart';
 import 'route_layer.dart';
+import 'scene/camera_director.dart';
+import 'scene/map_binding.dart';
+
+LatLng _ll(GeoPoint p) => LatLng(p.lat, p.lng);
 
 class RasterMap extends ConsumerStatefulWidget {
   const RasterMap({super.key, required this.spec});
@@ -25,77 +33,40 @@ class RasterMap extends ConsumerStatefulWidget {
 }
 
 class _RasterMapState extends ConsumerState<RasterMap> with TickerProviderStateMixin {
-  late final AnimatedMapController _anim = AnimatedMapController(vsync: this, duration: AnbessaMotion.camera, curve: AnbessaMotion.emphasized);
+  late final AnimatedMapController _anim = AnimatedMapController(vsync: this, duration: AnbessaMotion.camera, curve: AnbessaMotion.emphasized, cancelPreviousAnimations: true);
   MapController get _ctrl => _anim.mapController;
-  List<LatLng> _lastFit = const [];
+  late final _RasterPort _port = _RasterPort(this);
+  late final MapBinding _binding = MapBinding(_port);
   Timer? _moveDebounce;
-  Timer? _refit;
   bool _ready = false;
-  bool _userBroke = false;
-  double _rotation = 0;
+  Size? _size;
 
   AnbessaMap get w => widget.spec;
 
   @override
+  void initState() {
+    super.initState();
+    _binding.sync(w, ready: false);
+  }
+
+  @override
   void didUpdateWidget(covariant RasterMap oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final old = oldWidget.spec;
-    if (old.follow != w.follow) _userBroke = false;
-    final insetsChanged = old.topInset != w.topInset || old.bottomInset != w.bottomInset;
-    if (w.follow == FollowMode.none || _userBroke) {
-      if (w.fit.isNotEmpty && (!sameLatLngs(w.fit, _lastFit) || insetsChanged)) {
-        _refit?.cancel();
-        _refit = Timer(insetsChanged && sameLatLngs(w.fit, _lastFit) ? const Duration(milliseconds: 200) : Duration.zero, () => _fitTo(w.fit));
-      }
-    } else {
-      _followTick();
-    }
-  }
-
-  void _followTick() {
-    if (!_ready || _userBroke) return;
-    final s = w.subject;
-    if (s == null) return;
-    final bearing = w.follow == FollowMode.driverBearing ? w.subjectHeading : 0.0;
-    // keep the car in the lower middle of the free area while navigating; centred otherwise
-    final size = context.size ?? const Size(360, 640);
-    final freeHeight = size.height - w.topInset - w.bottomInset;
-    final offsetY = w.follow == FollowMode.driverBearing ? freeHeight * 0.18 : 0.0;
-    _rotation = w.follow == FollowMode.driverBearing ? -bearing : 0;
-    // tiny moves every frame: no animation, or the camera lags the car
-    _ctrl.move(s, w.followZoom, offset: Offset(0, offsetY + (w.topInset - w.bottomInset) / 2));
-    if ((_ctrl.camera.rotation - _rotation).abs() > 0.5) _ctrl.rotate(_rotation);
-  }
-
-  void _fitTo(List<LatLng> pts, {bool animate = true}) {
-    if (!mounted || !_ready || pts.isEmpty) return;
-    _lastFit = List.of(pts);
-    final fit = fitWithInsets(pts, top: w.topInset, bottom: w.bottomInset, side: w.padding.left);
-    if (!animate || MediaQuery.disableAnimationsOf(context)) {
-      _ctrl.fitCamera(fit);
-    } else {
-      _anim.animatedFitCamera(cameraFit: fit, rotation: 0);
-    }
-  }
-
-  void _recenter() {
-    _userBroke = false;
-    w.onRecenter?.call();
-    if (w.follow != FollowMode.none) {
-      final s = w.subject;
-      if (s != null) _anim.animateTo(dest: s, zoom: w.followZoom, rotation: w.follow == FollowMode.driverBearing ? _rotation : 0);
-      return;
-    }
-    if (w.fit.isNotEmpty) _fitTo(w.fit);
-    setState(() {});
+    _binding.sync(w, ready: _ready);
   }
 
   @override
   void dispose() {
     _moveDebounce?.cancel();
-    _refit?.cancel();
+    _binding.dispose();
     _anim.dispose();
     super.dispose();
+  }
+
+  Widget _withBottom(Widget Function(double bottom) builder) {
+    final sheet = w.sheetHeight;
+    if (sheet == null) return builder(w.bottomInset);
+    return ValueListenableBuilder<double>(valueListenable: sheet, builder: (_, h, _) => builder(h));
   }
 
   @override
@@ -111,70 +82,132 @@ class _RasterMapState extends ConsumerState<RasterMap> with TickerProviderStateM
     final rotating = w.follow == FollowMode.driverBearing;
     // the controller has no camera until flutter_map has rendered once
     final rot = _ready ? _ctrl.camera.rotation : 0.0;
-    final pins = pinsFor(w, (_) => rot);
-    return Stack(
-      children: [
-        FlutterMap(
-          mapController: _ctrl,
-          options: MapOptions(
-            initialCenter: initial,
-            initialZoom: w.zoom,
-            minZoom: 9,
-            maxZoom: 19,
-            interactionOptions: InteractionOptions(flags: w.interactive ? (rotating ? InteractiveFlag.all : InteractiveFlag.all & ~InteractiveFlag.rotate) : InteractiveFlag.none),
-            onTap: w.onTap == null ? null : (_, p) => w.onTap!(p),
-            onMapEvent: (e) {
-              if (e.source == MapEventSource.dragStart || e.source == MapEventSource.multiFingerGestureStart || e.source == MapEventSource.doubleTap || e.source == MapEventSource.scrollWheel) {
-                if (w.follow != FollowMode.none && !_userBroke) {
-                  _userBroke = true;
-                  setState(() {});
-                }
-                w.onUserGesture?.call();
-              }
-              if (e is MapEventRotate || e is MapEventRotateEnd) setState(() {});
-              if (w.onMove != null && (e is MapEventMoveEnd || e is MapEventFlingAnimationEnd)) {
-                _moveDebounce?.cancel();
-                _moveDebounce = Timer(const Duration(milliseconds: 250), () => w.onMove!(_ctrl.camera.center));
-              }
-            },
-            onMapReady: () {
-              _ready = true;
-              if (w.follow != FollowMode.none && w.subject != null) {
-                _followTick();
-              } else if (w.fit.isNotEmpty) {
-                _fitTo(w.fit, animate: false);
-              }
-            },
-            backgroundColor: c.canvas,
-          ),
+    final pins = pinsFor(w, (ctx) => MapCamera.maybeOf(ctx)?.rotation ?? 0);
+    final car = w.driverCar;
+    final nearby = w.nearbyCars;
+    return LayoutBuilder(
+      builder: (context, box) {
+        _size = box.biggest;
+        return Stack(
           children: [
-            _tileLayer(context, satellite ? (url: satelliteTiles, subdomains: const <String>[], attribution: satelliteAttribution, retina: false, darken: false) : tiles),
-            if (me?.accuracy != null && me!.accuracy! > 15)
-              CircleLayer(circles: [
-                CircleMarker(point: me.position, radius: me.accuracy!, useRadiusInMeter: true, color: c.info.withValues(alpha: 0.12), borderColor: c.info.withValues(alpha: 0.35), borderStrokeWidth: 1),
-              ]),
-            if (routes.isNotEmpty) PolylineLayer(polylines: routePolylines(c, routes, onImagery: satellite)),
-            MarkerLayer(
-              rotate: true,
-              markers: [for (final p in pins) Marker(point: p.point, width: p.size.width, height: p.size.height, alignment: _markerAlignment(p.alignment), child: p.child)],
+            FlutterMap(
+              mapController: _ctrl,
+              options: MapOptions(
+                initialCenter: initial,
+                initialZoom: w.follow != FollowMode.none ? w.followZoom : w.zoom,
+                minZoom: 9,
+                maxZoom: 19,
+                interactionOptions: InteractionOptions(flags: w.interactive ? (rotating ? InteractiveFlag.all : InteractiveFlag.all & ~InteractiveFlag.rotate) : InteractiveFlag.none),
+                onTap: w.onTap == null ? null : (_, p) => w.onTap!(p),
+                onMapEvent: (e) {
+                  if (e.source == MapEventSource.dragStart || e.source == MapEventSource.multiFingerGestureStart || e.source == MapEventSource.doubleTap || e.source == MapEventSource.scrollWheel) {
+                    _binding.director.onUserGesture();
+                    w.onUserGesture?.call();
+                  }
+                  if (e is MapEventRotate || e is MapEventRotateEnd) setState(() {});
+                  if (w.onMove != null && (e is MapEventMoveEnd || e is MapEventFlingAnimationEnd)) {
+                    _moveDebounce?.cancel();
+                    _moveDebounce = Timer(const Duration(milliseconds: 250), () => w.onMove!(_ctrl.camera.center));
+                  }
+                },
+                onMapReady: () {
+                  _ready = true;
+                  _binding.director.setLook(basePitch: 0, threeD: false, reduceMotion: MediaQuery.disableAnimationsOf(context));
+                  _binding.sync(w, ready: true);
+                },
+                backgroundColor: c.canvas,
+              ),
+              children: [
+                _tileLayer(context, satellite ? (url: satelliteTiles, subdomains: const <String>[], attribution: satelliteAttribution, retina: false, darken: false) : tiles),
+                if (me?.accuracy != null && me!.accuracy! > 15)
+                  CircleLayer(circles: [
+                    CircleMarker(point: me.position, radius: me.accuracy!, useRadiusInMeter: true, color: c.info.withValues(alpha: 0.12), borderColor: c.info.withValues(alpha: 0.35), borderStrokeWidth: 1),
+                  ]),
+                if (routes.isNotEmpty) PolylineLayer(polylines: routePolylines(c, routes, onImagery: satellite)),
+                if (nearby != null)
+                  ValueListenableBuilder<List<NearbyCarFrame>>(
+                    valueListenable: nearby,
+                    builder: (context, cars, _) => MarkerLayer(
+                      rotate: true,
+                      markers: [
+                        for (final f in cars)
+                          Marker(
+                            key: ValueKey('nearby:${f.id}'),
+                            point: LatLng(f.lat, f.lng),
+                            width: 26,
+                            height: 26,
+                            child: Opacity(opacity: f.opacity.clamp(0.0, 1.0), child: Builder(builder: (ctx) => NearbyCarGlyph(heading: f.bearing, mapRotation: MapCamera.maybeOf(ctx)?.rotation ?? 0))),
+                          ),
+                        if (cars.isNotEmpty && w.nearbyLabel != null)
+                          Marker(point: LatLng(cars.first.lat, cars.first.lng), width: 240, height: 34, alignment: const Alignment(0, -1.6), child: Center(child: MapCalloutChip(callout: MapCallout(point: LatLng(cars.first.lat, cars.first.lng), label: w.nearbyLabel!, tone: Tone.amber)))),
+                      ],
+                    ),
+                  ),
+                MarkerLayer(
+                  rotate: true,
+                  markers: [for (final p in pins) Marker(point: p.point, width: p.size.width, height: p.size.height, alignment: _markerAlignment(p.alignment), child: p.child)],
+                ),
+                if (car != null)
+                  ValueListenableBuilder<AnimatedPose?>(
+                    valueListenable: car,
+                    builder: (context, p, _) => p == null
+                        ? const SizedBox.shrink()
+                        : MarkerLayer(
+                            rotate: true,
+                            markers: [
+                              Marker(
+                                point: LatLng(p.lat, p.lng),
+                                width: 44,
+                                height: 44,
+                                child: Builder(builder: (ctx) => CarMarker(heading: p.heading, stale: p.stale, mapRotation: MapCamera.maybeOf(ctx)?.rotation ?? 0)),
+                              ),
+                              if (w.driverCarLabel != null)
+                                Marker(point: LatLng(p.lat, p.lng), width: 240, height: 34, alignment: const Alignment(0, -1.9), child: Center(child: MapCalloutChip(callout: MapCallout(point: LatLng(p.lat, p.lng), label: w.driverCarLabel!, tone: Tone.amber)))),
+                            ],
+                          ),
+                  )
+                else if (w.driverCarLabel != null && w.carNow != null)
+                  MarkerLayer(markers: [
+                    Marker(point: LatLng(w.carNow!.lat, w.carNow!.lng), width: 240, height: 34, alignment: const Alignment(0, -1.9), child: Center(child: MapCalloutChip(callout: MapCallout(point: LatLng(w.carNow!.lat, w.carNow!.lng), label: w.driverCarLabel!, tone: Tone.amber)))),
+                  ]),
+              ],
             ),
+            _withBottom((bottom) => Positioned(left: 6, right: 72, bottom: bottom + 4, child: MapCredit(satellite ? satelliteAttribution : tiles.attribution))),
+            if (w.interactive)
+              _withBottom(
+                (bottom) => Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: bottom + 16,
+                  child: Center(
+                    child: ValueListenableBuilder<bool>(
+                      valueListenable: _binding.director.showRecenter,
+                      builder: (_, show, _) => RecenterPill(label: context.l10n.recenter, visible: show, onTap: _binding.recenter),
+                    ),
+                  ),
+                ),
+              ),
+            if (w.showControls && w.interactive)
+              _withBottom(
+                (bottom) => Positioned(
+                  right: 12,
+                  bottom: bottom + 12,
+                  child: ValueListenableBuilder<bool>(
+                    valueListenable: _binding.director.showRecenter,
+                    builder: (_, free, _) => MapControls(
+                      rotation: rotating ? 0 : rot,
+                      onResetNorth: _anim.animatedRotateReset,
+                      showRecenter: w.follow != FollowMode.none || w.fit.isNotEmpty || w.onRecenter != null,
+                      recenterActive: w.follow != FollowMode.none && !free,
+                      onRecenter: _binding.recenter,
+                      showModeSwitch: w.showModeSwitch,
+                    ),
+                  ),
+                ),
+              ),
           ],
-        ),
-        Positioned(left: 6, right: 72, bottom: w.bottomInset + 4, child: MapCredit(satellite ? satelliteAttribution : tiles.attribution)),
-        if (w.showControls && w.interactive)
-          Positioned(
-            right: 12,
-            bottom: w.bottomInset + 12,
-            child: MapControls(
-              rotation: rotating ? 0 : rot,
-              onResetNorth: _anim.animatedRotateReset,
-              showRecenter: w.follow != FollowMode.none || w.fit.isNotEmpty || w.onRecenter != null,
-              recenterActive: w.follow != FollowMode.none && !_userBroke,
-              onRecenter: _recenter,
-              showModeSwitch: w.showModeSwitch,
-            ),
-          ),
-      ],
+        );
+      },
     );
   }
 
@@ -195,3 +228,48 @@ class _RasterMapState extends ConsumerState<RasterMap> with TickerProviderStateM
 
 /// flutter_map's marker alignment is where the point sits relative to the widget, inverted.
 Alignment _markerAlignment(Alignment a) => Alignment(-a.x, -a.y);
+
+/// The director's hands on the flutter_map camera. flutter_map moves are cheap Dart calls, so
+/// follow moves happen on every subject change instead of chained animations.
+class _RasterPort implements CameraPort {
+  _RasterPort(this._s);
+  final _RasterMapState _s;
+
+  @override
+  Size? get viewport => _s._size;
+
+  @override
+  double get bearing => _s._ready ? -_s._ctrl.camera.rotation : 0;
+
+  @override
+  bool get followsEveryFrame => true;
+
+  Offset _offset(EdgeInsets p) => Offset((p.left - p.right) / 2, (p.top - p.bottom) / 2);
+
+  @override
+  Future<void> moveTo({required GeoPoint center, required double zoom, required double bearing, required double pitch, required EdgeInsets padding, required Duration duration}) async {
+    if (!_s._ready || !_s.mounted) return;
+    final ctrl = _s._ctrl;
+    final rotation = -bearing;
+    if ((ctrl.camera.rotation - rotation).abs() > 0.5) ctrl.rotate(rotation);
+    if (duration <= Duration.zero) {
+      ctrl.move(_ll(center), zoom, offset: _offset(padding));
+      return;
+    }
+    await _s._anim.animateTo(dest: _ll(center), zoom: zoom, offset: _offset(padding), duration: duration);
+  }
+
+  @override
+  Future<void> fit(List<GeoPoint> points, {required EdgeInsets padding, required double bearing, required double pitch, required Duration duration, double maxZoom = 17, double singleZoom = 15}) async {
+    if (!_s._ready || !_s.mounted || points.isEmpty) return;
+    final pts = [for (final p in points) _ll(p)];
+    final fit = pts.length == 1
+        ? CameraFit.bounds(bounds: LatLngBounds(pts.first, pts.first), padding: padding, maxZoom: singleZoom, minZoom: singleZoom)
+        : CameraFit.bounds(bounds: LatLngBounds.fromPoints(pts), padding: padding, maxZoom: maxZoom);
+    if (duration <= Duration.zero) {
+      _s._ctrl.fitCamera(fit);
+      return;
+    }
+    await _s._anim.animatedFitCamera(cameraFit: fit, duration: duration);
+  }
+}

@@ -16,7 +16,7 @@ import '../../../core/network/providers.dart';
 import '../../../core/router/routes.dart';
 import '../../config/client_config_provider.dart';
 import '../../maps/anbessa_map.dart';
-import '../../maps/marker_animator.dart';
+import '../../maps/route_layer.dart' show toGeoPoints;
 import 'active_trip_controller.dart';
 import 'cancel_sheet.dart';
 import 'trip_eta_controller.dart';
@@ -37,25 +37,21 @@ class _RiderTripScreenState extends ConsumerState<RiderTripScreen> with SingleTi
   DateTime _now = DateTime.now().toUtc();
   bool _busy = false;
   Object? _error;
-  double _sheetHeight = 0;
+  // the sheet height goes straight to the map (no rebuild of this screen while it's dragged)
+  final _sheetHeight = ValueNotifier<double>(0);
   RiderStage? _lastStage;
 
   @override
   void initState() {
     super.initState();
     _tick = Timer.periodic(const Duration(seconds: 1), (_) => setState(() => _now = DateTime.now().toUtc()));
-    _car.addListener(_onCar);
-  }
-
-  void _onCar() {
-    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
     _tick?.cancel();
-    _car.removeListener(_onCar);
     _car.dispose();
+    _sheetHeight.dispose();
     _confetti.dispose();
     super.dispose();
   }
@@ -125,21 +121,29 @@ class _RiderTripScreenState extends ConsumerState<RiderTripScreen> with SingleTi
     WidgetsBinding.instance.addPostFrameCallback((_) => _onStage(stage));
     final parties = t.driver == null ? null : ref.watch(tripPartiesProvider(t.id)).value;
     final tracking = t.driver != null && t.isActive;
+    // the animator glides the car on the map; this screen only rebuilds per sample (for the ETA)
     ref.listen(driverLiveProvider(t.id), (_, next) {
       final live = next.value;
       if (live != null && tracking) _car.push((lat: live.lat, lng: live.lng), heading: live.heading, speed: live.speed, at: live.at);
     });
-    final pose = tracking ? _car.pose : null;
+    final live = tracking ? ref.watch(driverLiveProvider(t.id)).value : null;
+    if (live != null && _car.pose == null) {
+      // the first sample arrived before the listener: start the animator from it
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _car.pose == null) _car.push((lat: live.lat, lng: live.lng), heading: live.heading, speed: live.speed, at: live.at);
+      });
+    }
     final pinOn = ref.watch(featureProvider(Feature.tripPin));
     final sosOn = ref.watch(featureProvider(Feature.sos));
     final pickup = LatLng(t.pickup.lat, t.pickup.lng);
     final dropoff = LatLng(t.dropoff.lat, t.dropoff.lng);
-    final carPt = pose == null ? null : LatLng(pose.lat, pose.lng);
+    final carPt = live == null ? null : LatLng(live.lat, live.lng);
+    final carStale = live != null && _car.isStale;
 
     // the car's road to its target, refreshed by the ETA controller
     final target = stage == RiderStage.inTrip ? (lat: t.dropoff.lat, lng: t.dropoff.lng) : (lat: t.pickup.lat, lng: t.pickup.lng);
-    if (pose != null && (stage == RiderStage.driverAssigned || stage == RiderStage.inTrip)) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => ref.read(tripEtaProvider(t.id).notifier).track(pose.point, target));
+    if (live != null && (stage == RiderStage.driverAssigned || stage == RiderStage.inTrip)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => ref.read(tripEtaProvider(t.id).notifier).track((lat: live.lat, lng: live.lng), target));
     }
     final eta = ref.watch(tripEtaProvider(t.id));
     final tripLine = RouteLine.fromPolyline6(t.route.polyline, kind: stage == RiderStage.driverAssigned ? RouteKind.secondary : RouteKind.primary);
@@ -150,6 +154,10 @@ class _RiderTripScreenState extends ConsumerState<RiderTripScreen> with SingleTi
       if (!tripLine.isEmpty) tripLine else if (stage != RiderStage.driverAssigned) RouteLine.straight(pickup, dropoff),
       ?carLine,
     ];
+    // the car glides along the road it is on (its road to the target, or the trip's road)
+    final carRoad = carLine != null && carLine.kind == RouteKind.primary ? carLine : (stage == RiderStage.inTrip && !tripLine.isEmpty ? tripLine : null);
+    _car.route = carRoad == null ? null : toGeoPoints(carRoad.points);
+    // fitted when the stage changes or the car's road first arrives; not as the car moves
     final fit = switch (stage) {
       RiderStage.driverAssigned => [pickup, ?carPt],
       RiderStage.driverArrived => [pickup, ?carPt],
@@ -157,6 +165,7 @@ class _RiderTripScreenState extends ConsumerState<RiderTripScreen> with SingleTi
       _ => [pickup, dropoff],
     };
     final etaSeconds = eta?.seconds ?? (carPt == null ? null : (haversineMeters(carPt.latitude, carPt.longitude, target.lat, target.lng) * 1.35 / 6.1).round());
+    final carLabel = carPt != null && etaSeconds != null && (stage == RiderStage.driverAssigned || stage == RiderStage.inTrip) ? l.etaMinutes((etaSeconds / 60).ceil().clamp(1, 99)) : null;
     final top = MediaQuery.paddingOf(context).top;
 
     return Scaffold(
@@ -164,16 +173,14 @@ class _RiderTripScreenState extends ConsumerState<RiderTripScreen> with SingleTi
         children: [
           AnbessaMap(
             fit: fit,
+            fitKey: (stage, carLine != null),
             pickup: pickup,
             dropoff: dropoff,
-            driverPose: pose,
+            driverCar: tracking ? _car : null,
+            driverCarLabel: carLabel,
             routes: routes,
             topInset: top + 64,
-            bottomInset: _sheetHeight,
-            callouts: [
-              if (carPt != null && etaSeconds != null && (stage == RiderStage.driverAssigned || stage == RiderStage.inTrip))
-                MapCallout(point: carPt, label: l.etaMinutes((etaSeconds / 60).ceil().clamp(1, 99)), tone: Tone.amber, icon: Icons.schedule),
-            ],
+            sheetHeight: _sheetHeight,
             overlays: [
               if (stage == RiderStage.finding) MapOverlay(point: pickup, size: const Size(160, 160), child: RadarPulse(color: c.accent, size: 160)),
             ],
@@ -210,9 +217,7 @@ class _RiderTripScreenState extends ConsumerState<RiderTripScreen> with SingleTi
           Align(alignment: Alignment.topCenter, child: ConfettiWidget(confettiController: _confetti, blastDirectionality: BlastDirectionality.explosive, numberOfParticles: 24, colors: [c.accent, c.success, c.info])),
           AppSheet(
             snaps: const [0.42, 0.8],
-            onHeightChanged: (h) {
-              if ((h - _sheetHeight).abs() > 2) setState(() => _sheetHeight = h);
-            },
+            onHeightChanged: (h) => _sheetHeight.value = h,
             padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
             builder: (context, _) => AnimatedSwitcherX(
               child: KeyedSubtree(
@@ -220,7 +225,7 @@ class _RiderTripScreenState extends ConsumerState<RiderTripScreen> with SingleTi
                 child: switch (stage) {
                   RiderStage.finding => _Finding(trip: t, now: _now, busy: _busy, error: _error, onCancel: () => _cancel(t)),
                   RiderStage.driverAssigned || RiderStage.driverArrived => _DriverCard(
-                      trip: t, parties: parties, arrived: stage == RiderStage.driverArrived, stale: pose?.stale ?? false, hasPosition: pose != null, etaSeconds: etaSeconds, now: _now, pinOn: pinOn, busy: _busy, error: _error, onCancel: () => _cancel(t)),
+                      trip: t, parties: parties, arrived: stage == RiderStage.driverArrived, stale: carStale, hasPosition: live != null, etaSeconds: etaSeconds, now: _now, pinOn: pinOn, busy: _busy, error: _error, onCancel: () => _cancel(t)),
                   RiderStage.inTrip => _InTrip(trip: t, parties: parties, etaSeconds: etaSeconds),
                   RiderStage.completed => _Ended(trip: t, completed: true),
                   RiderStage.cancelled => _Ended(trip: t, completed: false),

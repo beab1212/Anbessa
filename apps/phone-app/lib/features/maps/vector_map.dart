@@ -1,22 +1,33 @@
 // The vector engine (MapLibre): the map on Android and iOS. Flat, 3D (tilted, buildings extruded)
-// or satellite, following the theme. Pins are Flutter widgets placed over the map (the same ones
-// the raster engine draws); routes are native line layers.
+// or satellite, following the theme.
+//
+// Everything that moves is native: a MapScene owns GeoJSON sources and symbol/line layers for the
+// routes, pins, the person, the followed car and the cars nearby, and updates only their data.
+// The camera is driven by a CameraDirector through a MapBinding. The only Flutter widgets over
+// the map are the screen's overlays (the search pulse) and a few callouts, hidden while the
+// person drags the map (WidgetLayer positions trail the native camera).
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart' show LatLng;
 import 'package:maplibre/maplibre.dart' as ml;
 import 'package:ride_app_core/ride_app_core.dart';
+import '../../core/l10n/l10n.dart';
 import '../config/client_config_provider.dart';
 import 'anbessa_map.dart';
-import 'fit.dart';
 import 'map_mode.dart';
 import 'map_styles.dart';
-import 'route_layer.dart';
+import 'scene/camera_director.dart';
+import 'scene/map_binding.dart';
+import 'scene/map_scene.dart';
+import 'scene/scene_images.dart';
+import 'scene/scene_style.dart';
 
 ml.Geographic _geo(LatLng p) => ml.Geographic(lon: p.longitude, lat: p.latitude);
+ml.Geographic _geoP(GeoPoint p) => ml.Geographic(lon: p.lng, lat: p.lat);
 LatLng _latLng(ml.Geographic g) => LatLng(g.lat, g.lon);
 
 /// The camera never zooms closer than this when fitting points (two pins in the same building).
@@ -31,155 +42,110 @@ class VectorMap extends ConsumerStatefulWidget {
 
 class _VectorMapState extends ConsumerState<VectorMap> {
   ml.MapController? _ctrl;
-  ml.StyleController? _styleCtrl;
+  final MapScene _scene = MapScene();
+  late final _VectorPort _port = _VectorPort(this);
+  late final MapBinding _binding = MapBinding(_port);
   /// the style the map has (or is loading); a different one is set after the frame
   String? _style;
   MapMode? _mode;
-  bool _userBroke = false;
+  bool? _dark;
+  bool _styleLoaded = false;
   bool _gesture = false;
-  List<LatLng> _lastFit = const [];
-  Timer? _refit;
-  DateTime _lastFollow = DateTime(0);
-  // The plugin compares layers by identity, so they're rebuilt only when the routes change.
-  List<ml.Layer> _layers = const [];
-  String? _layersKey;
+  Size? _size;
+  ValueListenable<AnimatedPose?>? _carL;
+  ValueListenable<List<NearbyCarFrame>>? _carsL;
 
   AnbessaMap get w => widget.spec;
 
-  Duration get _cameraTime => MediaQuery.disableAnimationsOf(context) ? Duration.zero : AnbessaMotion.camera;
-
-  // ── camera ──────────────────────────────────────────────────────────────────
-
-  Future<void> _fitTo(List<LatLng> pts) async {
-    final c = _ctrl;
-    if (c == null || pts.isEmpty || !mounted) return;
-    _lastFit = List.of(pts);
-    final pad = EdgeInsets.fromLTRB(w.padding.left, w.topInset + 48, w.padding.right, w.bottomInset + 32);
-    final pitch = pitchFor(_mode ?? MapMode.flat);
-    if (pts.length == 1) {
-      await c.animateCamera(center: _geo(pts.first), zoom: 15, bearing: 0, pitch: pitch, padding: pad, nativeDuration: _cameraTime);
-      return;
-    }
-    await c.fitBounds(bounds: ml.LngLatBounds.fromPoints(pts.map(_geo).toList()), bearing: 0, pitch: pitch, padding: pad, nativeDuration: _cameraTime);
-    if (!mounted) return;
-    final cam = c.camera;
-    if (cam != null && cam.zoom > _maxFitZoom) await c.animateCamera(zoom: _maxFitZoom, padding: pad, nativeDuration: _cameraTime);
+  @override
+  void initState() {
+    super.initState();
+    _syncContent();
+    _binding.sync(w, ready: false);
   }
-
-  void _followTick({bool force = false}) {
-    final c = _ctrl;
-    final s = w.subject;
-    if (c == null || s == null || _userBroke || !mounted) return;
-    // the car's pose changes every frame; the native camera is moved ~12 times a second
-    final now = DateTime.now();
-    if (!force && now.difference(_lastFollow) < const Duration(milliseconds: 80)) return;
-    _lastFollow = now;
-    final nav = w.follow == FollowMode.driverBearing;
-    final size = context.size ?? const Size(360, 640);
-    final free = size.height - w.topInset - w.bottomInset;
-    // navigating: the car sits in the lower part of the free area, the road ahead above it
-    c.moveCamera(
-      center: _geo(s),
-      zoom: w.followZoom,
-      bearing: nav ? w.subjectHeading : 0,
-      pitch: _mode == MapMode.threeD ? (nav ? 60 : pitchFor(MapMode.threeD)) : 0,
-      padding: EdgeInsets.only(top: w.topInset + (nav ? free * 0.36 : 0), bottom: w.bottomInset),
-    );
-  }
-
-  void _recenter() {
-    _userBroke = false;
-    w.onRecenter?.call();
-    if (w.follow != FollowMode.none) {
-      _followTick(force: true);
-    } else if (w.fit.isNotEmpty) {
-      _fitTo(w.fit);
-    }
-    setState(() {});
-  }
-
-  void _resetNorth() => _ctrl?.animateCamera(bearing: 0, nativeDuration: _cameraTime);
 
   @override
   void didUpdateWidget(covariant VectorMap oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final old = oldWidget.spec;
-    if (old.follow != w.follow) _userBroke = false;
-    final insetsChanged = old.topInset != w.topInset || old.bottomInset != w.bottomInset;
-    if (w.follow == FollowMode.none || _userBroke) {
-      if (w.fit.isNotEmpty && (!sameLatLngs(w.fit, _lastFit) || insetsChanged)) {
-        _refit?.cancel();
-        _refit = Timer(insetsChanged && sameLatLngs(w.fit, _lastFit) ? const Duration(milliseconds: 200) : Duration.zero, () => _fitTo(w.fit));
-      }
-    } else {
-      _followTick();
+    _syncContent();
+    _binding.sync(w, ready: _styleLoaded);
+  }
+
+  // ── content → scene ─────────────────────────────────────────────────────────
+
+  void _syncContent() {
+    _scene.setRoutes(w.allRoutes);
+    _scene.setPins(pickup: w.pickup, dropoff: w.dropoff);
+    _scene.setMe(w.mePoseOrPoint);
+    if (!identical(_carL, w.driverCar)) {
+      _carL?.removeListener(_onCar);
+      _carL = w.driverCar;
+      _carL?.addListener(_onCar);
     }
+    _scene.setDriverCar(w.carNow);
+    _scene.setDriverLabel(w.carNow == null ? null : w.driverCarLabel);
+    if (!identical(_carsL, w.nearbyCars)) {
+      _carsL?.removeListener(_onCars);
+      _carsL = w.nearbyCars;
+      _carsL?.addListener(_onCars);
+    }
+    final frames = _carsL?.value ?? [for (final (i, c) in w.cars.indexed) NearbyCarFrame(id: i, lat: c.position.latitude, lng: c.position.longitude, bearing: c.heading ?? 0)];
+    _scene.setNearbyCars(frames);
+    _scene.setNearbyLabel(frames.isEmpty ? null : w.nearbyLabel);
+  }
+
+  void _onCar() {
+    final p = _carL?.value;
+    _scene.setDriverCar(p);
+    if (p == null) _scene.setDriverLabel(null);
+  }
+
+  void _onCars() {
+    final frames = _carsL?.value ?? const <NearbyCarFrame>[];
+    _scene.setNearbyCars(frames);
+    _scene.setNearbyLabel(frames.isEmpty ? null : w.nearbyLabel);
   }
 
   // ── style: base map, 3D buildings, mode changes ─────────────────────────────
 
-  void _placeCamera() {
-    if (w.follow != FollowMode.none && w.subject != null) {
-      _followTick(force: true);
-    } else if (w.fit.isNotEmpty) {
-      _fitTo(w.fit);
-    }
+  SceneLook _look(MapMode mode) => SceneLook(
+        colors: context.colors,
+        imagery: mode == MapMode.satellite,
+        buildings: mode == MapMode.threeD,
+        imageScale: sceneImageScale(MediaQuery.devicePixelRatioOf(context)),
+      );
+
+  void _updateDirectorLook() {
+    final mode = _mode ?? MapMode.flat;
+    _binding.director.setLook(basePitch: pitchFor(mode), threeD: mode == MapMode.threeD, reduceMotion: MediaQuery.disableAnimationsOf(context));
   }
 
   void _onStyleLoaded(ml.StyleController style) {
-    final first = _styleCtrl == null;
-    _styleCtrl = style;
-    if (_mode == MapMode.threeD) _addBuildings();
-    if (first) _placeCamera();
-  }
-
-  Future<void> _addBuildings() async {
-    final style = _styleCtrl;
-    if (style == null || !mounted) return;
-    final layer = ml.FillExtrusionStyleLayer(
-      id: buildingsLayerId,
-      sourceId: buildingsSourceId,
-      sourceLayerId: 'building',
-      minZoom: 14,
-      paint: buildingsPaint(context.colors),
-    );
-    try {
-      // under the route lines, so the route stays visible between buildings
-      await style.addLayer(layer, belowLayerId: _layers.isEmpty ? null : _layers.first is ml.PolylineLayer ? 'maplibre-layer-0' : null);
-    } catch (_) {
-      try {
-        await style.addLayer(layer);
-      } catch (_) {
-        // a style without OpenMapTiles buildings (a custom MAP_STYLE_URL): 3D is the tilt alone
-      }
-    }
-  }
-
-  Future<void> _removeBuildings() async {
-    try {
-      await _styleCtrl?.removeLayer(buildingsLayerId);
-    } catch (_) {}
+    if (!mounted) return;
+    final first = !_styleLoaded;
+    _styleLoaded = true;
+    unawaited(_scene.attach(style, _look(_mode ?? MapMode.flat)));
+    _updateDirectorLook();
+    if (first) _binding.sync(w, ready: true);
   }
 
   /// Called after a frame when the mode or the theme asks for something else.
-  void _applyLook(MapMode mode, String style) {
+  void _applyLook(MapMode mode, String style, bool dark) {
     final c = _ctrl;
     if (c == null || !mounted) return;
     final previous = _mode;
+    final themeChanged = _dark != null && _dark != dark;
     _mode = mode;
-    if (style != _style) {
+    _dark = dark;
+    if (style != _style || themeChanged) {
+      // a new style drops every source and layer; the scene rebuilds them when it has loaded
       _style = style;
-      _styleCtrl = null; // buildings, if any, are added again when it has loaded
+      _scene.detach();
       c.setStyle(style);
     } else if (previous != mode) {
-      if (mode == MapMode.threeD) {
-        _addBuildings();
-      } else if (previous == MapMode.threeD) {
-        _removeBuildings();
-      }
+      unawaited(_scene.setBuildings(mode == MapMode.threeD));
     }
-    if (previous != mode && w.follow == FollowMode.none) c.animateCamera(pitch: pitchFor(mode), nativeDuration: _cameraTime);
-    if (previous != mode && w.follow != FollowMode.none) _followTick(force: true);
+    _updateDirectorLook();
   }
 
   // ── events ──────────────────────────────────────────────────────────────────
@@ -187,15 +153,12 @@ class _VectorMapState extends ConsumerState<VectorMap> {
   void _onEvent(ml.MapEvent e) {
     switch (e) {
       case ml.MapEventStartMoveCamera(:final reason) when reason == ml.CameraChangeReason.apiGesture:
-        _gesture = true;
-        if (w.follow != FollowMode.none && !_userBroke) {
-          _userBroke = true;
-          setState(() {});
-        }
+        if (!_gesture) setState(() => _gesture = true);
+        _binding.director.onUserGesture();
         w.onUserGesture?.call();
       case ml.MapEventCameraIdle():
         if (_gesture) {
-          _gesture = false;
+          setState(() => _gesture = false);
           final cam = _ctrl?.camera;
           if (cam != null) w.onMove?.call(_latLng(cam.center));
         }
@@ -206,32 +169,21 @@ class _VectorMapState extends ConsumerState<VectorMap> {
     }
   }
 
-  // ── layers ──────────────────────────────────────────────────────────────────
-
-  List<ml.Layer> _routeLayers(AnbessaColors c, List<RouteLine> routes, bool imagery) {
-    final key = '${c.isDark}|$imagery|${routes.where((r) => !r.isEmpty).map((r) => '${r.kind.index}:${r.points.length}:${r.points.first.latitude},${r.points.first.longitude}:${r.points.last.latitude},${r.points.last.longitude}').join(';')}';
-    if (key == _layersKey) return _layers;
-    _layersKey = key;
-    final out = <ml.Layer>[];
-    for (final r in routes) {
-      if (r.isEmpty) continue;
-      final s = routeStroke(c, r.kind, onImagery: imagery);
-      final line = [ml.Feature(geometry: ml.LineString.from(r.points.map(_geo)))];
-      if (s.casing != null) out.add(ml.PolylineLayer(polylines: line, color: s.casing!, width: s.casingWidth.round()));
-      out.add(ml.PolylineLayer(
-        polylines: line,
-        color: s.color,
-        width: s.width.round(),
-        dashArray: s.dash == null ? null : [for (final d in s.dash!) (d < 1 ? 1 : d.round())],
-      ));
-    }
-    return _layers = out;
-  }
+  void _resetNorth() => _ctrl?.animateCamera(bearing: 0, nativeDuration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : AnbessaMotion.camera).catchError((Object _) {});
 
   @override
   void dispose() {
-    _refit?.cancel();
+    _carL?.removeListener(_onCar);
+    _carsL?.removeListener(_onCars);
+    _binding.dispose();
+    _scene.dispose();
     super.dispose();
+  }
+
+  Widget _withBottom(Widget Function(double bottom) builder) {
+    final sheet = w.sheetHeight;
+    if (sheet == null) return builder(w.bottomInset);
+    return ValueListenableBuilder<double>(valueListenable: sheet, builder: (_, h, _) => builder(h));
   }
 
   @override
@@ -243,50 +195,130 @@ class _VectorMapState extends ConsumerState<VectorMap> {
     if (_ctrl == null) {
       _style ??= style;
       _mode ??= mode;
-    } else if (style != _style || mode != _mode) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _applyLook(mode, style));
+      _dark ??= c.isDark;
+    } else if (style != _style || mode != _mode || c.isDark != _dark) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _applyLook(mode, style, c.isDark));
     }
     final initial = w.center ?? w.subject ?? (w.fit.isNotEmpty ? w.fit.first : LatLng(city.bbox.centerLat, city.bbox.centerLng));
-    final satellite = mode == MapMode.satellite;
-    final layers = _routeLayers(c, w.allRoutes, satellite);
     final nav = w.follow == FollowMode.driverBearing;
     double bearingOf(BuildContext ctx) => ml.MapCamera.maybeOf(ctx)?.bearing ?? 0;
-    final pins = pinsFor(w, (ctx) => -bearingOf(ctx));
-    return ml.MapLibreMap(
-      options: ml.MapOptions(
-        initStyle: _style!,
-        initCenter: _geo(initial),
-        initZoom: w.zoom,
-        initPitch: pitchFor(_mode!),
-        minZoom: 3,
-        maxZoom: 19,
-        maxPitch: 60,
-        gestures: w.interactive ? const ml.MapGestures.all() : const ml.MapGestures.none(),
-        androidForegroundLoadColor: c.canvas,
-      ),
-      onMapCreated: (ctrl) => _ctrl = ctrl,
-      onStyleLoaded: _onStyleLoaded,
-      onEvent: _onEvent,
-      layers: layers,
-      children: [
-        ml.WidgetLayer(markers: [for (final p in pins) ml.Marker(point: _geo(p.point), size: p.size, alignment: p.alignment, child: p.child)]),
-        Positioned(left: 6, right: 72, bottom: w.bottomInset + 4, child: MapCredit(vectorAttributionFor(mode))),
-        if (w.showControls && w.interactive)
-          Positioned(
-            right: 12,
-            bottom: w.bottomInset + 12,
-            child: Builder(
-              builder: (ctx) => MapControls(
-                rotation: nav ? 0 : -bearingOf(ctx),
-                onResetNorth: _resetNorth,
-                showRecenter: w.follow != FollowMode.none || w.fit.isNotEmpty || w.onRecenter != null,
-                recenterActive: w.follow != FollowMode.none && !_userBroke,
-                onRecenter: _recenter,
-                showModeSwitch: w.showModeSwitch,
-              ),
-            ),
+    final pins = pinsFor(w, (ctx) => -bearingOf(ctx), native: false);
+    final overlays = pins.take(w.overlays.length).toList();
+    final callouts = pins.skip(w.overlays.length).toList();
+    ml.Marker marker(MapPin p) => ml.Marker(point: _geo(p.point), size: p.size, alignment: p.alignment, child: p.child);
+    return LayoutBuilder(
+      builder: (context, box) {
+        _size = box.biggest;
+        return ml.MapLibreMap(
+          options: ml.MapOptions(
+            initStyle: _style!,
+            initCenter: _geo(initial),
+            initZoom: w.follow != FollowMode.none ? w.followZoom : w.zoom,
+            initPitch: pitchFor(_mode!),
+            minZoom: 3,
+            maxZoom: 19,
+            maxPitch: 60,
+            gestures: w.interactive ? const ml.MapGestures.all() : const ml.MapGestures.none(),
+            androidForegroundLoadColor: c.canvas,
           ),
-      ],
+          onMapCreated: (ctrl) => _ctrl = ctrl,
+          onStyleLoaded: _onStyleLoaded,
+          onEvent: _onEvent,
+          children: [
+            if (overlays.isNotEmpty) ml.WidgetLayer(markers: [for (final p in overlays) marker(p)]),
+            if (callouts.isNotEmpty)
+              AnimatedOpacity(
+                opacity: _gesture ? 0 : 1,
+                duration: AnbessaMotion.fast,
+                child: ml.WidgetLayer(markers: [for (final p in callouts) marker(p)]),
+              ),
+            _withBottom(
+              (bottom) => Positioned(left: 6, right: 72, bottom: bottom + 4, child: MapCredit(vectorAttributionFor(mode))),
+            ),
+            if (w.interactive)
+              _withBottom(
+                (bottom) => Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: bottom + 16,
+                  child: Center(
+                    child: ValueListenableBuilder<bool>(
+                      valueListenable: _binding.director.showRecenter,
+                      builder: (_, show, _) => RecenterPill(label: context.l10n.recenter, visible: show, onTap: _binding.recenter),
+                    ),
+                  ),
+                ),
+              ),
+            if (w.showControls && w.interactive)
+              _withBottom(
+                (bottom) => Positioned(
+                  right: 12,
+                  bottom: bottom + 12,
+                  child: Builder(
+                    builder: (ctx) => ValueListenableBuilder<bool>(
+                      valueListenable: _binding.director.showRecenter,
+                      builder: (_, free, _) => MapControls(
+                        rotation: nav ? 0 : -bearingOf(ctx),
+                        onResetNorth: _resetNorth,
+                        showRecenter: w.follow != FollowMode.none || w.fit.isNotEmpty || w.onRecenter != null,
+                        recenterActive: w.follow != FollowMode.none && !free,
+                        onRecenter: _binding.recenter,
+                        showModeSwitch: w.showModeSwitch,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// The director's hands on the MapLibre camera.
+class _VectorPort implements CameraPort {
+  _VectorPort(this._s);
+  final _VectorMapState _s;
+
+  @override
+  Size? get viewport => _s._size;
+
+  @override
+  double get bearing => _s._ctrl?.camera?.bearing ?? 0;
+
+  @override
+  bool get followsEveryFrame => false;
+
+  @override
+  Future<void> moveTo({required GeoPoint center, required double zoom, required double bearing, required double pitch, required EdgeInsets padding, required Duration duration}) async {
+    final c = _s._ctrl;
+    if (c == null || !_s.mounted) return;
+    if (duration <= Duration.zero) {
+      await c.moveCamera(center: _geoP(center), zoom: zoom, bearing: bearing, pitch: pitch, padding: padding);
+    } else {
+      await c.animateCamera(center: _geoP(center), zoom: zoom, bearing: bearing, pitch: pitch, padding: padding, nativeDuration: duration);
+    }
+  }
+
+  @override
+  Future<void> fit(List<GeoPoint> points, {required EdgeInsets padding, required double bearing, required double pitch, required Duration duration, double maxZoom = _maxFitZoom, double singleZoom = 15}) async {
+    final c = _s._ctrl;
+    if (c == null || !_s.mounted || points.isEmpty) return;
+    final vp = viewport;
+    // close points: centre at the zoom cap in one move (fitBounds would zoom in past it first)
+    final z = points.length == 1 ? double.infinity : (vp == null ? 0.0 : fitZoomFor(points, vp, padding));
+    if (z > maxZoom) {
+      final target = points.length == 1 ? points.first : boundsCenter(points);
+      await moveTo(center: target, zoom: points.length == 1 ? singleZoom : maxZoom, bearing: bearing, pitch: pitch, padding: padding, duration: duration);
+      return;
+    }
+    await c.fitBounds(
+      bounds: ml.LngLatBounds.fromPoints([for (final p in points) _geoP(p)]),
+      bearing: bearing,
+      pitch: pitch,
+      padding: padding,
+      nativeDuration: duration <= Duration.zero ? const Duration(milliseconds: 1) : duration,
     );
   }
 }
