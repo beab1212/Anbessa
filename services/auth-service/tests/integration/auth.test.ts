@@ -79,6 +79,20 @@ describe("phone sign-in and tokens", () => {
     expect(claimsOf(await u.accessToken()).roles).toEqual([{ r: "RIDER" }]);
   });
 
+  it("a profile photo is a small JPEG data URL; anything else is refused", async () => {
+    const u = new AppUser(h, phone());
+    const { user } = await u.signIn();
+    const small = `data:image/jpeg;base64,${"/9j/4AAQ".repeat(64)}`;
+    expect((await u.call("POST", "/api/auth/update-user", { image: small })).statusCode).toBe(200);
+    expect((await h.c.db.user.findUniqueOrThrow({ where: { id: user.id } })).image).toBe(small);
+    expect((await u.call("POST", "/api/auth/update-user", { image: "https://example.com/me.png" })).statusCode).toBeGreaterThanOrEqual(400);
+    expect((await u.call("POST", "/api/auth/update-user", { image: `data:image/jpeg;base64,${"A".repeat(60 * 1024)}` })).statusCode).toBeGreaterThanOrEqual(400);
+    expect((await h.c.db.user.findUniqueOrThrow({ where: { id: user.id } })).image).toBe(small);
+    // other services see it (trip-service shows it to the other side of a trip)
+    const internal = await h.app.inject({ method: "GET", url: `/internal/users/${user.id}`, headers: { authorization: `Bearer ${h.c.config.INTERNAL_SERVICE_TOKEN}` } });
+    expect(internal.json()).toMatchObject({ id: user.id, image: small });
+  });
+
   it("an app access token is rejected by staff APIs (audience)", async () => {
     const u = new AppUser(h, phone());
     await u.signIn();

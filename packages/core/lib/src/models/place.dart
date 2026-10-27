@@ -47,3 +47,46 @@ const Map<String, List<Place>> commonPlaces = {
     Place(name: 'Haile Resort', label: 'Lake side', lat: 7.0616, lng: 38.4537),
   ],
 };
+
+enum PlaceLabel { home, work, other, unknown }
+
+/// A rider's saved place (GET /api/trips/places).
+@immutable
+class SavedPlace {
+  const SavedPlace({required this.id, required this.label, required this.name, this.address, required this.lat, required this.lng});
+  final String id;
+  final PlaceLabel label;
+  final String name;
+  final String? address;
+  final double lat;
+  final double lng;
+  factory SavedPlace.fromJson(Json j) => SavedPlace(
+        id: str(j, 'id'), label: PlaceLabel.values.where((e) => e.name == (strOrNull(j, 'label') ?? '').toLowerCase()).firstOrNull ?? PlaceLabel.unknown, name: str(j, 'name'), address: strOrNull(j, 'address'),
+        lat: readDouble(j, 'lat'), lng: readDouble(j, 'lng'),
+      );
+  Place get place => Place(name: name, label: address, lat: lat, lng: lng);
+}
+
+/// GET /api/locations/nearby: anonymous cars around a point.
+@immutable
+class NearbyCar {
+  const NearbyCar({required this.lat, required this.lng, this.heading});
+  final double lat;
+  final double lng;
+  final double? heading;
+  factory NearbyCar.fromJson(Json j) => NearbyCar(lat: readDouble(j, 'lat'), lng: readDouble(j, 'lng'), heading: doubleOrNull(j, 'heading'));
+}
+
+@immutable
+class NearbyCars {
+  const NearbyCars({required this.cars, this.etaSeconds, required this.driversNearby, required this.approximate});
+  final List<NearbyCar> cars;
+  final int? etaSeconds;
+  final int driversNearby;
+  final bool approximate;
+  factory NearbyCars.fromJson(Json j) => NearbyCars(
+        cars: asJsonList(j['cars']).map(NearbyCar.fromJson).toList(growable: false), etaSeconds: intOrNull(j, 'etaSeconds'),
+        driversNearby: readInt(j, 'driversNearby', 0), approximate: readBool(j, 'approximate'),
+      );
+  static const none = NearbyCars(cars: [], driversNearby: 0, approximate: false);
+}

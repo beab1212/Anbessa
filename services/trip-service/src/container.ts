@@ -10,6 +10,8 @@ import { socketEmitter, type Realtime } from "./lib/realtime.js";
 import { createMatcher } from "./matching/matcher.js";
 import { builtinQuotes, pricingQuotes, type QuoteProvider } from "./quotes.js";
 import { createParties } from "./trips/parties.js";
+import { createPlaces } from "./trips/places.js";
+import { createShares } from "./trips/share.js";
 import { createTripService } from "./trips/service.js";
 import { createSettingsClient, fetchSettingsSnapshotFrom, type SettingsReader } from "@ride-app/shared-settings";
 
@@ -33,11 +35,14 @@ export function createContainer(config: Config, logger: Logger, opts: ContainerO
   const location = opts.location ?? locationClient(config.LOCATION_INTERNAL_URL, config.INTERNAL_SERVICE_TOKEN);
   const mapping = opts.mapping ?? mappingClient(config.MAPPING_INTERNAL_URL, config.INTERNAL_SERVICE_TOKEN);
   const realtime = opts.realtime ?? socketEmitter(redis);
+  const places = createPlaces(db);
   const parties = createParties({
     redis, logger,
     client: opts.parties ?? partiesClient(config.AUTH_INTERNAL_URL, config.FLEET_INTERNAL_URL, config.INTERNAL_SERVICE_TOKEN),
+    ratingOf: (userId) => trips.ratingOfUser(userId),
   });
   const now = opts.now ?? (() => new Date());
+  const shares = createShares({ db, parties, location, baseUrl: config.SHARE_BASE_URL, now });
 
   // live settings; this service's env values are the defaults until an admin changes them
   const settingsClient = opts.settings ? undefined : createSettingsClient({
@@ -84,7 +89,7 @@ export function createContainer(config: Config, logger: Logger, opts: ContainerO
     });
 
   return {
-    config, db, redis, trips, parties, matcher, devQuotes, verifyAccessToken, settings, settingsClient,
+    config, db, redis, trips, parties, places, shares, matcher, devQuotes, verifyAccessToken, settings, settingsClient,
     internalToken: config.INTERNAL_SERVICE_TOKEN,
     async close() {
       matcher.stop();

@@ -1,6 +1,6 @@
-// The driver's home (workflow 04): offline → pick a car and go online; online → the map with
-// their own position, ping health, and the offer sheet when a trip comes in. A balance banner
-// says when cash trips are paused or driving is blocked.
+// The driver's home (workflow 04): the map following their car, health chips, the balance
+// banner, a sheet with today's numbers and the car, and one slide to go online or offline. A
+// trip offer slides in over it, with its pickup and drop-off drawn on the map.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,13 +11,17 @@ import '../../../core/config/env.dart';
 import '../../../core/l10n/l10n.dart';
 import '../../../core/location/location_source.dart';
 import '../../../core/push/local_notifications.dart';
+import '../../../core/realtime/realtime_hub.dart';
 import '../../../core/router/routes.dart';
 import '../../../core/state.dart';
 import '../../maps/anbessa_map.dart';
+import '../../shell/shells.dart';
 import '../earnings/earnings_controller.dart';
+import '../earnings/earnings_summary_controller.dart';
 import '../offers/offer_controller.dart';
 import '../offers/offer_sheet.dart';
 import 'shift_controller.dart';
+import 'vehicle_picker_sheet.dart';
 
 class DriverHomeScreen extends ConsumerStatefulWidget {
   const DriverHomeScreen({super.key});
@@ -27,6 +31,9 @@ class DriverHomeScreen extends ConsumerStatefulWidget {
 
 class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> {
   String? _vehicleId;
+  double _sheetHeight = 0;
+  bool _following = true;
+  bool _devOpen = false;
 
   @override
   Widget build(BuildContext context) {
@@ -37,65 +44,135 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> {
     final offer = ref.watch(offerProvider);
     final balance = ref.watch(balanceProvider).value;
     final me = ref.watch(lastPositionProvider);
+    final rt = ref.watch(realtimeStateProvider).value ?? RealtimeState.offline;
+    final bannerH = ref.watch(bannerHeightProvider);
+    final today = ref.watch(earningsSummaryProvider('today')).value;
     final vehicles = ref.watch(drivableVehiclesProvider).value ?? home.value?.allVehicles ?? const <Vehicle>[];
     final chosenId = _vehicleId ?? ref.read(shiftProvider.notifier).lastVehicleId;
     final chosen = vehicles.where((v) => v.id == chosenId).firstOrNull ?? vehicles.where((v) => v.canDrive ?? true).firstOrNull;
+    final o = offer.offer;
+    final top = MediaQuery.paddingOf(context).top + bannerH;
+    final balanceBanner = balance != null && balance.state != BalanceState.ok && balance.state != BalanceState.unknown;
 
     return Scaffold(
       body: Stack(
         children: [
           AnbessaMap(
-            center: me == null ? null : LatLng(me.lat, me.lng),
-            zoom: 15,
-            driver: me == null ? null : DriverMarkerData(position: LatLng(me.lat, me.lng), heading: me.heading, stale: false, onTrip: false),
+            driverPose: me == null ? null : AnimatedPose(lat: me.lat, lng: me.lng, heading: me.heading ?? 0, stale: false),
+            follow: _following && o == null ? FollowMode.me : FollowMode.none,
+            followZoom: 15,
+            fit: o == null ? const [] : [if (me != null) LatLng(me.lat, me.lng), LatLng(o.pickup.lat, o.pickup.lng), LatLng(o.dropoff.lat, o.dropoff.lng)],
+            pickup: o == null ? null : LatLng(o.pickup.lat, o.pickup.lng),
+            dropoff: o == null ? null : LatLng(o.dropoff.lat, o.dropoff.lng),
+            routes: [
+              if (o != null) ...[
+                if (me != null) RouteLine.straight(LatLng(me.lat, me.lng), LatLng(o.pickup.lat, o.pickup.lng)),
+                ...() {
+                  final r = ref.watch(offerRouteProvider(o)).value;
+                  return [if (r != null && r.polyline6.isNotEmpty) RouteLine.fromPolyline6(r.polyline6) else RouteLine(const [], kind: RouteKind.primary)];
+                }(),
+              ],
+            ],
+            onUserGesture: () => setState(() => _following = false),
+            topInset: top + 56,
+            bottomInset: o == null ? _sheetHeight : 320,
           ),
-          SafeArea(
+          // status and health
+          Positioned(
+            top: top + 8,
+            left: 12,
+            right: 12,
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                  child: Row(
-                    children: [
-                      StatusPill(shift.online ? l.online : l.youAreOffline, tone: shift.online ? Tone.green : Tone.grey, pulse: shift.online),
-                      const Spacer(),
-                      if (shift.online)
-                        Text(shift.gpsPoor ? l.gpsPoor : l.pingsOk, style: TextStyle(color: shift.gpsPoor ? c.danger : c.success, fontSize: 12, fontWeight: FontWeight.w600, shadows: const [Shadow(color: Colors.white, blurRadius: 8)])),
-                    ],
-                  ),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    MapChip(
+                      icon: shift.online ? null : Icons.power_settings_new,
+                      label: shift.online ? l.online : l.youAreOffline,
+                      tone: shift.online ? c.success : c.muted,
+                      pulse: shift.online,
+                    ),
+                    const SizedBox(width: 8),
+                    // health chips wrap onto a second line at large text sizes
+                    Expanded(
+                      child: Wrap(
+                        alignment: WrapAlignment.end,
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: [
+                          if (shift.online) MapChip(icon: shift.gpsPoor ? Icons.gps_off : Icons.gps_fixed, label: shift.gpsPoor ? l.gpsPoor : l.gpsGood, tone: shift.gpsPoor ? c.danger : c.success),
+                          if (shift.online && rt != RealtimeState.connected) MapChip(icon: Icons.wifi_off, label: l.reconnecting, tone: c.warning),
+                          if (Env.fakeLocationOn) MapChip(icon: Icons.bug_report_outlined, label: l.devTools, onTap: () => setState(() => _devOpen = !_devOpen)),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-                if (Env.fakeLocationOn) const Padding(padding: EdgeInsets.fromLTRB(16, 8, 16, 0), child: DevLocationPanel()),
-                const Spacer(),
-                if (balance != null && balance.state != BalanceState.ok && balance.state != BalanceState.unknown)
+                if (balanceBanner)
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                    child: Notice(
-                      switch (balance.state) {
+                    padding: const EdgeInsets.only(top: 8),
+                    child: FloatingBanner(
+                      text: switch (balance.state) {
                         BalanceState.warning => l.balanceWarningLede,
                         BalanceState.cashBlocked => l.balanceCashBlockedLede,
                         BalanceState.blocked => l.balanceBlockedLede,
                         _ => '',
                       },
                       tone: balance.state == BalanceState.warning ? NoticeTone.warning : NoticeTone.error,
-                      action: TextButton(onPressed: () => context.go(Routes.driverEarnings), child: Text(l.topUp)),
+                      icon: Icons.account_balance_wallet_outlined,
+                      actionLabel: l.topUp,
+                      action: () => context.go(Routes.driverTopUp),
                     ),
                   ),
-                Card(
-                  margin: const EdgeInsets.all(16),
-                  child: Padding(
-                    padding: const EdgeInsets.all(14),
-                    child: shift.online ? _online(context, shift, home.value) : _offline(context, shift, vehicles, chosen),
-                  ),
-                ),
+                if (_devOpen && Env.fakeLocationOn) const Padding(padding: EdgeInsets.only(top: 8), child: DevLocationPanel()),
               ],
             ),
           ),
-          if (offer.offer != null || offer.notice != null) OfferSheet(state: offer),
+          if (o == null)
+            AppSheet(
+              snaps: const [0.32, 0.6],
+              onHeightChanged: (h) {
+                if ((h - _sheetHeight).abs() > 2) setState(() => _sheetHeight = h);
+              },
+              builder: (context, _) => AnimatedSwitcherX(
+                child: KeyedSubtree(
+                  key: ValueKey(shift.online),
+                  child: shift.online ? _online(context, shift, today) : _offline(context, shift, vehicles, chosen, today),
+                ),
+              ),
+            ),
+          if (o != null || offer.notice != null) OfferSheet(state: offer),
         ],
       ),
     );
   }
 
-  Widget _offline(BuildContext context, ShiftState shift, List<Vehicle> vehicles, Vehicle? chosen) {
+  Widget _stats(BuildContext context, ShiftState shift, EarningsSummary? today) {
+    final l = context.l10n;
+    final loc = context.localeTag;
+    if (today == null) return const SizedBox.shrink();
+    final since = shift.session?.startedAt;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: StatRow(
+        children: [
+          StatTile(label: l.earningsToday, icon: Icons.account_balance_wallet_outlined, value: AnimatedMoney(today.netMinor, locale: loc)),
+          StatTile(label: l.tripsToday, icon: Icons.route_outlined, value: AnimatedCounter(value: today.trips, format: (v) => v.round().toString())),
+          if (since != null) StatTile(label: l.timeOnline, icon: Icons.schedule, value: Text(since_(since))),
+        ],
+      ),
+    );
+  }
+
+  String since_(DateTime start) {
+    final d = DateTime.now().toUtc().difference(start.toUtc());
+    final h = d.inHours, m = d.inMinutes % 60;
+    return h > 0 ? '${h}h ${m}m' : '${m}m';
+  }
+
+  Widget _offline(BuildContext context, ShiftState shift, List<Vehicle> vehicles, Vehicle? chosen, EarningsSummary? today) {
     final l = context.l10n;
     final c = context.colors;
     final error = shift.error;
@@ -107,42 +184,46 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> {
       mainAxisSize: MainAxisSize.min,
       children: [
         if (shift.endedReason != null && shift.endedReason != 'DRIVER') Padding(padding: const EdgeInsets.only(bottom: 10), child: Notice(l.forcedOffline(offlineReasonLabel(l, shift.endedReason)), tone: NoticeTone.warning)),
+        _stats(context, shift, today),
         if (vehicles.isEmpty)
           Notice(l.noVehicles, tone: NoticeTone.info, action: TextButton(onPressed: () => context.go(Routes.driverOnboarding), child: Text(l.addVehicle)))
         else ...[
-          DropdownButtonFormField<String>(
-            initialValue: chosen?.id,
-            decoration: InputDecoration(labelText: l.chooseVehicle),
-            items: [
-              for (final v in vehicles)
-                DropdownMenuItem(value: v.id, enabled: v.canDrive ?? true, child: Text('${v.plateNumber} · ${v.label}${v.isFleet ? ' · ${l.fleetCar}' : ''}', overflow: TextOverflow.ellipsis)),
+          SectionGroup(
+            margin: const EdgeInsets.only(bottom: 12),
+            children: [
+              SettingsTile(
+                icon: chosen == null ? Icons.directions_car_outlined : vehicleIcon(chosen.vehicleType),
+                title: chosen == null ? l.chooseVehicle : '${chosen.plateNumber} · ${chosen.label}',
+                subtitle: chosen == null ? null : (chosen.canDrive == false ? (chosen.denialMessage != null ? describeError(l, AppError(status: 403, code: chosen.denial ?? '', message: chosen.denialMessage!)) : l.notEligible) : (chosen.isFleet ? l.fleetCar : l.ready)),
+                trailing: chosen == null ? null : StatusPill(chosen.canDrive == false ? l.notEligible : l.ready, tone: chosen.canDrive == false ? Tone.red : Tone.green),
+                onTap: () async {
+                  final v = await showVehiclePicker(context, vehicles: vehicles, selectedId: chosen?.id);
+                  if (v != null) setState(() => _vehicleId = v.id);
+                },
+              ),
             ],
-            onChanged: (v) => setState(() => _vehicleId = v),
           ),
-          if (chosen != null && chosen.canDrive == false && chosen.denialMessage != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(describeError(l, AppError(status: 403, code: chosen.denial ?? '', message: chosen.denialMessage!)), style: TextStyle(color: c.danger, fontSize: 13))),
-          const SizedBox(height: 12),
           if (errorText != null)
-            Notice(errorText, tone: NoticeTone.error, action: TextButton(onPressed: () => ref.read(locationSourceProvider).openSettings(), child: Text(l.openSettings)))
-          else
-            Problem(error, describe: (e) => describeError(l, e)),
-          if (error != null) const SizedBox(height: 10),
-          PrimaryButton(
-            label: shift.busy ? l.goingOnline : l.goOnline,
+            Padding(padding: const EdgeInsets.only(bottom: 10), child: Notice(errorText, tone: NoticeTone.error, action: TextButton(onPressed: () => ref.read(locationSourceProvider).openSettings(), child: Text(l.openSettings))))
+          else if (error != null)
+            Padding(padding: const EdgeInsets.only(bottom: 10), child: Problem(error, describe: (e) => describeError(l, e))),
+          SwipeToConfirm(
+            label: l.slideToGoOnline,
             icon: Icons.power_settings_new,
             busy: shift.busy,
-            onPressed: chosen == null || chosen.canDrive == false
-                ? null
-                : () async {
-                    await ref.read(localNotificationsProvider).requestPermission();
-                    await ref.read(shiftProvider.notifier).goOnline(chosen);
-                  },
+            enabled: chosen != null && chosen.canDrive != false,
+            onConfirmed: () async {
+              await ref.read(localNotificationsProvider).requestPermission();
+              await ref.read(shiftProvider.notifier).goOnline(chosen!);
+            },
           ),
         ],
+        if (Env.fakeLocationOn) Padding(padding: const EdgeInsets.only(top: 8), child: Text('${l.devTools}: ${l.youAreHere} ${ref.watch(lastPositionProvider)?.let((p) => '${p.lat.toStringAsFixed(4)}, ${p.lng.toStringAsFixed(4)}') ?? '—'}', style: AnbessaType.caption.copyWith(color: c.faint))),
       ],
     );
   }
 
-  Widget _online(BuildContext context, ShiftState shift, DriverHome? home) {
+  Widget _online(BuildContext context, ShiftState shift, EarningsSummary? today) {
     final l = context.l10n;
     final c = context.colors;
     final v = shift.vehicle;
@@ -152,24 +233,30 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> {
       children: [
         Row(
           children: [
-            Icon(Icons.directions_car, color: c.accentStrong),
-            const SizedBox(width: 10),
-            Expanded(child: Text(v == null ? l.online : '${v.plateNumber} · ${v.label}', style: const TextStyle(fontWeight: FontWeight.w600))),
-            if (shift.session != null) Text(l.onlineSince(clockOf(shift.session!.startedAt)), style: TextStyle(color: c.muted, fontSize: 12)),
+            Container(width: 44, height: 44, decoration: BoxDecoration(color: c.successSoft, shape: BoxShape.circle), child: const RadarPulse(color: Color(0xFF22C55E), size: 44, rings: 2)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(l.waitingForOffers, style: AnbessaType.title.copyWith(color: c.text)),
+                  Text(v == null ? l.online : '${v.plateNumber} · ${v.label}', style: AnbessaType.caption.copyWith(color: c.muted)),
+                ],
+              ),
+            ),
           ],
         ),
-        const SizedBox(height: 8),
-        Text(l.waitingForOffers, style: TextStyle(color: c.text2)),
-        const SizedBox(height: 12),
+        const SizedBox(height: 14),
+        _stats(context, shift, today),
         Problem(shift.error, describe: (e) => describeError(l, e)),
-        OutlinedButton.icon(onPressed: shift.busy ? null : () => ref.read(shiftProvider.notifier).goOffline(), icon: const Icon(Icons.power_settings_new), label: Text(l.goOffline)),
+        SwipeToConfirm(label: l.slideToGoOffline, icon: Icons.power_settings_new, tone: Tone.grey, busy: shift.busy, onConfirmed: () => ref.read(shiftProvider.notifier).goOffline()),
       ],
     );
   }
 }
 
-/// Development only (Linux, FAKE_LOCATION=on): steer the fake position. Tap the map to teleport;
-/// "Drive to pickup" moves at 40 km/h towards the active trip's pickup, then drop-off.
+/// Development only (Linux, FAKE_LOCATION=on): steer the fake position. "Drive to target" moves
+/// at 40 km/h towards the active trip's pickup, then drop-off.
 class DevLocationPanel extends ConsumerWidget {
   const DevLocationPanel({super.key});
   @override
@@ -178,12 +265,12 @@ class DevLocationPanel extends ConsumerWidget {
     if (src is! FakeLocationSource) return const SizedBox.shrink();
     final c = context.colors;
     final pos = ref.watch(lastPositionProvider);
-    return Container(
+    return FloatingCard(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(color: c.warningSoft, borderRadius: BorderRadius.circular(anbessaRadius), border: Border.all(color: c.accent)),
+      radius: AnbessaRadius.md,
       child: Wrap(
         crossAxisAlignment: WrapCrossAlignment.center,
-        spacing: 8,
+        spacing: 4,
         children: [
           Text('fake GPS ${pos == null ? '' : '${pos.lat.toStringAsFixed(4)}, ${pos.lng.toStringAsFixed(4)}'}', style: TextStyle(fontSize: 11, color: c.accentStrong, fontFamilyFallback: monoFamilyFallback)),
           TextButton(onPressed: () => src.set(8.9806, 38.7578), child: const Text('Bole')),

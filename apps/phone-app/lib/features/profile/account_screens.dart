@@ -1,15 +1,10 @@
-// Account (both modes): profile name, language, signed-in devices, payment preferences, mode
-// switch, flagged entries (support, scheduled rides, promos, delete account), sign out.
+// Language, signed-in devices and payment preferences (the account hub itself is account_hub_screen.dart).
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:ride_app_core/ride_app_core.dart';
 import '../../core/l10n/l10n.dart';
 import '../../core/network/providers.dart';
-import '../../core/router/routes.dart';
-import '../../core/session/session_controller.dart';
-import '../config/client_config_provider.dart';
 import '../rider/booking/booking_controller.dart';
 
 class LocaleController extends Notifier<Locale?> {
@@ -33,118 +28,6 @@ class LocaleController extends Notifier<Locale?> {
 
 final localeProvider = NotifierProvider<LocaleController, Locale?>(LocaleController.new);
 
-class AccountScreen extends ConsumerWidget {
-  const AccountScreen({super.key, required this.mode});
-  final AppMode mode;
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final l = context.l10n;
-    final c = context.colors;
-    final session = ref.watch(currentSessionProvider);
-    final version = ref.watch(appVersionProvider).value;
-    final support = ref.watch(featureProvider(Feature.support));
-    final scheduled = ref.watch(featureProvider(Feature.scheduledRides));
-    final promos = ref.watch(featureProvider(Feature.promos));
-    final deletion = ref.watch(featureProvider(Feature.accountDeletion));
-    if (session == null) return const SizedBox.shrink();
-    return Scaffold(
-      appBar: AppBar(title: Text(l.accountTitle)),
-      body: ListView(
-        children: [
-          ListTile(
-            leading: CircleAvatar(backgroundColor: c.accentSoft, foregroundColor: c.accentStrong, child: Text(session.displayName.characters.first.toUpperCase())),
-            title: Text(session.displayName, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 17)),
-            subtitle: Text(formatPhone(session.profile.phone)),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => context.push(Routes.profile),
-          ),
-          const Divider(),
-          if (mode == AppMode.rider && session.canDrive) ListTile(leading: const Icon(Icons.drive_eta_outlined), title: Text(l.switchToDriver), onTap: () => ref.read(modeProvider.notifier).set(AppMode.driver)),
-          if (mode == AppMode.rider && !session.canDrive) ListTile(leading: const Icon(Icons.drive_eta_outlined), title: Text(l.becomeDriver), subtitle: Text(l.becomeDriverLede), onTap: () => ref.read(modeProvider.notifier).set(AppMode.driver)),
-          if (mode == AppMode.driver) ListTile(leading: const Icon(Icons.hail), title: Text(l.switchToRider), onTap: () => ref.read(modeProvider.notifier).set(AppMode.rider)),
-          ListTile(leading: const Icon(Icons.language), title: Text(l.language), onTap: () => context.push(Routes.language)),
-          if (mode == AppMode.rider) ListTile(leading: const Icon(Icons.payments_outlined), title: Text(l.paymentPreferences), onTap: () => context.push(Routes.paymentPrefs)),
-          ListTile(leading: const Icon(Icons.devices_outlined), title: Text(l.sessions), onTap: () => context.push(Routes.sessions)),
-          if (scheduled && mode == AppMode.rider) ListTile(leading: const Icon(Icons.schedule), title: Text(l.scheduledRides), onTap: () => context.push(Routes.scheduled)),
-          if (promos && mode == AppMode.rider) ListTile(leading: const Icon(Icons.local_offer_outlined), title: Text(l.promos), onTap: () => context.push(Routes.promos)),
-          if (support) ListTile(leading: const Icon(Icons.help_outline), title: Text(l.support), onTap: () => context.push(Routes.support)),
-          const Divider(),
-          ListTile(
-            leading: Icon(Icons.logout, color: c.danger),
-            title: Text(l.signOut, style: TextStyle(color: c.danger)),
-            onTap: () async {
-              final yes = await showDialog<bool>(
-                context: context,
-                builder: (ctx) => AlertDialog(
-                  content: Text(l.signOutConfirm),
-                  actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(l.cancel)), FilledButton(onPressed: () => Navigator.pop(ctx, true), child: Text(l.signOut))],
-                ),
-              );
-              if (yes == true) await ref.read(sessionProvider.notifier).signOut();
-            },
-          ),
-          if (deletion) ListTile(leading: Icon(Icons.delete_outline, color: c.muted), title: Text(l.deleteAccount, style: TextStyle(color: c.muted)), onTap: () => context.push(Routes.deleteAccount)),
-          const SizedBox(height: 16),
-          Center(child: Text(version == null ? '' : l.appVersion('${version.version}+${version.build}'), style: TextStyle(color: c.faint, fontSize: 12))),
-          const SizedBox(height: 24),
-        ],
-      ),
-    );
-  }
-}
-
-class ProfileScreen extends ConsumerStatefulWidget {
-  const ProfileScreen({super.key});
-  @override
-  ConsumerState<ProfileScreen> createState() => _ProfileScreenState();
-}
-
-class _ProfileScreenState extends ConsumerState<ProfileScreen> {
-  late final _name = TextEditingController(text: ref.read(currentSessionProvider)?.profile.name ?? '');
-  bool _busy = false;
-  Object? _error;
-  bool _saved = false;
-
-  Future<void> _save() async {
-    setState(() {
-      _busy = true;
-      _error = null;
-      _saved = false;
-    });
-    try {
-      final p = await ref.read(authApiProvider).updateName(_name.text.trim());
-      await ref.read(sessionProvider.notifier).updateProfile(p);
-      setState(() => _saved = true);
-    } catch (e) {
-      setState(() => _error = e);
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final l = context.l10n;
-    final s = ref.watch(currentSessionProvider);
-    return Scaffold(
-      appBar: AppBar(title: Text(l.profile)),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          TextField(controller: _name, decoration: InputDecoration(labelText: l.nameLabel), textCapitalization: TextCapitalization.words),
-          const SizedBox(height: 12),
-          KeyValue(l.phoneLabelShort, Text(formatPhone(s?.profile.phone))),
-          const SizedBox(height: 12),
-          if (_saved) Notice(l.nameSaved, tone: NoticeTone.ok),
-          Problem(_error, describe: (e) => describeError(l, e)),
-          const SizedBox(height: 12),
-          PrimaryButton(label: l.save, busy: _busy, onPressed: _name.text.trim().length < 2 ? null : _save),
-        ],
-      ),
-    );
-  }
-}
-
 class LanguageScreen extends ConsumerWidget {
   const LanguageScreen({super.key});
   @override
@@ -154,11 +37,13 @@ class LanguageScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: Text(l.language)),
       body: ListView(
+        padding: const EdgeInsets.all(16),
         children: [
-          RadioGroup<String>(
-            groupValue: current,
-            onChanged: (v) => ref.read(localeProvider.notifier).set(v == null ? null : Locale(v)),
-            child: Column(children: [RadioListTile(value: 'en', title: Text(l.english)), RadioListTile(value: 'am', title: Text(l.amharic))]),
+          SectionGroup(
+            children: [
+              ChoiceRow(title: l.english, subtitle: 'English', selected: current == 'en', onTap: () => ref.read(localeProvider.notifier).set(const Locale('en'))),
+              ChoiceRow(title: l.amharic, subtitle: 'አማርኛ', selected: current == 'am', onTap: () => ref.read(localeProvider.notifier).set(const Locale('am'))),
+            ],
           ),
         ],
       ),

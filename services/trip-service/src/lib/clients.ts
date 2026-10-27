@@ -39,6 +39,7 @@ export interface DriverLive {
   balanceState?: string;
   lat?: number;
   lng?: number;
+  heading?: number;
   at?: number;
   stale: boolean;
 }
@@ -67,13 +68,13 @@ export function locationClient(base: string, token: string): LocationClient {
 
 export interface MappingClient {
   table(sources: LatLng[], destinations: LatLng[]): Promise<{ durations: (number | null)[][]; approximate: boolean }>;
-  route(points: LatLng[]): Promise<{ distanceMeters: number; durationSeconds: number; approximate: boolean }>;
+  route(points: LatLng[], geometry?: boolean): Promise<{ distanceMeters: number; durationSeconds: number; approximate: boolean; geometry?: string }>;
 }
 
 export function mappingClient(base: string, token: string): MappingClient {
   return {
     table: (sources, destinations) => call(base, token, "/internal/table", { method: "POST", body: JSON.stringify({ sources, destinations }) }),
-    route: (points) => call(base, token, "/internal/route", { method: "POST", body: JSON.stringify({ points }) }),
+    route: (points, geometry = false) => call(base, token, "/internal/route", { method: "POST", body: JSON.stringify({ points, geometry }) }),
   };
 }
 
@@ -87,8 +88,14 @@ export interface PublicVehicle {
 }
 
 /** Who is on the other side of a trip: auth-service names, fleet-service cars. */
+export interface PublicUser {
+  name: string;
+  /** a small photo as a data URL, when the person set one */
+  image?: string | null;
+}
+
 export interface PartiesClient {
-  userName(userId: string): Promise<string | null>;
+  user(userId: string): Promise<PublicUser | null>;
   vehicle(vehicleId: string): Promise<PublicVehicle | null>;
 }
 
@@ -102,7 +109,7 @@ export function partiesClient(authBase: string, fleetBase: string, token: string
     }
   };
   return {
-    userName: async (userId) => (await orNull(call<{ name: string }>(authBase, token, `/internal/users/${userId}`)))?.name ?? null,
+    user: (userId) => orNull(call<PublicUser>(authBase, token, `/internal/users/${userId}`)),
     vehicle: (vehicleId) => orNull(call<PublicVehicle>(fleetBase, token, `/internal/vehicles/${vehicleId}`)),
   };
 }

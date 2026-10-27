@@ -13,6 +13,7 @@ import { cacheKey, type Cache } from "./lib/cache.js";
 import { EngineError, type Breaker } from "./engines/http.js";
 import type { NominatimClient, Place } from "./engines/nominatim.js";
 import type { OsrmClient, RouteResult, SnapResult, TableResult } from "./engines/osrm.js";
+import { encodePolyline6 } from "./lib/polyline.js";
 import { CITIES, inServiceArea } from "./regions.js";
 
 export const LIMITS = { maxWaypoints: 10, maxTableCells: 625, maxTableSide: 50, maxSearchLength: 120 };
@@ -55,12 +56,16 @@ export function createMaps(deps: { osrm: OsrmClient; nominatim: NominatimClient;
   };
 
   return {
-    async route(points: LatLng[], withGeometry = false): Promise<RouteResult & { approximate: boolean }> {
+    /**
+     * Distance and time between the points, with the road geometry and the turn-by-turn steps when
+     * asked. The fallback (OSRM down) draws the straight line between the points and has no steps.
+     */
+    async route(points: LatLng[], withGeometry = false, withSteps = false): Promise<RouteResult & { approximate: boolean }> {
       if (points.length < 2 || points.length > LIMITS.maxWaypoints) throw badRequest(`2–${LIMITS.maxWaypoints} points required`);
       assertInArea(points);
       const pts = points.map(round);
       try {
-        const r = await cached(cacheKey("route", [pts, withGeometry]), TTL.route, () => deps.osrmBreaker.run(() => osrm.route(pts, withGeometry)));
+        const r = await cached(cacheKey("route", [pts, withGeometry, withSteps]), TTL.route, () => deps.osrmBreaker.run(() => osrm.route(pts, withGeometry, withSteps)));
         return { ...r, approximate: false };
       } catch (err) {
         if (err instanceof EngineError && err.status === 404) throw notFound("route");
@@ -72,7 +77,11 @@ export function createMaps(deps: { osrm: OsrmClient; nominatim: NominatimClient;
           distanceMeters += leg.distanceMeters;
           durationSeconds += leg.durationSeconds;
         }
-        return { distanceMeters, durationSeconds, approximate: true };
+        return {
+          distanceMeters, durationSeconds, approximate: true,
+          ...(withGeometry ? { geometry: encodePolyline6(points) } : {}),
+          ...(withSteps ? { steps: [] } : {}),
+        };
       }
     },
 

@@ -6,6 +6,7 @@ import { useSession } from "./lib/session";
 import { Shell, type Section } from "./components/Shell";
 import { Empty } from "./components/ui";
 import { PartnerSignIn, SignInChooser, StaffSignIn } from "./pages/SignIn";
+import { SharedTrip } from "./pages/public/SharedTrip";
 import { StaffSetup } from "./pages/staff/Setup";
 import { Board } from "./pages/staff/Board";
 import { Drivers } from "./pages/staff/Drivers";
@@ -160,6 +161,7 @@ export function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Home />} />
+        <Route path="/t/:token" element={<SharedTrip />} />
         <Route path="/sign-in" element={<SignInChooser />} />
         <Route path="/sign-in/staff" element={<StaffSignIn />} />
         <Route path="/sign-in/partner" element={<PartnerSignIn />} />

@@ -11,6 +11,7 @@ import 'core/router/app_router.dart';
 import 'core/router/routes.dart';
 import 'features/config/client_config_provider.dart';
 import 'features/profile/account_screens.dart';
+import 'features/profile/appearance_controller.dart';
 import 'features/rider/trip/active_trip_controller.dart';
 
 class AnbessaApp extends ConsumerStatefulWidget {
@@ -76,10 +77,13 @@ class _AnbessaAppState extends ConsumerState<AnbessaApp> with WidgetsBindingObse
   Widget build(BuildContext context) {
     final router = ref.watch(routerProvider);
     final locale = ref.watch(localeProvider);
+    final themeMode = ref.watch(themeModeProvider);
     return MaterialApp.router(
       title: 'Anbessa',
       debugShowCheckedModeBanner: false,
       theme: anbessaTheme(),
+      darkTheme: anbessaTheme(brightness: Brightness.dark),
+      themeMode: themeMode,
       locale: locale,
       supportedLocales: AppLocalizations.supportedLocales,
       localizationsDelegates: const [AppLocalizations.delegate, GlobalMaterialLocalizations.delegate, GlobalWidgetsLocalizations.delegate, GlobalCupertinoLocalizations.delegate],

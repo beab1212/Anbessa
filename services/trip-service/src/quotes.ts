@@ -29,6 +29,8 @@ export interface Quote {
   durationSeconds: number;
   /** distances came from a straight-line estimate (OSRM was down) */
   approximate: boolean;
+  /** the road line pickup → drop-off (encoded polyline, precision 6), kept on the trip for the apps' maps */
+  routePolyline6?: string;
   /** ISO 8601 */
   expiresAt: string;
 }
@@ -77,7 +79,7 @@ export function builtinQuotes(redis: Redis, mapping: MappingClient, settings: Se
     async create(input: { requestedBy: string; pickup: LatLng; dropoff: LatLng; vehicleTypes: string[]; pickupAddress?: string; dropoffAddress?: string }): Promise<Quote[]> {
       const cityId = cityAt(input.pickup);
       if (!cityId) throw badRequest("pickup is outside the served cities", "outside_service_area");
-      const route = await mapping.route([input.pickup, input.dropoff]);
+      const route = await mapping.route([input.pickup, input.dropoff], true);
       const km = route.distanceMeters / 1000;
       const min = route.durationSeconds / 60;
       const ttl = settings.get<number>("quote.ttlSeconds");
@@ -93,7 +95,8 @@ export function builtinQuotes(redis: Redis, mapping: MappingClient, settings: Se
           id: `q_${randomUUID()}`, requestedBy: input.requestedBy, cityId, vehicleType,
           pickup: input.pickup, dropoff: input.dropoff, pickupAddress: input.pickupAddress, dropoffAddress: input.dropoffAddress,
           fareMinor, waitingPerMinMinor: f.waitingPerMinMinor, currency: "ETB",
-          distanceMeters: route.distanceMeters, durationSeconds: route.durationSeconds, approximate: route.approximate, expiresAt,
+          distanceMeters: route.distanceMeters, durationSeconds: route.durationSeconds, approximate: route.approximate,
+          ...(route.geometry ? { routePolyline6: route.geometry } : {}), expiresAt,
         };
         await redis.set(key(q.id), JSON.stringify(q), "EX", ttl);
         quotes.push(q);

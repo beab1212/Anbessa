@@ -29,7 +29,19 @@ function fakeEngines(): Promise<void> {
     if (engine.down) return send(503, { message: "down" });
     if (url.pathname.startsWith("/route/v1/driving/")) {
       if (engine.noRoute) return send(400, { code: "NoRoute", message: "Impossible route" });
-      return send(200, { code: "Ok", routes: [{ distance: 7412.6, duration: 943.2, geometry: url.searchParams.get("overview") === "full" ? "_p~iF~ps|U_ulLnnqC" : undefined }] });
+      const withSteps = url.searchParams.get("steps") === "true";
+      return send(200, {
+        code: "Ok",
+        routes: [{
+          distance: 7412.6, duration: 943.2,
+          geometry: url.searchParams.get("overview") === "full" ? "_p~iF~ps|U_ulLnnqC" : undefined,
+          ...(withSteps ? { legs: [{ steps: [
+            { distance: 120.4, duration: 20.1, name: "Africa Avenue", maneuver: { type: "depart", location: [38.7578, 8.9806], bearing_after: 12 } },
+            { distance: 7292.2, duration: 923.1, name: "Churchill Avenue", maneuver: { type: "turn", modifier: "left", location: [38.76, 8.99], bearing_after: 270 } },
+            { distance: 0, duration: 0, name: "", maneuver: { type: "arrive", location: [38.75, 9.0333], bearing_after: 0 } },
+          ] }] } : {}),
+        }],
+      });
     }
     if (url.pathname.startsWith("/table/v1/driving/")) {
       const s = url.searchParams.get("sources")!.split(";").length;
@@ -96,6 +108,26 @@ describe("internal routing", () => {
   it("returns the geometry when asked", async () => {
     const r = await internal("/internal/route", { points: [BOLE, PIASSA], geometry: true });
     expect(r.json()).toMatchObject({ geometry: "_p~iF~ps|U_ulLnnqC" });
+  });
+
+  it("returns turn-by-turn steps when asked, cached apart from the plain answer", async () => {
+    const r = await internal("/internal/route", { points: [BOLE, PIASSA], geometry: true, steps: true });
+    expect(r.statusCode).toBe(200);
+    const body = r.json<{ steps: { maneuver: { type: string; modifier?: string; location: { lat: number; lng: number } }; name: string; distanceMeters: number }[] }>();
+    expect(body.steps).toHaveLength(3);
+    expect(body.steps[1]).toEqual({ maneuver: { type: "turn", modifier: "left", location: { lat: 8.99, lng: 38.76 }, bearingAfter: 270 }, name: "Churchill Avenue", distanceMeters: 7292, durationSeconds: 923 });
+    expect(engine.hits[0]).toContain("steps=true");
+    await internal("/internal/route", { points: [BOLE, PIASSA], geometry: true });
+    expect(engine.hits.length).toBe(2); // a different cache entry
+  });
+
+  it("OSRM down with geometry asked → the straight line as a polyline, no steps", async () => {
+    engine.down = true;
+    const r = await internal("/internal/route", { points: [BOLE, PIASSA], geometry: true, steps: true });
+    const body = r.json<{ approximate: boolean; geometry: string; steps: unknown[] }>();
+    expect(body.approximate).toBe(true);
+    expect(body.geometry.length).toBeGreaterThan(8);
+    expect(body.steps).toEqual([]);
   });
 
   it("no road between the points → 404, not an estimate", async () => {
@@ -167,6 +199,17 @@ describe("public maps API", () => {
   it("reverse-geocodes and snaps the pickup pin, for app and staff tokens", async () => {
     expect((await get(`/api/maps/reverse?lat=${BOLE.lat}&lng=${BOLE.lng}`)).json()).toMatchObject({ label: "Africa Avenue, Bole, Addis Ababa, Ethiopia", name: "Africa Avenue" });
     expect((await get(`/api/maps/snap?lat=${BOLE.lat}&lng=${BOLE.lng}`, undefined, "ride-admin")).json()).toEqual({ lat: 8.98071, lng: 38.75801, name: "Africa Avenue", distanceMeters: 12, approximate: false });
+  });
+
+  it("gives the apps the road line between two points, with the turns on request", async () => {
+    const r = await get(`/api/maps/route?from=${BOLE.lat},${BOLE.lng}&to=${PIASSA.lat},${PIASSA.lng}&steps=1`);
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toMatchObject({ polyline6: "_p~iF~ps|U_ulLnnqC", distanceMeters: 7413, durationSeconds: 943, approximate: false });
+    expect(r.json<{ steps: unknown[] }>().steps).toHaveLength(3);
+    const plain = await get(`/api/maps/route?from=${BOLE.lat},${BOLE.lng}&to=${PIASSA.lat},${PIASSA.lng}`);
+    expect(plain.json<{ steps: unknown[] }>().steps).toEqual([]);
+    expect((await get(`/api/maps/route?from=51.5,-0.12&to=${PIASSA.lat},${PIASSA.lng}`)).statusCode).toBe(400);
+    expect((await get(`/api/maps/route?from=abc&to=${PIASSA.lat},${PIASSA.lng}`)).statusCode).toBe(400);
   });
 
   it("needs a token, validates input, and returns 503 when geocoding is down", async () => {

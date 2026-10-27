@@ -36,7 +36,7 @@ sealed class RealtimeEvent {
         'trip:offer_expired' => OfferExpiredEvent(tripId: str(j, 'tripId'), offerId: str(j, 'offerId')),
         'trip:offer_cancelled' => OfferCancelledEvent(tripId: str(j, 'tripId')),
         'driver:location' => DriverLocationEvent(
-            tripId: str(j, 'tripId'), driverId: str(j, 'driverId'), lat: readDouble(j, 'lat'), lng: readDouble(j, 'lng'), heading: doubleOrNull(j, 'heading'),
+            tripId: str(j, 'tripId'), driverId: str(j, 'driverId'), lat: readDouble(j, 'lat'), lng: readDouble(j, 'lng'), heading: doubleOrNull(j, 'heading'), speed: doubleOrNull(j, 'speed'),
             at: j['at'] is num ? DateTime.fromMillisecondsSinceEpoch(readInt(j, 'at'), isUtc: true) : DateTime.now().toUtc(),
           ),
         'payment:action_required' => PaymentActionRequiredEvent(payment: Payment.fromJson(asJson(j['payment'])), instructions: strOrNull(j, 'instructions')),
@@ -75,12 +75,14 @@ class OfferCancelledEvent extends RealtimeEvent {
 }
 
 class DriverLocationEvent extends RealtimeEvent {
-  const DriverLocationEvent({required this.tripId, required this.driverId, required this.lat, required this.lng, this.heading, required this.at});
+  const DriverLocationEvent({required this.tripId, required this.driverId, required this.lat, required this.lng, this.heading, this.speed, required this.at});
   final String tripId;
   final String driverId;
   final double lat;
   final double lng;
   final double? heading;
+  /// m/s, when the phone reports it
+  final double? speed;
   final DateTime at;
 }
 

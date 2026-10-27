@@ -14,6 +14,7 @@ import '../../core/network/providers.dart';
 import '../../core/router/routes.dart';
 import '../../core/session/session_controller.dart';
 import '../bootstrap/gates.dart';
+import '../profile/account_screens.dart' show localeProvider;
 
 class WelcomeScreen extends ConsumerWidget {
   const WelcomeScreen({super.key});
@@ -22,26 +23,71 @@ class WelcomeScreen extends ConsumerWidget {
     final l = context.l10n;
     final c = context.colors;
     final reason = ref.watch(sessionProvider.notifier).lastSignOut;
+    final locale = ref.watch(localeProvider);
+    final isAm = (locale?.languageCode ?? Localizations.localeOf(context).languageCode) == 'am';
     return Scaffold(
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(24),
-          children: [
-            const SizedBox(height: 32),
-            const AnbessaLogo(size: 56),
-            const SizedBox(height: 20),
-            Text(l.welcomeTitle, style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700, color: c.text, height: 1.15)),
-            const SizedBox(height: 10),
-            Text(l.welcomeLede, style: TextStyle(fontSize: 16, color: c.text2, height: 1.4)),
-            const SizedBox(height: 28),
-            if (reason == SignOutReason.sessionEnded) Padding(padding: const EdgeInsets.only(bottom: 12), child: Notice(l.errorSessionEnded, tone: NoticeTone.info)),
-            if (reason == SignOutReason.suspended) Padding(padding: const EdgeInsets.only(bottom: 12), child: Notice(l.errorSuspended, tone: NoticeTone.error)),
-            PrimaryButton(label: l.signInWithPhone, icon: Icons.phone_android, onPressed: () => context.push(Routes.signIn)),
-            const SizedBox(height: 10),
-            OutlinedButton.icon(onPressed: () => context.push('${Routes.signIn}?driver=1'), icon: const Icon(Icons.drive_eta_outlined), label: Text(l.driveWithAnbessa)),
-            if (Env.devLoginOn) ...[const SizedBox(height: 28), const DevSignInPanel()],
-          ],
-        ),
+      body: Stack(
+        children: [
+          // a warm wash behind the logo
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            height: 360,
+            child: DecoratedBox(
+              decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [c.accentSoft, c.canvas])),
+            ),
+          ),
+          SafeArea(
+            child: Column(
+              children: [
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                    child: PillTabs<String>(
+                      expand: false,
+                      items: const [('en', 'English'), ('am', 'አማርኛ')],
+                      selected: isAm ? 'am' : 'en',
+                      onChanged: (v) => ref.read(localeProvider.notifier).set(Locale(v)),
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
+                    children: [
+                      const SizedBox(height: 24),
+                      const PopIn(child: Align(alignment: Alignment.centerLeft, child: AnbessaLogo(size: 72))),
+                      const SizedBox(height: 28),
+                      FadeSlideIn(delay: const Duration(milliseconds: 80), child: Text(l.welcomeTitle, style: AnbessaType.display.copyWith(color: c.text))),
+                      const SizedBox(height: 12),
+                      FadeSlideIn(delay: const Duration(milliseconds: 160), child: Text(l.welcomeLede, style: AnbessaType.body.copyWith(color: c.text2, fontSize: 16))),
+                      const SizedBox(height: 36),
+                      if (reason == SignOutReason.sessionEnded) Padding(padding: const EdgeInsets.only(bottom: 12), child: Notice(l.errorSessionEnded, tone: NoticeTone.info)),
+                      if (reason == SignOutReason.suspended) Padding(padding: const EdgeInsets.only(bottom: 12), child: Notice(l.errorSuspended, tone: NoticeTone.error)),
+                      FadeSlideIn(delay: const Duration(milliseconds: 240), child: PrimaryButton(label: l.signInWithPhone, icon: Icons.phone_android, onPressed: () => context.push(Routes.signIn))),
+                      const SizedBox(height: 10),
+                      FadeSlideIn(delay: const Duration(milliseconds: 300), child: OutlinedButton.icon(onPressed: () => context.push('${Routes.signIn}?driver=1'), icon: const Icon(Icons.drive_eta_outlined), label: Text(l.driveWithAnbessa))),
+                      if (Env.devLoginOn) ...[
+                        const SizedBox(height: 28),
+                        Theme(
+                          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                          child: ExpansionTile(
+                            tilePadding: EdgeInsets.zero,
+                            leading: Icon(Icons.bug_report_outlined, color: c.muted),
+                            title: Text(l.devSignInTitle, style: AnbessaType.body2.copyWith(color: c.muted)),
+                            children: const [DevSignInPanel()],
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -58,11 +104,21 @@ class _PhoneScreenState extends ConsumerState<PhoneScreen> {
   final _ctrl = TextEditingController();
   Object? _error;
   bool _busy = false;
+  int _shake = 0;
+
+  String get _digits => _ctrl.text.replaceAll(RegExp(r'\D'), '');
+  bool get _plausible => toE164(_ctrl.text) != null || toE164('0$_digits') != null;
 
   Future<void> _send() async {
     final l = context.l10n;
-    final e164 = toE164(_ctrl.text);
-    if (e164 == null) return setState(() => _error = AppError(status: 400, code: 'phone', message: l.phoneInvalid));
+    final e164 = toE164(_ctrl.text) ?? toE164('0$_digits');
+    if (e164 == null) {
+      Haptics.error();
+      return setState(() {
+        _error = AppError(status: 400, code: 'phone', message: l.phoneInvalid);
+        _shake++;
+      });
+    }
     setState(() {
       _busy = true;
       _error = null;
@@ -71,7 +127,11 @@ class _PhoneScreenState extends ConsumerState<PhoneScreen> {
       await ref.read(authApiProvider).sendOtp(e164);
       if (mounted) context.push('${Routes.verify}?phone=${Uri.encodeComponent(e164)}${widget.driver ? '&driver=1' : ''}');
     } catch (e) {
-      setState(() => _error = e);
+      Haptics.error();
+      setState(() {
+        _error = e;
+        _shake++;
+      });
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -80,26 +140,62 @@ class _PhoneScreenState extends ConsumerState<PhoneScreen> {
   @override
   Widget build(BuildContext context) {
     final l = context.l10n;
+    final c = context.colors;
     return Scaffold(
-      appBar: AppBar(title: Text(l.phoneTitle)),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          Text(l.phoneLede, style: TextStyle(color: context.colors.text2)),
-          const SizedBox(height: 16),
-          TextField(
-            controller: _ctrl,
-            autofocus: true,
-            keyboardType: TextInputType.phone,
-            autofillHints: const [AutofillHints.telephoneNumber],
-            decoration: InputDecoration(labelText: l.phoneLabel, hintText: l.phoneHint, prefixIcon: const Icon(Icons.phone_outlined)),
-            onSubmitted: (_) => _send(),
-          ),
-          const SizedBox(height: 12),
-          Problem(_error, describe: (e) => describeError(l, e)),
-          const SizedBox(height: 12),
-          PrimaryButton(label: l.sendCode, busy: _busy, onPressed: _send),
-        ],
+      appBar: AppBar(),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
+                children: [
+                  Text(l.phoneTitle, style: AnbessaType.h1.copyWith(color: c.text)),
+                  const SizedBox(height: 8),
+                  Text(l.phoneLede, style: AnbessaType.body.copyWith(color: c.text2)),
+                  const SizedBox(height: 24),
+                  Shake(
+                    trigger: _shake == 0 ? null : _shake,
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          height: 56,
+                          padding: const EdgeInsets.symmetric(horizontal: 14),
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(color: c.surface2, borderRadius: BorderRadius.circular(AnbessaRadius.md), border: Border.all(color: c.border)),
+                          child: Text('🇪🇹 +251', style: AnbessaType.title.copyWith(color: c.text)),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: TextField(
+                            controller: _ctrl,
+                            autofocus: true,
+                            keyboardType: TextInputType.phone,
+                            autofillHints: const [AutofillHints.telephoneNumber],
+                            inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d\s+]')), LengthLimitingTextInputFormatter(16)],
+                            style: AnbessaType.title.copyWith(fontSize: 20, letterSpacing: 1, fontFeatures: AnbessaType.tabular),
+                            decoration: InputDecoration(hintText: '9 12 345 678', errorText: null),
+                            onChanged: (_) => setState(() {}),
+                            onSubmitted: (_) => _send(),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(l.phoneHint, style: AnbessaType.caption.copyWith(color: c.muted)),
+                  const SizedBox(height: 12),
+                  Problem(_error, describe: (e) => describeError(l, e)),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+              child: PrimaryButton(label: l.sendCode, icon: Icons.arrow_forward_rounded, busy: _busy, onPressed: _plausible ? _send : null),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -117,6 +213,8 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
   final _ctrl = TextEditingController();
   Object? _error;
   bool _busy = false;
+  bool _wrong = false;
+  int _shake = 0;
   int _resendIn = 30;
   int _elapsed = 0;
   Timer? _timer;
@@ -140,20 +238,29 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
     super.dispose();
   }
 
-  Future<void> _verify() async {
-    final code = _ctrl.text.trim();
-    if (code.length != 6) return;
+  Future<void> _verify([String? code]) async {
+    final v = (code ?? _ctrl.text).trim();
+    if (v.length != 6) return;
     setState(() {
       _busy = true;
       _error = null;
+      _wrong = false;
     });
     try {
-      final v = await ref.read(authApiProvider).verifyOtp(widget.phone, code);
-      await ref.read(sessionProvider.notifier).signIn(v);
+      final s = await ref.read(authApiProvider).verifyOtp(widget.phone, v);
+      Haptics.success();
+      await ref.read(sessionProvider.notifier).signIn(s);
       if (widget.driver) await ref.read(modeProvider.notifier).set(AppMode.driver);
       // the router's guards take over from here
     } catch (e) {
-      setState(() => _error = e is AppError && (e.status == 400 || e.status == 401) && e.code != ErrorCodes.rateLimited ? AppError(status: 400, code: 'code', message: context.l10n.codeInvalid) : e);
+      Haptics.error();
+      final wrong = e is AppError && (e.status == 400 || e.status == 401) && e.code != ErrorCodes.rateLimited;
+      setState(() {
+        _wrong = wrong;
+        _shake++;
+        _error = wrong ? AppError(status: 400, code: 'code', message: context.l10n.codeInvalid) : e;
+      });
+      if (wrong) _ctrl.clear();
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -177,34 +284,42 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
     final l = context.l10n;
     final c = context.colors;
     return Scaffold(
-      appBar: AppBar(title: Text(l.codeTitle)),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          Text(l.codeSent(formatPhone(widget.phone)), style: TextStyle(color: c.text2)),
-          TextButton(onPressed: () => context.pop(), child: Text(l.changeNumber)),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _ctrl,
-            autofocus: true,
-            keyboardType: TextInputType.number,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(6)],
-            autofillHints: const [AutofillHints.oneTimeCode],
-            style: const TextStyle(fontSize: 28, letterSpacing: 10, fontFamilyFallback: monoFamilyFallback),
-            textAlign: TextAlign.center,
-            decoration: InputDecoration(labelText: l.codeLabel),
-            onChanged: (v) {
-              if (v.length == 6) _verify();
-            },
-          ),
-          const SizedBox(height: 12),
-          if (_elapsed >= 20) Padding(padding: const EdgeInsets.only(bottom: 12), child: Notice(l.sentBySmsToo, tone: NoticeTone.info)),
-          Problem(_error, describe: (e) => describeError(l, e)),
-          const SizedBox(height: 12),
-          PrimaryButton(label: l.verify, busy: _busy, onPressed: _verify),
-          const SizedBox(height: 8),
-          TextButton(onPressed: _resendIn > 0 ? null : _resend, child: Text(_resendIn > 0 ? l.resendIn(_resendIn) : l.resend)),
-        ],
+      appBar: AppBar(),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+          children: [
+            Text(l.codeTitle, style: AnbessaType.h1.copyWith(color: c.text)),
+            const SizedBox(height: 8),
+            Wrap(
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                Text(l.codeSent(formatPhone(widget.phone)), style: AnbessaType.body.copyWith(color: c.text2)),
+                TextButton(onPressed: () => context.pop(), style: TextButton.styleFrom(visualDensity: VisualDensity.compact), child: Text(l.changeNumber)),
+              ],
+            ),
+            const SizedBox(height: 24),
+            Shake(
+              trigger: _shake == 0 ? null : _shake,
+              child: Center(child: PinBoxes(length: 6, controller: _ctrl, error: _wrong, enabled: !_busy, onCompleted: _verify, size: 48)),
+            ),
+            const SizedBox(height: 20),
+            if (_busy) const Center(child: SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5))),
+            if (_elapsed >= 20 && !_busy) Padding(padding: const EdgeInsets.only(bottom: 12), child: Notice(l.sentBySmsToo, tone: NoticeTone.info)),
+            Problem(_error, describe: (e) => describeError(l, e)),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (_resendIn > 0) ...[
+                  CountdownRing(remaining: Duration(seconds: _resendIn), total: const Duration(seconds: 30), size: 28, strokeWidth: 3, child: const SizedBox()),
+                  const SizedBox(width: 8),
+                ],
+                TextButton(onPressed: _resendIn > 0 ? null : _resend, child: Text(_resendIn > 0 ? l.resendIn(_resendIn) : l.resend)),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -246,8 +361,8 @@ class _DevSignInPanelState extends ConsumerState<DevSignInPanel> {
     final l = context.l10n;
     final c = context.colors;
     return SectionCard(
-      title: l.devSignInTitle,
       trailing: const StatusPill('development only', tone: Tone.amber),
+      title: l.devSignInTitle,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -258,14 +373,15 @@ class _DevSignInPanelState extends ConsumerState<DevSignInPanel> {
             future: _accounts,
             builder: (context, snap) {
               if (snap.hasError) return Notice('${l.devNotSeeded} ${describeError(l, snap.error)}', tone: NoticeTone.warning, action: TextButton(onPressed: () => setState(() => _accounts = ref.read(authApiProvider).devAccounts()), child: Text(l.retry)));
-              final list = (snap.data ?? const <DevAccount>[]).where((a) => a.app == 'phone').toList()..sort((a, b) => a.app.compareTo(b.app));
-              if (!snap.hasData) return const Padding(padding: EdgeInsets.all(12), child: LinearProgressIndicator());
+              final list = (snap.data ?? const <DevAccount>[]).where((a) => a.app == 'phone').toList();
+              if (!snap.hasData) return const SkeletonList(rows: 3, avatar: false);
               return Column(
                 children: [
                   for (final a in list)
                     ListTile(
                       contentPadding: EdgeInsets.zero,
                       enabled: a.seeded && _busy == null,
+                      leading: AvatarImage(name: a.name, size: 36),
                       title: Text(a.label, style: const TextStyle(fontWeight: FontWeight.w600)),
                       subtitle: Text('${a.name} · ${formatPhone(a.phone)}${a.seeded ? '' : ' · ${l.devNotSeeded}'}'),
                       trailing: _busy == a.key ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.login),
@@ -287,27 +403,52 @@ class ModeSwitcherScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final l = context.l10n;
     final c = context.colors;
-    Widget option(IconData icon, String title, String lede, AppMode mode) => Card(
-          child: ListTile(
-            contentPadding: const EdgeInsets.all(16),
-            leading: Icon(icon, size: 32, color: c.accentStrong),
-            title: Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-            subtitle: Text(lede),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => ref.read(modeProvider.notifier).set(mode),
+    Widget option(int i, IconData icon, String title, String lede, AppMode mode) => FadeSlideIn(
+          delay: Duration(milliseconds: 80 * i),
+          child: Material(
+            color: c.surface,
+            borderRadius: BorderRadius.circular(AnbessaRadius.xl),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(AnbessaRadius.xl),
+              onTap: () {
+                Haptics.medium();
+                ref.read(modeProvider.notifier).set(mode);
+              },
+              child: Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(borderRadius: BorderRadius.circular(AnbessaRadius.xl), border: Border.all(color: c.border)),
+                child: Row(
+                  children: [
+                    Container(width: 56, height: 56, decoration: BoxDecoration(color: c.accentSoft, borderRadius: BorderRadius.circular(AnbessaRadius.lg)), child: Icon(icon, size: 30, color: c.accentStrong)),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [Text(title, style: AnbessaType.h2.copyWith(color: c.text)), const SizedBox(height: 4), Text(lede, style: AnbessaType.body2.copyWith(color: c.text2))],
+                      ),
+                    ),
+                    Icon(Icons.chevron_right_rounded, color: c.faint),
+                  ],
+                ),
+              ),
+            ),
           ),
         );
     return Scaffold(
-      appBar: AppBar(title: Text(l.appName)),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          Text(l.chooseModeTitle, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
-          const SizedBox(height: 16),
-          option(Icons.hail, l.rideTitle, l.rideLede, AppMode.rider),
-          const SizedBox(height: 10),
-          option(Icons.drive_eta, l.driveTitle, l.driveLede, AppMode.driver),
-        ],
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(24),
+          children: [
+            const SizedBox(height: 24),
+            const AnbessaLogo(size: 48),
+            const SizedBox(height: 20),
+            Text(l.chooseModeTitle, style: AnbessaType.h1.copyWith(color: c.text)),
+            const SizedBox(height: 20),
+            option(0, Icons.hail, l.rideTitle, l.rideLede, AppMode.rider),
+            const SizedBox(height: 12),
+            option(1, Icons.drive_eta, l.driveTitle, l.driveLede, AppMode.driver),
+          ],
+        ),
       ),
     );
   }

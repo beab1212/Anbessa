@@ -54,6 +54,8 @@ class AuthApi {
 
   Future<void> signOut() => _c.call('POST', '$base/sign-out', body: const <String, dynamic>{}, sessionBearer: true, noRetry: true, parse: (_) {});
 
+  /// Name and/or photo (a small JPEG data URL; the server refuses big ones).
+  Future<Profile> updateProfile({String? name, String? image}) => _c.call('POST', '$base/update-user', body: {'name': ?name, 'image': ?image}, sessionBearer: true, parse: (res) => Profile.fromJson(asJson(asJson(res.data)['user'] ?? res.data)));
   Future<Profile> updateName(String name) =>
       _c.call('POST', '$base/update-user', body: {'name': name}, sessionBearer: true, parse: (res) => Profile.fromJson(asJson(asJson(res.data)['user'])));
 
@@ -90,3 +92,16 @@ class IdentityApi {
 
 /// How a caller may inspect a raw response when a typed wrapper doesn't fit.
 typedef RawResponse = Response<dynamic>;
+
+/// Better Auth's organization plugin, the parts the apps use: my organisations and invitations.
+class OrganizationsApi {
+  const OrganizationsApi(this._c);
+  final ApiClient _c;
+  static const base = '/api/auth/organization';
+
+  Future<List<Organization>> mine() => _c.call('GET', '$base/list', sessionBearer: true, parse: (res) => asJsonList(res.data).map(Organization.fromJson).toList(growable: false));
+  Future<List<OrgInvitation>> invitations() =>
+      _c.call('GET', '$base/list-user-invitations', sessionBearer: true, parse: (res) => asJsonList(res.data).map(OrgInvitation.fromJson).toList(growable: false));
+  Future<void> accept(String invitationId) => _c.call('POST', '$base/accept-invitation', body: {'invitationId': invitationId}, sessionBearer: true, parse: (_) {});
+  Future<void> reject(String invitationId) => _c.call('POST', '$base/reject-invitation', body: {'invitationId': invitationId}, sessionBearer: true, parse: (_) {});
+}

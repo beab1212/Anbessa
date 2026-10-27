@@ -41,12 +41,15 @@ export const envSchema = z
     OFFER_SECONDS: z.coerce.number().int().min(5).max(60).default(15),
     MATCH_RADII_METERS: z.string().default("2000,4000,6000").transform((s) => s.split(",").map(Number)),
     // Anti-fraud: the driver must enter the rider's 4-digit PIN to start (workflow 06 step 8)
+    /** where share-my-trip links point: the web app's public /t/:token page */
+    SHARE_BASE_URL: z.string().url().default("http://localhost:5173"),
     TRIP_PIN_REQUIRED: z.enum(["true", "false"]).default("false").transform((v) => v === "true"),
   })
   .superRefine((env, ctx) => {
     const fail = (path: string, message: string) => ctx.addIssue({ code: "custom", path: [path], message });
     if (env.NODE_ENV === "production") {
       if (env.PRICING === "builtin") fail("PRICING", "the built-in quote stand-in is not allowed in production");
+      if (/^http:\/\/(localhost|127\.)/.test(env.SHARE_BASE_URL)) fail("SHARE_BASE_URL", "share links must point at the public web app");
       if (!env.KAFKA_BROKERS) fail("KAFKA_BROKERS", "required in production (trip events)");
     }
     if (env.MATCH_RADII_METERS.some((r) => !Number.isFinite(r) || r < 100 || r > 20_000)) fail("MATCH_RADII_METERS", "radii must be 100–20000 m");

@@ -37,3 +37,4 @@ final apiClientProvider = Provider<ApiClient>((ref) {
 final apisProvider = Provider<Apis>((ref) => Apis(ref.watch(apiClientProvider)));
 final authApiProvider = Provider<AuthApi>((ref) => AuthApi(ref.watch(apiClientProvider)));
 final identityApiProvider = Provider<IdentityApi>((ref) => IdentityApi(ref.watch(apiClientProvider)));
+final organizationsApiProvider = Provider<OrganizationsApi>((ref) => OrganizationsApi(ref.watch(apiClientProvider)));

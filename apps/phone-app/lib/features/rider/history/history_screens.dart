@@ -1,12 +1,14 @@
-// Past trips (both sides) and one trip's receipt.
+// Past trips (both sides), grouped by day with a period filter, and one trip's receipt.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:ride_app_core/ride_app_core.dart';
+import 'package:share_plus/share_plus.dart';
 import '../../../core/l10n/l10n.dart';
 import '../../../core/network/providers.dart';
+import '../../../core/session/session_controller.dart';
 import '../../maps/anbessa_map.dart';
 import '../payments/pay_screen.dart';
 import '../trip/active_trip_controller.dart';
@@ -15,14 +17,20 @@ class TripHistory extends AsyncNotifier<({List<Trip> trips, String? next})> {
   TripHistory(this.arg);
   /// rider | driver
   final String arg;
+  bool _loadingMore = false;
   @override
   Future<({List<Trip> trips, String? next})> build() => ref.read(apisProvider).trips.list(as: arg);
 
   Future<void> more() async {
     final cur = state.value;
-    if (cur == null || cur.next == null) return;
-    final page = await ref.read(apisProvider).trips.list(as: arg, before: cur.next);
-    state = AsyncData((trips: [...cur.trips, ...page.trips], next: page.next));
+    if (cur == null || cur.next == null || _loadingMore) return;
+    _loadingMore = true;
+    try {
+      final page = await ref.read(apisProvider).trips.list(as: arg, before: cur.next);
+      state = AsyncData((trips: [...cur.trips, ...page.trips], next: page.next));
+    } finally {
+      _loadingMore = false;
+    }
   }
 
   Future<void> refresh() async => state = AsyncData(await ref.read(apisProvider).trips.list(as: arg));
@@ -30,42 +38,142 @@ class TripHistory extends AsyncNotifier<({List<Trip> trips, String? next})> {
 
 final tripHistoryProvider = AsyncNotifierProvider.family<TripHistory, ({List<Trip> trips, String? next}), String>(TripHistory.new);
 
-class HistoryScreen extends ConsumerWidget {
+enum HistoryPeriod { all, week, month }
+
+class HistoryScreen extends ConsumerStatefulWidget {
   const HistoryScreen({super.key, required this.as, required this.receiptRoute});
   /// rider | driver
   final String as;
   final String Function(String id) receiptRoute;
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<HistoryScreen> createState() => _HistoryScreenState();
+}
+
+class _HistoryScreenState extends ConsumerState<HistoryScreen> {
+  late String _as = widget.as;
+  HistoryPeriod _period = HistoryPeriod.all;
+  final _scroll = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    _scroll.addListener(() {
+      if (_scroll.position.extentAfter < 400) ref.read(tripHistoryProvider(_as).notifier).more();
+    });
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final l = context.l10n;
     final c = context.colors;
-    final h = ref.watch(tripHistoryProvider(as));
-    final trips = h.value?.trips ?? const <Trip>[];
+    final session = ref.watch(currentSessionProvider);
+    final both = session?.canDrive ?? false;
+    final h = ref.watch(tripHistoryProvider(_as));
+    final now = DateTime.now();
+    final since = switch (_period) {
+      HistoryPeriod.week => now.subtract(const Duration(days: 7)),
+      HistoryPeriod.month => DateTime(now.year, now.month - 1, now.day),
+      HistoryPeriod.all => null,
+    };
+    final trips = (h.value?.trips ?? const <Trip>[]).where((t) => since == null || t.times.requestedAt.isAfter(since)).toList();
+    // group by day
+    final groups = <String, List<Trip>>{};
+    for (final t in trips) {
+      groups.putIfAbsent(_dayLabel(l, t.times.requestedAt, now), () => []).add(t);
+    }
     return Scaffold(
       appBar: AppBar(title: Text(l.activityTitle)),
-      body: RefreshIndicator(
-        onRefresh: () => ref.read(tripHistoryProvider(as).notifier).refresh(),
-        child: h.isLoading && trips.isEmpty
-            ? const Center(child: CircularProgressIndicator())
-            : trips.isEmpty
-                ? ListView(children: [const SizedBox(height: 80), EmptyState(icon: Icons.receipt_long_outlined, title: l.noTrips, body: l.noTripsLede)])
-                : ListView.separated(
-                    itemCount: trips.length + (h.value?.next != null ? 1 : 0),
-                    separatorBuilder: (_, _) => const Divider(height: 1),
-                    itemBuilder: (context, i) {
-                      if (i == trips.length) {
-                        return TextButton(onPressed: () => ref.read(tripHistoryProvider(as).notifier).more(), child: Text(l.next));
-                      }
-                      final t = trips[i];
-                      return ListTile(
-                        leading: Icon(t.status == TripStatus.cancelled ? Icons.cancel_outlined : Icons.directions_car, color: t.status == TripStatus.cancelled ? c.danger : c.accentStrong),
-                        title: Text(t.dropoff.address ?? t.vehicleType, maxLines: 1, overflow: TextOverflow.ellipsis),
-                        subtitle: Text('${dayAndTime(t.times.requestedAt, locale: context.localeTag)} · ${tripStatusLabel(l, t.status)}'),
-                        trailing: MoneyText(t.status == TripStatus.cancelled ? (t.cancellation?.feeMinor ?? 0) : t.fare.chargedMinor, locale: context.localeTag, style: const TextStyle(fontWeight: FontWeight.w600)),
-                        onTap: () => context.push(receiptRoute(t.id)),
-                      );
-                    },
-                  ),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+            child: Column(
+              children: [
+                if (both) ...[
+                  PillTabs<String>(items: [('rider', l.asRider), ('driver', l.asDriver)], selected: _as, onChanged: (v) => setState(() => _as = v)),
+                  const SizedBox(height: 8),
+                ],
+                PillTabs<HistoryPeriod>(items: [(HistoryPeriod.all, l.filterAll), (HistoryPeriod.week, l.filterThisWeek), (HistoryPeriod.month, l.filterThisMonth)], selected: _period, onChanged: (v) => setState(() => _period = v)),
+              ],
+            ),
+          ),
+          Expanded(
+            child: RefreshIndicator(
+              onRefresh: () => ref.read(tripHistoryProvider(_as).notifier).refresh(),
+              child: h.isLoading && trips.isEmpty
+                  ? const Padding(padding: EdgeInsets.symmetric(horizontal: 16), child: SkeletonList(rows: 6))
+                  : h.hasError && trips.isEmpty
+                      ? ListView(children: [Padding(padding: const EdgeInsets.all(16), child: Problem(h.error, describe: (e) => describeError(l, e), onRetry: () => ref.read(tripHistoryProvider(_as).notifier).refresh(), retryLabel: l.retry))])
+                      : trips.isEmpty
+                          ? ListView(children: [const SizedBox(height: 60), IllustratedEmpty(illustration: AnbessaIllustration.noTrips, title: l.noTrips, body: l.noTripsLede)])
+                          : ListView(
+                              controller: _scroll,
+                              padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                              children: [
+                                for (final e in groups.entries) ...[
+                                  Padding(padding: const EdgeInsets.fromLTRB(4, 14, 4, 6), child: Text(e.key, style: AnbessaType.label.copyWith(color: c.muted, letterSpacing: 0.4))),
+                                  SectionGroup(
+                                    margin: EdgeInsets.zero,
+                                    children: [for (final t in e.value) _TripRow(trip: t, onTap: () => context.push(widget.receiptRoute(t.id)))],
+                                  ),
+                                ],
+                                if (h.value?.next != null) const Padding(padding: EdgeInsets.all(16), child: Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)))),
+                              ],
+                            ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _dayLabel(AppLocalizations l, DateTime at, DateTime now) {
+    final d = toAddis(at), n = toAddis(now);
+    if (d.year == n.year && d.month == n.month && d.day == n.day) return l.today;
+    final y = n.subtract(const Duration(days: 1));
+    if (d.year == y.year && d.month == y.month && d.day == y.day) return l.yesterday;
+    return dayOf(at, locale: context.localeTag);
+  }
+}
+
+class _TripRow extends StatelessWidget {
+  const _TripRow({required this.trip, required this.onTap});
+  final Trip trip;
+  final VoidCallback onTap;
+  @override
+  Widget build(BuildContext context) {
+    final l = context.l10n;
+    final c = context.colors;
+    final cancelled = trip.status == TripStatus.cancelled;
+    final amount = cancelled ? (trip.cancellation?.feeMinor ?? 0) : trip.fare.chargedMinor;
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Row(
+          children: [
+            Container(width: 40, height: 40, decoration: BoxDecoration(color: cancelled ? c.dangerSoft : c.surface2, borderRadius: BorderRadius.circular(AnbessaRadius.sm)), child: Icon(cancelled ? Icons.close_rounded : vehicleIcon(trip.vehicleType), color: cancelled ? c.danger : c.accentStrong, size: 22)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(trip.dropoff.address ?? trip.vehicleType, maxLines: 1, overflow: TextOverflow.ellipsis, style: AnbessaType.body.copyWith(fontWeight: FontWeight.w500, color: c.text)),
+                  const SizedBox(height: 2),
+                  Row(children: [Text(clockOf(trip.times.requestedAt), style: AnbessaType.caption.copyWith(color: c.muted, fontFeatures: AnbessaType.tabular)), const SizedBox(width: 6), StatusPill(tripStatusLabel(l, trip.status), tone: cancelled ? Tone.red : trip.status == TripStatus.completed ? Tone.green : Tone.blue)]),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            MoneyText(amount, locale: context.localeTag, style: AnbessaType.body.copyWith(fontWeight: FontWeight.w700, color: cancelled ? c.muted : c.text)),
+          ],
+        ),
       ),
     );
   }
@@ -83,22 +191,65 @@ class ReceiptScreen extends ConsumerWidget {
     final t = tripAsync.value;
     final money = asDriver ? ref.watch(tripPaymentsProvider(tripId)).value : null;
     final settlement = money?.settlements.where((s) => s.purpose == 'TRIP_FARE').firstOrNull;
+    final parties = t?.driver == null ? null : ref.watch(tripPartiesProvider(tripId)).value;
     return Scaffold(
-      appBar: AppBar(title: Text(l.receiptTitle)),
+      appBar: AppBar(
+        title: Text(l.receiptTitle),
+        actions: [
+          if (t != null)
+            IconButton(
+              tooltip: l.shareReceipt,
+              icon: const Icon(Icons.share_outlined),
+              onPressed: () => SharePlus.instance.share(ShareParams(text: l.receiptShareText(dayAndTime(t.times.requestedAt, locale: context.localeTag), t.pickup.address ?? '—', t.dropoff.address ?? '—', birr(t.fare.chargedMinor, locale: context.localeTag), shortId(t.id)))),
+            ),
+        ],
+      ),
       body: t == null
-          ? (tripAsync.hasError ? Padding(padding: const EdgeInsets.all(16), child: Problem(tripAsync.error, describe: (e) => describeError(l, e))) : const Center(child: CircularProgressIndicator()))
+          ? (tripAsync.hasError ? Padding(padding: const EdgeInsets.all(16), child: Problem(tripAsync.error, describe: (e) => describeError(l, e))) : const Padding(padding: EdgeInsets.all(16), child: Column(children: [SkeletonCard(height: 180), SizedBox(height: 12), SkeletonCard(height: 220)])))
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
                 SizedBox(
-                  height: 180,
+                  height: 190,
                   child: ClipRRect(
-                    borderRadius: BorderRadius.circular(anbessaRadiusLg),
-                    child: AnbessaMap(fit: [LatLng(t.pickup.lat, t.pickup.lng), LatLng(t.dropoff.lat, t.dropoff.lng)], pickup: LatLng(t.pickup.lat, t.pickup.lng), dropoff: LatLng(t.dropoff.lat, t.dropoff.lng), line: [LatLng(t.pickup.lat, t.pickup.lng), LatLng(t.dropoff.lat, t.dropoff.lng)], interactive: false),
+                    borderRadius: BorderRadius.circular(AnbessaRadius.lg),
+                    child: AnbessaMap(
+                      fit: [LatLng(t.pickup.lat, t.pickup.lng), LatLng(t.dropoff.lat, t.dropoff.lng)],
+                      pickup: LatLng(t.pickup.lat, t.pickup.lng),
+                      dropoff: LatLng(t.dropoff.lat, t.dropoff.lng),
+                      routes: [t.route.polyline == null ? RouteLine.straight(LatLng(t.pickup.lat, t.pickup.lng), LatLng(t.dropoff.lat, t.dropoff.lng)) : RouteLine.fromPolyline6(t.route.polyline)],
+                      interactive: false,
+                      showControls: false,
+                      padding: const EdgeInsets.all(32),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 12),
-                Row(children: [StatusPill(tripStatusLabel(l, t.status), tone: t.status == TripStatus.completed ? Tone.green : t.status == TripStatus.cancelled ? Tone.red : Tone.blue), const Spacer(), Text(dayAndTime(t.times.requestedAt, locale: context.localeTag), style: TextStyle(color: c.muted))]),
+                Row(children: [StatusPill(tripStatusLabel(l, t.status), tone: t.status == TripStatus.completed ? Tone.green : t.status == TripStatus.cancelled ? Tone.red : Tone.blue), const Spacer(), Text(dayAndTime(t.times.requestedAt, locale: context.localeTag), style: AnbessaType.caption.copyWith(color: c.muted))]),
+                const SizedBox(height: 12),
+                if (parties != null && (parties.driverName != null || parties.vehicle != null))
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Row(
+                      children: [
+                        AvatarImage(src: parties.driverPhoto, name: parties.driverName ?? l.driverLabel, size: 40),
+                        const SizedBox(width: 10),
+                        Expanded(child: Text('${parties.driverName ?? l.driverLabel} · ${parties.vehicle?.label ?? ''} ${parties.vehicle?.plateNumber ?? ''}', style: AnbessaType.body2.copyWith(color: c.text2), maxLines: 2)),
+                      ],
+                    ),
+                  ),
+                SectionCard(
+                  title: l.tripTimeline,
+                  child: Column(
+                    children: [
+                      _TimeRow(l.requestedAtLabel, t.times.requestedAt),
+                      if (t.times.startedAt != null) _TimeRow(l.startedAtLabel, t.times.startedAt!),
+                      if (t.times.completedAt != null) _TimeRow(l.completedAtLabel, t.times.completedAt!),
+                      if (t.times.cancelledAt != null) _TimeRow(l.cancelledAtLabel, t.times.cancelledAt!),
+                      if (t.route.distanceMeters != null || t.route.estDistanceMeters > 0) KeyValue(l.distanceFare, Text(km(t.route.distanceMeters ?? t.route.estDistanceMeters))),
+                    ],
+                  ),
+                ),
                 const SizedBox(height: 12),
                 ReceiptCard(trip: t),
                 if (settlement != null) ...[
@@ -118,4 +269,12 @@ class ReceiptScreen extends ConsumerWidget {
             ),
     );
   }
+}
+
+class _TimeRow extends StatelessWidget {
+  const _TimeRow(this.label, this.at);
+  final String label;
+  final DateTime at;
+  @override
+  Widget build(BuildContext context) => KeyValue(label, Text(dayAndTime(at, locale: context.localeTag)));
 }

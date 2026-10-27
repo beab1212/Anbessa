@@ -1,8 +1,11 @@
-// The design system, from the web app's tokens (apps/web/src/styles/tokens.css): light neutral
-// surfaces, amber for the active thing, red only for what needs a person now. One palette for
-// both modes; the shell says which mode you're in.
+// The design system, from the web app's tokens (apps/web/src/styles/tokens.css): neutral
+// surfaces, amber for the active thing, red only for what needs a person now. One palette per
+// brightness; rider and driver share it (the shell says which mode you're in).
 
+import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
+import 'dark_palette.dart';
+import 'tokens.dart';
 
 @immutable
 class AnbessaColors extends ThemeExtension<AnbessaColors> {
@@ -73,110 +76,244 @@ class AnbessaColors extends ThemeExtension<AnbessaColors> {
     infoSoft: Color(0xFFDBEAFE),
   );
 
-  @override
-  AnbessaColors copyWith() => this;
+  static const dark = anbessaDark;
+
+  bool get isDark => canvas.computeLuminance() < 0.2;
+  Brightness get brightness => isDark ? Brightness.dark : Brightness.light;
+
+  /// The amber a filled control is painted with: the darker amber in light mode (white text reads
+  /// on it, 4.5:1), the bright one in dark mode (dark text on it).
+  Color get primaryFill => isDark ? accent : accentStrong;
+
+  /// The text colour that reads on [primaryFill].
+  Color get onAccent => isDark ? const Color(0xFF1A1200) : Colors.white;
 
   @override
-  AnbessaColors lerp(ThemeExtension<AnbessaColors>? other, double t) => this;
+  AnbessaColors copyWith({
+    Color? canvas,
+    Color? surface,
+    Color? surface2,
+    Color? border,
+    Color? borderStrong,
+    Color? text,
+    Color? text2,
+    Color? muted,
+    Color? faint,
+    Color? accent,
+    Color? accentStrong,
+    Color? accentSoft,
+    Color? success,
+    Color? successSoft,
+    Color? warning,
+    Color? warningSoft,
+    Color? danger,
+    Color? dangerSoft,
+    Color? info,
+    Color? infoSoft,
+  }) =>
+      AnbessaColors(
+        canvas: canvas ?? this.canvas,
+        surface: surface ?? this.surface,
+        surface2: surface2 ?? this.surface2,
+        border: border ?? this.border,
+        borderStrong: borderStrong ?? this.borderStrong,
+        text: text ?? this.text,
+        text2: text2 ?? this.text2,
+        muted: muted ?? this.muted,
+        faint: faint ?? this.faint,
+        accent: accent ?? this.accent,
+        accentStrong: accentStrong ?? this.accentStrong,
+        accentSoft: accentSoft ?? this.accentSoft,
+        success: success ?? this.success,
+        successSoft: successSoft ?? this.successSoft,
+        warning: warning ?? this.warning,
+        warningSoft: warningSoft ?? this.warningSoft,
+        danger: danger ?? this.danger,
+        dangerSoft: dangerSoft ?? this.dangerSoft,
+        info: info ?? this.info,
+        infoSoft: infoSoft ?? this.infoSoft,
+      );
+
+  @override
+  AnbessaColors lerp(ThemeExtension<AnbessaColors>? other, double t) {
+    if (other is! AnbessaColors) return this;
+    Color l(Color a, Color b) => Color.lerp(a, b, t)!;
+    return AnbessaColors(
+      canvas: l(canvas, other.canvas),
+      surface: l(surface, other.surface),
+      surface2: l(surface2, other.surface2),
+      border: l(border, other.border),
+      borderStrong: l(borderStrong, other.borderStrong),
+      text: l(text, other.text),
+      text2: l(text2, other.text2),
+      muted: l(muted, other.muted),
+      faint: l(faint, other.faint),
+      accent: l(accent, other.accent),
+      accentStrong: l(accentStrong, other.accentStrong),
+      accentSoft: l(accentSoft, other.accentSoft),
+      success: l(success, other.success),
+      successSoft: l(successSoft, other.successSoft),
+      warning: l(warning, other.warning),
+      warningSoft: l(warningSoft, other.warningSoft),
+      danger: l(danger, other.danger),
+      dangerSoft: l(dangerSoft, other.dangerSoft),
+      info: l(info, other.info),
+      infoSoft: l(infoSoft, other.infoSoft),
+    );
+  }
 }
 
 extension AnbessaThemeX on BuildContext {
   AnbessaColors get colors => Theme.of(this).extension<AnbessaColors>() ?? AnbessaColors.light;
+  bool get isDark => colors.isDark;
 }
 
-const anbessaRadiusSm = 6.0;
-const anbessaRadius = 8.0;
-const anbessaRadiusLg = 12.0;
+// kept for existing call sites; new code uses AnbessaRadius
+const anbessaRadiusSm = AnbessaRadius.sm;
+const anbessaRadius = AnbessaRadius.md;
+const anbessaRadiusLg = AnbessaRadius.lg;
 
-/// Fonts: the app bundles Inter and JetBrains Mono? No: the system sans is fine on phones; ids and
-/// money use a monospace fallback. Amharic falls back to Noto Sans Ethiopic (bundled by the app).
+/// Ids and money use a monospace fallback; the app bundles the body font (Inter) and Noto Sans
+/// Ethiopic for Amharic.
 const monoFamilyFallback = ['JetBrains Mono', 'Roboto Mono', 'DejaVu Sans Mono', 'Menlo', 'monospace'];
 
-ThemeData anbessaTheme({List<String> fontFamilyFallback = const ['NotoSansEthiopic']}) {
-  const c = AnbessaColors.light;
-  final scheme = ColorScheme.fromSeed(seedColor: c.accent, brightness: Brightness.light).copyWith(
-    primary: c.accentStrong,
-    onPrimary: Colors.white,
+ThemeData anbessaTheme({Brightness brightness = Brightness.light, String? fontFamily = 'Inter', List<String> fontFamilyFallback = const ['NotoSansEthiopic']}) {
+  final dark = brightness == Brightness.dark;
+  final c = dark ? AnbessaColors.dark : AnbessaColors.light;
+  final scheme = ColorScheme.fromSeed(seedColor: c.accent, brightness: brightness).copyWith(
+    primary: c.primaryFill,
+    onPrimary: c.onAccent,
     primaryContainer: c.accentSoft,
-    onPrimaryContainer: c.accentStrong,
+    onPrimaryContainer: dark ? c.accentStrong : c.accentStrong,
     secondary: c.text2,
     surface: c.surface,
     onSurface: c.text,
     onSurfaceVariant: c.text2,
+    surfaceContainerHighest: c.surface2,
     outline: c.borderStrong,
     outlineVariant: c.border,
     error: c.danger,
-    onError: Colors.white,
+    onError: dark ? const Color(0xFF1A0000) : Colors.white,
     errorContainer: c.dangerSoft,
     onErrorContainer: c.danger,
   );
-  final base = ThemeData(useMaterial3: true, colorScheme: scheme, brightness: Brightness.light);
-  final text = base.textTheme.apply(bodyColor: c.text, displayColor: c.text, fontFamilyFallback: fontFamilyFallback);
+  final base = ThemeData(useMaterial3: true, colorScheme: scheme, brightness: brightness, fontFamily: fontFamily);
+  TextStyle t(TextStyle s) => s.copyWith(color: c.text, fontFamily: fontFamily, fontFamilyFallback: fontFamilyFallback);
+  final text = base.textTheme
+      .copyWith(
+        displayLarge: t(AnbessaType.display),
+        displayMedium: t(AnbessaType.display.copyWith(fontSize: 28)),
+        headlineLarge: t(AnbessaType.h1),
+        headlineMedium: t(AnbessaType.h1.copyWith(fontSize: 22)),
+        headlineSmall: t(AnbessaType.h2),
+        titleLarge: t(AnbessaType.h2),
+        titleMedium: t(AnbessaType.title),
+        titleSmall: t(AnbessaType.body2.copyWith(fontWeight: FontWeight.w600)),
+        bodyLarge: t(AnbessaType.body),
+        bodyMedium: t(AnbessaType.body2),
+        bodySmall: t(AnbessaType.caption.copyWith(color: c.muted)),
+        labelLarge: t(AnbessaType.body2.copyWith(fontWeight: FontWeight.w600)),
+        labelMedium: t(AnbessaType.label),
+        labelSmall: t(AnbessaType.label.copyWith(fontSize: 11)),
+      )
+      .apply(fontFamily: fontFamily, fontFamilyFallback: fontFamilyFallback);
+  final radius = BorderRadius.circular(AnbessaRadius.md);
   return base.copyWith(
     scaffoldBackgroundColor: c.canvas,
     canvasColor: c.canvas,
     textTheme: text,
-    extensions: const [c],
+    extensions: [c],
+    splashFactory: InkSparkle.splashFactory,
+    pageTransitionsTheme: const PageTransitionsTheme(builders: {
+      TargetPlatform.android: FadeForwardsPageTransitionsBuilder(),
+      TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+      TargetPlatform.linux: FadeForwardsPageTransitionsBuilder(),
+      TargetPlatform.macOS: FadeForwardsPageTransitionsBuilder(),
+      TargetPlatform.windows: FadeForwardsPageTransitionsBuilder(),
+    }),
     appBarTheme: AppBarTheme(
-      backgroundColor: c.surface,
+      backgroundColor: c.canvas,
       foregroundColor: c.text,
       elevation: 0,
       scrolledUnderElevation: 0,
       centerTitle: false,
-      shape: Border(bottom: BorderSide(color: c.border)),
-      titleTextStyle: text.titleLarge?.copyWith(fontWeight: FontWeight.w600, fontSize: 18),
+      titleTextStyle: text.titleLarge,
+      iconTheme: IconThemeData(color: c.text),
     ),
     cardTheme: CardThemeData(
       color: c.surface,
       elevation: 0,
       margin: EdgeInsets.zero,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(anbessaRadiusLg), side: BorderSide(color: c.border)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AnbessaRadius.lg), side: BorderSide(color: c.border)),
     ),
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
-        backgroundColor: c.accentStrong,
-        foregroundColor: Colors.white,
-        minimumSize: const Size(48, 48),
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(anbessaRadius)),
-        textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+        backgroundColor: c.primaryFill,
+        foregroundColor: c.onAccent,
+        disabledBackgroundColor: c.surface2,
+        disabledForegroundColor: c.faint,
+        minimumSize: const Size(48, 52),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AnbessaRadius.lg)),
+        textStyle: AnbessaType.body.copyWith(fontWeight: FontWeight.w700, fontFamily: fontFamily, fontFamilyFallback: fontFamilyFallback),
       ),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
         foregroundColor: c.text,
-        minimumSize: const Size(48, 48),
+        minimumSize: const Size(48, 52),
         side: BorderSide(color: c.borderStrong),
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(anbessaRadius)),
-        textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AnbessaRadius.lg)),
+        textStyle: AnbessaType.body.copyWith(fontWeight: FontWeight.w600, fontFamily: fontFamily, fontFamilyFallback: fontFamilyFallback),
       ),
     ),
     textButtonTheme: TextButtonThemeData(
-      style: TextButton.styleFrom(foregroundColor: c.accentStrong, minimumSize: const Size(48, 44), textStyle: const TextStyle(fontWeight: FontWeight.w600)),
+      style: TextButton.styleFrom(
+        foregroundColor: c.accentStrong,
+        minimumSize: const Size(48, 44),
+        shape: RoundedRectangleBorder(borderRadius: radius),
+        textStyle: AnbessaType.body2.copyWith(fontWeight: FontWeight.w600, fontFamily: fontFamily, fontFamilyFallback: fontFamilyFallback),
+      ),
     ),
+    iconButtonTheme: IconButtonThemeData(style: IconButton.styleFrom(foregroundColor: c.text, minimumSize: const Size(48, 48))),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
       fillColor: c.surface,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(anbessaRadius), borderSide: BorderSide(color: c.borderStrong)),
-      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(anbessaRadius), borderSide: BorderSide(color: c.borderStrong)),
-      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(anbessaRadius), borderSide: BorderSide(color: c.accent, width: 2)),
-      errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(anbessaRadius), borderSide: BorderSide(color: c.danger)),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      border: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: c.border)),
+      enabledBorder: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: c.border)),
+      focusedBorder: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: c.accent, width: 2)),
+      errorBorder: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: c.danger)),
+      focusedErrorBorder: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: c.danger, width: 2)),
       labelStyle: TextStyle(color: c.text2),
       hintStyle: TextStyle(color: c.faint),
+      prefixIconColor: c.muted,
+      suffixIconColor: c.muted,
     ),
     bottomSheetTheme: BottomSheetThemeData(
       backgroundColor: c.surface,
       surfaceTintColor: Colors.transparent,
+      modalBackgroundColor: c.surface,
       showDragHandle: true,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      dragHandleColor: c.borderStrong,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(AnbessaRadius.sheet))),
+    ),
+    dialogTheme: DialogThemeData(
+      backgroundColor: c.surface,
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AnbessaRadius.xl)),
+      titleTextStyle: text.titleLarge,
+      contentTextStyle: text.bodyMedium?.copyWith(color: c.text2),
     ),
     navigationBarTheme: NavigationBarThemeData(
       backgroundColor: c.surface,
       indicatorColor: c.accentSoft,
       surfaceTintColor: Colors.transparent,
-      labelTextStyle: WidgetStatePropertyAll(text.labelSmall?.copyWith(fontWeight: FontWeight.w600)),
+      height: 64,
+      elevation: 0,
+      indicatorShape: const StadiumBorder(),
+      labelTextStyle: WidgetStateProperty.resolveWith((s) => AnbessaType.label.copyWith(color: s.contains(WidgetState.selected) ? c.text : c.muted, fontFamily: fontFamily, fontFamilyFallback: fontFamilyFallback)),
       iconTheme: WidgetStateProperty.resolveWith((s) => IconThemeData(color: s.contains(WidgetState.selected) ? c.accentStrong : c.muted)),
     ),
     dividerTheme: DividerThemeData(color: c.border, thickness: 1, space: 1),
@@ -184,11 +321,28 @@ ThemeData anbessaTheme({List<String> fontFamilyFallback = const ['NotoSansEthiop
       backgroundColor: c.surface,
       selectedColor: c.accentSoft,
       side: BorderSide(color: c.border),
-      labelStyle: TextStyle(color: c.text, fontWeight: FontWeight.w500),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+      labelStyle: TextStyle(color: c.text, fontWeight: FontWeight.w500, fontFamily: fontFamily, fontFamilyFallback: fontFamilyFallback),
+      shape: const StadiumBorder(),
+      showCheckmark: false,
     ),
-    snackBarTheme: SnackBarThemeData(backgroundColor: c.text, contentTextStyle: const TextStyle(color: Colors.white), behavior: SnackBarBehavior.floating),
-    listTileTheme: ListTileThemeData(iconColor: c.text2, textColor: c.text),
-    progressIndicatorTheme: ProgressIndicatorThemeData(color: c.accent),
+    snackBarTheme: SnackBarThemeData(
+      backgroundColor: dark ? c.surface2 : c.text,
+      contentTextStyle: TextStyle(color: dark ? c.text : Colors.white, fontFamily: fontFamily, fontFamilyFallback: fontFamilyFallback),
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: radius),
+    ),
+    listTileTheme: ListTileThemeData(iconColor: c.text2, textColor: c.text, minVerticalPadding: 12),
+    progressIndicatorTheme: ProgressIndicatorThemeData(color: c.accent, linearTrackColor: c.border, circularTrackColor: c.border),
+    switchTheme: SwitchThemeData(
+      thumbColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? c.onAccent : c.surface),
+      trackColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? c.primaryFill : c.borderStrong),
+      trackOutlineColor: const WidgetStatePropertyAll(Colors.transparent),
+    ),
+    radioTheme: RadioThemeData(fillColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? c.accent : c.borderStrong)),
+    checkboxTheme: CheckboxThemeData(fillColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? c.primaryFill : Colors.transparent), checkColor: WidgetStatePropertyAll(c.onAccent)),
+    sliderTheme: SliderThemeData(activeTrackColor: c.accent, thumbColor: c.accent, inactiveTrackColor: c.border),
+    tabBarTheme: TabBarThemeData(labelColor: c.text, unselectedLabelColor: c.muted, indicatorColor: c.accent, dividerColor: c.border),
+    badgeTheme: BadgeThemeData(backgroundColor: c.danger, textColor: Colors.white),
+    tooltipTheme: TooltipThemeData(decoration: BoxDecoration(color: c.text, borderRadius: BorderRadius.circular(AnbessaRadius.sm)), textStyle: TextStyle(color: c.canvas)),
   );
 }

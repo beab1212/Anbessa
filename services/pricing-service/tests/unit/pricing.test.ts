@@ -29,7 +29,7 @@ describe("price", () => {
   });
 });
 
-async function setup() {
+async function setup(opts: { etaDown?: boolean } = {}) {
   const kept = new Map<string, Quote>();
   const store: QuoteStore = { put: async (q) => void kept.set(q.id, q), get: async (id) => kept.get(id) ?? null };
   const settings = staticSettings({}, { "addis-ababa": { "fares.economy.perKmMinor": 2000 } });
@@ -38,7 +38,13 @@ async function setup() {
   const jwk = { ...(await exportJWK(publicKey)), kid: "k", alg: "ES256" };
   const c = createContainer(config, pino({ level: "silent" }), {
     store, settings,
-    mapping: { route: async () => ({ distanceMeters: 6000, durationSeconds: 900, approximate: false }) },
+    mapping: { route: async (_points, geometry = false) => ({ distanceMeters: 6000, durationSeconds: 900, approximate: false, ...(geometry ? { geometry: "_p~iF~ps|U_ulLnnqC" } : {}) }) },
+    location: {
+      etaToPickup: async (q) => {
+        if (opts.etaDown) throw new Error("location 503");
+        return q.vehicleType === "economy" ? { etaSeconds: 240, driversNearby: 3, approximate: false } : { etaSeconds: null, driversNearby: 0, approximate: false };
+      },
+    },
     verifyAccessToken: createTokenVerifier({ issuer: ISSUER, keySet: createLocalJWKSet({ keys: [jwk as never] }) }),
   });
   const app = await buildApp({ ...c, ready: async () => true });
@@ -55,6 +61,12 @@ describe("estimates and the quote trip-service reads", () => {
     expect(r.statusCode).toBe(200);
     const quotes = r.json<{ quotes: Quote[] }>().quotes;
     expect(quotes.map((q) => q.vehicleType)).toEqual(["economy", "comfort", "minivan"]);
+    // the road line comes once for the map, and on each quote for trip-service to keep
+    expect(r.json()).toMatchObject({ route: { polyline6: "_p~iF~ps|U_ulLnnqC", distanceMeters: 6000, durationSeconds: 900, approximate: false } });
+    expect(quotes[0]!.routePolyline6).toBe("_p~iF~ps|U_ulLnnqC");
+    // the ETA to the pickup per vehicle type, from location-service
+    expect(quotes[0]).toMatchObject({ etaToPickupSeconds: 240, driversNearby: 3 });
+    expect(quotes[1]).toMatchObject({ etaToPickupSeconds: null, driversNearby: 0 });
     // economy in Addis: per km overridden to 20 birr → 50 + 120 + 30 = 200 birr
     expect(quotes[0]).toMatchObject({ cityId: "addis-ababa", fareMinor: 20_000, requestedBy: rider, currency: "ETB" });
 
@@ -67,6 +79,14 @@ describe("estimates and the quote trip-service reads", () => {
     expect(internal.json()).toMatchObject({ id: quotes[0]!.id, fareMinor: 20_000 });
     expect((await s.app.inject({ method: "GET", url: `/internal/quotes/${quotes[0]!.id}`, headers: { authorization: "Bearer nope" } })).statusCode).toBe(401);
     expect((await s.app.inject({ method: "GET", url: "/internal/quotes/q_missing", headers: { authorization: `Bearer ${TOKEN}` } })).statusCode).toBe(404);
+    await s.close();
+  });
+
+  it("still quotes when location-service is down: the ETA is just unknown", async () => {
+    const s = await setup({ etaDown: true });
+    const r = await s.app.inject({ method: "POST", url: "/api/pricing/estimates", headers: { authorization: `Bearer ${await s.token(crypto.randomUUID())}` }, payload: { pickup: BOLE, dropoff: PIASSA, vehicleTypes: ["economy"] } });
+    expect(r.statusCode).toBe(200);
+    expect(r.json<{ quotes: Quote[] }>().quotes[0]).toMatchObject({ fareMinor: 20_000, etaToPickupSeconds: null, driversNearby: 0 });
     await s.close();
   });
 

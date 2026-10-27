@@ -350,6 +350,8 @@ Formatting: `.editorconfig` everywhere; Prettier (`pnpm format`) for TS/JSON/MD;
 | Phone app: `Too many attempts` on sign-in | The OTP send limit (per number, per minute). Wait a minute |
 | Phone app: the driver has no profile or car in development | Run `pnpm --filter @ride-app/fleet-service seed:dev` (after auth-service's `seed:dev`) |
 | Phone app: grey map | The tile server isn't reachable. Leave `TILE_URL` empty to use OpenStreetMap's tiles in development |
+| Phone app: the driver signs in with rider mode only | auth-service's `seed:dev` writes the phone accounts' roles as listed (rider), and fleet-service only grants DRIVER when it activates a profile. Run auth's seed first, then fleet's, on a fresh database. If auth's seed ran again later, re-grant the role the way fleet-service does: `POST localhost:3001/internal/drivers/<userId>/role {"active":true}` with the service token from `services/auth-service/.env` |
+| Phone app: straight route lines, no turn list | mapping-service has no OSRM data and answers `approximate: true` with a straight line and no steps. Run `make map-data` for real roads |
 | `Bind for 0.0.0.0:6379 failed: port is already allocated` | Another Redis (often another project's container) owns the port. Stop it, or change the host port in `infra/docker/docker-compose.yml`. |
 | Postgres container exits right after an upgrade | The old Postgres 16 volume won't start on 18. Run `make infra-reset` (wipes local data). |
 | `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY` | pnpm wants to rebuild `node_modules` in a non-interactive shell. Run `CI=true pnpm install`. |

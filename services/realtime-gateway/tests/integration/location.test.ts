@@ -74,8 +74,8 @@ describe("location:update", () => {
     await goOnline(redis, { driverId: p.userId, cityId: "addis-ababa", vehicleType: "economy", vehicleId: "v", cashAllowed: true });
     await startTrip(redis, { tripId, driverId: p.userId, riderId: crypto.randomUUID() });
     const d = connect(p);
-    await d.call("location:update", { ...BOLE, tripId: "victim-trip" });
-    expect(d.emitted).toEqual([{ room: `trip:${tripId}`, event: "driver:location", data: expect.objectContaining({ tripId, driverId: p.userId }) }]);
+    await d.call("location:update", { ...BOLE, speed: 8.5, heading: 90, tripId: "victim-trip" });
+    expect(d.emitted).toEqual([{ room: `trip:${tripId}`, event: "driver:location", data: expect.objectContaining({ tripId, driverId: p.userId, speed: 8.5, heading: 90 }) }]);
     expect(d.published[0]?.tripId).toBe(tripId);
   });
 });

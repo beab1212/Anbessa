@@ -14,10 +14,15 @@ import '../../features/driver/shift/driver_home_screen.dart';
 import '../../features/driver/shift/shift_controller.dart';
 import '../../features/driver/trip/driver_trip_screen.dart';
 import '../../features/flagged/flagged_modules.dart';
-import '../../features/maps/place_picker_screen.dart';
+import '../../features/intro/intro_screen.dart';
+import '../../features/driver/vehicles/vehicles_screen.dart';
+import '../../features/profile/account_hub_screen.dart';
 import '../../features/profile/account_screens.dart';
-import '../../features/rider/booking/booking_controller.dart';
+import '../../features/profile/preference_screens.dart';
+import '../../features/profile/profile_screen.dart';
+import '../../features/profile/saved_places_screen.dart';
 import '../../features/rider/booking/quote_screen.dart';
+import '../../features/rider/booking/route_editor_screen.dart';
 import '../../features/rider/history/history_screens.dart';
 import '../../features/rider/home/rider_home_screen.dart';
 import '../../features/rider/payments/pay_screen.dart';
@@ -27,6 +32,7 @@ import '../../features/rider/trip/rider_trip_screen.dart';
 import '../../features/shell/shells.dart';
 import '../session/session_controller.dart';
 import 'routes.dart';
+import 'transitions.dart';
 
 /// Re-runs the redirect when what it depends on changes.
 class RouterNotifier extends ChangeNotifier {
@@ -36,6 +42,7 @@ class RouterNotifier extends ChangeNotifier {
     ref.listen(activeTripProvider, (_, _) => notifyListeners());
     ref.listen(updateRequiredProvider, (_, _) => notifyListeners());
     ref.listen(driverHomeProvider, (_, _) => notifyListeners());
+    ref.listen(introSeenProvider, (_, _) => notifyListeners());
   }
   final Ref ref;
 }
@@ -50,6 +57,7 @@ final routerProvider = Provider<GoRouter>((ref) {
     redirect: (context, state) => _redirect(ref, state),
     routes: [
       GoRoute(path: Routes.splash, builder: (_, _) => const SplashScreen()),
+      GoRoute(path: Routes.intro, pageBuilder: (_, s) => fadeThroughPage(s, const IntroScreen())),
       GoRoute(path: Routes.updateRequired, builder: (_, _) => const UpdateRequiredScreen()),
       GoRoute(path: Routes.welcome, builder: (_, _) => const WelcomeScreen()),
       GoRoute(path: Routes.signIn, builder: (_, s) => PhoneScreen(driver: s.uri.queryParameters['driver'] == '1')),
@@ -77,23 +85,20 @@ final routerProvider = Provider<GoRouter>((ref) {
           StatefulShellBranch(routes: [GoRoute(path: Routes.riderAccount, builder: (_, _) => const AccountScreen(mode: AppMode.rider))]),
         ],
       ),
-      GoRoute(path: Routes.riderPickup, builder: (_, _) => Consumer(builder: (ctx, r, _) => PlacePickerScreen(what: PickWhat.pickup, initial: r.read(bookingProvider).pickup, onPicked: (p) {
-            r.read(bookingProvider.notifier).setPickup(p);
-            if (r.read(bookingProvider).ready) {
-              ctx.go(Routes.riderQuote);
-            } else {
-              ctx.pushReplacement(Routes.riderDropoff);
-            }
-          }))),
-      GoRoute(path: Routes.riderDropoff, builder: (_, _) => Consumer(builder: (ctx, r, _) => PlacePickerScreen(what: PickWhat.dropoff, initial: r.read(bookingProvider).dropoff, onPicked: (p) {
-            r.read(bookingProvider.notifier).setDropoff(p);
-            if (r.read(bookingProvider).ready) {
-              ctx.go(Routes.riderQuote);
-            } else {
-              ctx.pushReplacement(Routes.riderPickup);
-            }
-          }))),
-      GoRoute(path: Routes.riderQuote, builder: (_, _) => const QuoteScreen()),
+      GoRoute(path: Routes.riderPickup, redirect: (_, _) => '${Routes.riderRoute}?focus=pickup'),
+      GoRoute(path: Routes.riderDropoff, redirect: (_, _) => '${Routes.riderRoute}?focus=dropoff'),
+      GoRoute(
+        path: Routes.riderRoute,
+        pageBuilder: (_, s) => slideUpPage(
+          s,
+          RouteEditorScreen(
+            focus: s.uri.queryParameters['focus'] == 'pickup' ? RouteField.pickup : RouteField.dropoff,
+            mode: s.uri.queryParameters['mode'] == 'savedPlace' ? RouteEditorMode.savedPlace : RouteEditorMode.book,
+            savedLabel: s.uri.queryParameters['label'],
+          ),
+        ),
+      ),
+      GoRoute(path: Routes.riderQuote, pageBuilder: (_, s) => slideUpPage(s, const QuoteScreen())),
       GoRoute(path: '/rider/trip/:id', builder: (_, s) => RiderTripScreen(tripId: s.pathParameters['id']!), routes: [
         GoRoute(path: 'pay', builder: (_, s) => PayScreen(tripId: s.pathParameters['id']!)),
         GoRoute(path: 'rate', builder: (_, s) => RatingScreen(tripId: s.pathParameters['id']!, asDriver: false, doneRoute: Routes.riderHome)),
@@ -133,6 +138,13 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: Routes.language, builder: (_, _) => const LanguageScreen()),
       GoRoute(path: Routes.sessions, builder: (_, _) => const SessionsScreen()),
       GoRoute(path: Routes.paymentPrefs, builder: (_, _) => const PaymentPreferencesScreen()),
+      GoRoute(path: Routes.savedPlaces, builder: (_, _) => const SavedPlacesScreen()),
+      GoRoute(path: Routes.appearance, builder: (_, _) => const AppearanceScreen()),
+      GoRoute(path: Routes.notifications, builder: (_, _) => const NotificationsScreen()),
+      GoRoute(path: Routes.safety, builder: (_, _) => const SafetyScreen()),
+      GoRoute(path: Routes.organizations, builder: (_, _) => const OrganizationsScreen()),
+      GoRoute(path: Routes.navigationPrefs, builder: (_, _) => const NavigationPrefsScreen()),
+      GoRoute(path: Routes.driverVehicles, builder: (_, _) => const VehiclesScreen()),
       GoRoute(path: Routes.deleteAccount, builder: (_, _) => const DeleteAccountScreen()),
       GoRoute(path: Routes.scheduled, builder: (_, _) => const ScheduledRidesScreen(), routes: [GoRoute(path: 'new', builder: (_, _) => const ScheduleRideScreen())]),
       GoRoute(path: Routes.sos, builder: (_, s) => SosScreen(tripId: s.uri.queryParameters['trip'])),
@@ -144,6 +156,8 @@ final routerProvider = Provider<GoRouter>((ref) {
 
 const _authPaths = {Routes.welcome, Routes.signIn, Routes.verify};
 const _anywherePrefixes = ['/account', '/sos', '/support', '/scheduled', '/promos'];
+/// The route editor also picks saved places from the account, whatever the mode.
+const _riderBookingPrefix = '/rider/book';
 
 String? _redirect(Ref ref, GoRouterState state) {
   final path = state.uri.path;
@@ -154,13 +168,18 @@ String? _redirect(Ref ref, GoRouterState state) {
   if (ref.read(updateRequiredProvider)) return path == Routes.updateRequired ? null : Routes.updateRequired;
   if (path == Routes.updateRequired) return Routes.splash;
   final session = sessionAsync.value;
-  // 3. signed out
-  if (session == null) return _authPaths.contains(path) ? null : Routes.welcome;
+  // 3. signed out (the intro once, first)
+  if (session == null) {
+    if (!ref.read(introSeenProvider)) return path == Routes.intro ? null : Routes.intro;
+    return _authPaths.contains(path) ? null : Routes.welcome;
+  }
+  if (path == Routes.intro) return Routes.splash;
   // 4. mode
   final mode = ref.read(effectiveModeProvider);
   if (mode == null) return path == Routes.mode ? null : Routes.mode;
   if (path == Routes.splash || path == Routes.mode || _authPaths.contains(path)) return mode == AppMode.rider ? Routes.riderHome : Routes.driverHome;
   if (_anywherePrefixes.any((p) => path.startsWith(p))) return null;
+  if (path.startsWith(_riderBookingPrefix) && mode == AppMode.driver) return null;
   final inRider = path.startsWith('/rider');
   final inDriver = path.startsWith('/driver');
   if (mode == AppMode.rider && inDriver) return Routes.riderHome;
@@ -169,7 +188,7 @@ String? _redirect(Ref ref, GoRouterState state) {
   if (mode == AppMode.driver) {
     final home = ref.read(driverHomeProvider).value;
     final approved = session.canDrive && (home?.driver?.isActive ?? true);
-    if (home != null && !approved && !path.startsWith(Routes.driverOnboarding) && path != Routes.driverAccount && !path.startsWith(Routes.driverEarnings)) return Routes.driverOnboarding;
+    if (home != null && !approved && !path.startsWith(Routes.driverOnboarding) && path != Routes.driverAccount && path != Routes.driverVehicles && !path.startsWith(Routes.driverEarnings)) return Routes.driverOnboarding;
   }
   // 6. the active trip takes over
   final trip = ref.read(activeTripProvider).value;

@@ -54,7 +54,7 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
     const wanted = body.vehicleTypes ?? available;
     const refused = wanted.filter((t) => !available.includes(t));
     if (cityId && refused.length) throw badRequest(`not offered in this city: ${refused.join(", ")}`, "vehicle_type_unavailable");
-    return { quotes: await quotes.estimate({ ...body, vehicleTypes: wanted, requestedBy: p.userId }) };
+    return quotes.estimateWithRoute({ ...body, vehicleTypes: wanted, requestedBy: p.userId });
   });
 
   // the fare card (public: shown in the apps before signing in)

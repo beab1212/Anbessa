@@ -86,10 +86,12 @@ final tripPartiesProvider = FutureProvider.family<TripParties, String>((ref, tri
 
 @immutable
 class DriverLive {
-  const DriverLive({required this.lat, required this.lng, this.heading, required this.at});
+  const DriverLive({required this.lat, required this.lng, this.heading, this.speed, required this.at});
   final double lat;
   final double lng;
   final double? heading;
+  /// m/s, when the socket carried it (polled positions don't)
+  final double? speed;
   final DateTime at;
 }
 
@@ -105,7 +107,7 @@ final driverLiveProvider = StreamProvider.family<DriverLive, String>((ref, tripI
   Future<void> join() async => joined = await hub.subscribeTrip(tripId);
   join();
   final sub = hub.events.listen((e) {
-    if (e is DriverLocationEvent && e.tripId == tripId) ctrl.add(DriverLive(lat: e.lat, lng: e.lng, heading: e.heading, at: e.at));
+    if (e is DriverLocationEvent && e.tripId == tripId) ctrl.add(DriverLive(lat: e.lat, lng: e.lng, heading: e.heading, speed: e.speed, at: e.at));
   });
   // after a drop the hub rejoins its rooms; if that is refused too, the next tick asks again
   final states = hub.states.listen((s) {

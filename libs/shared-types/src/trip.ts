@@ -29,7 +29,14 @@ export interface Trip {
   driver: { userId: string; vehicleId: string | null } | null;
   /** minor units (santim) */
   fare: { estimateMinor: number; finalMinor: number | null; waitingFeeMinor: number | null; currency: string };
-  route: { estDistanceMeters: number; estDurationSeconds: number; distanceMeters: number | null; durationSeconds: number | null };
+  route: {
+    estDistanceMeters: number;
+    estDurationSeconds: number;
+    distanceMeters: number | null;
+    durationSeconds: number | null;
+    /** the road line pickup → drop-off, encoded polyline precision 6 (null for trips quoted before it existed) */
+    polyline: string | null;
+  };
   /** ISO 8601 */
   times: {
     requestedAt: string; matchedAt: string | null; arrivedAt: string | null;
@@ -41,3 +48,9 @@ export interface Trip {
   /** staff only: review flags such as FAR_FROM_DROPOFF */
   flags?: string[];
 }
+
+/** What a rider or driver can tick when rating (workflow 08 step 14). The apps localise them. */
+export const RATING_TAGS = {
+  RIDER: ["polite", "safe_driving", "clean_car", "on_time", "good_navigation", "rude", "unsafe_driving", "dirty_car", "late", "took_long_route"],
+  DRIVER: ["polite", "on_time", "clear_pickup", "respectful", "rude", "late", "wrong_pickup", "left_mess"],
+} as const;

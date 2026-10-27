@@ -31,7 +31,11 @@ All routes take an access token: app (`aud=ride-app`) or staff (`aud=ride-admin`
 | `POST /api/trips/:id/assign` | dispatcher (`trip:assign @ CITY`) | `{ driverId }`: manual assignment |
 | `POST /api/trips/:id/en-route` · `/arrive` · `/start` · `/complete` | the assigned driver (`trip:update_status @ SELF`) | Progress. `arrive` needs the last ping within 150 m of the pickup. `start` needs `arrive` (and the rider's PIN when `TRIP_PIN_REQUIRED=true`) |
 | `POST /api/trips/:id/cancel` | rider, assigned driver (`@ SELF`) · coordinator (`@ ORG`) · call center, dispatch, support, safety (`@ CITY`) | `{ reason }`. Fee per workflow 07 (below) |
-| `POST /api/trips/:id/rating` | the trip's rider or driver | `{ stars 1–5, comment? }`, once each, within 7 days of completion |
+| `POST /api/trips/:id/rating` · `GET /api/trips/:id/rating` | the trip's rider or driver | `{ stars 1–5, comment?, tags? }` (tags from `RATING_TAGS` in shared-types, ≤ 5), once each, within 7 days of completion; `GET` reads back your own |
+| `GET /api/trips/me/rating` | yourself | `{ average, count }` of the ratings you received (cached 5 min). `GET /api/trips/:id/parties` shows a driver's average once they have 3 |
+| `GET /api/trips/places` · `PUT /api/trips/places/home\|work` · `POST /api/trips/places` · `DELETE /api/trips/places/:id` | yourself | Saved places: one Home, one Work, others; 20 at most |
+| `POST /api/trips/:id/share` · `DELETE /api/trips/:id/share` | the trip's rider or booker | A share link `{ token, url, expiresAt }` (the same one when asked again) / stop sharing. Refused (`409 trip_ended`) more than 30 min after the end |
+| `GET /api/trips/shared/:token` | **no token**; 30/min per IP | The shared view: status, pickup and drop-off, the driver's first name and photo, the car, the live position (fresh, while on this trip), the road line. Unknown, revoked and expired links all answer `404` |
 | `GET /api/trips/:id` | rider, booker, driver · staff of the city · billing org · the vehicle's fleet | The trip. The PIN goes to the rider's side only, review flags to staff only |
 | `GET /api/trips?as=rider\|driver&before=` · `GET /api/trips/active` | yourself | Your trips (keyset pagination), your current trip |
 | `GET /api/trips/board?cityId=` | `trip:read @ CITY` | Dispatcher live board: active trips |
@@ -68,8 +72,8 @@ Errors are `{ error, message }`: `409 invalid_state` (another change won the rac
 ### Not yet
 
 - **Quotes:** pricing-service doesn't exist, so `PRICING=builtin` (refused in production) prices with a fixed table and mapping-service routes. pricing-service must serve `GET /internal/quotes/:id` with the `Quote` shape in `src/quotes.ts`.
-- **Route:** the actual distance is the planned route until GPS-trace matching (OSRM `/match` on `driver.location`) is added. No ETA refresh or route-deviation alerts yet.
-- **Mid-trip:** no destination change, share links or masked calls. Payment pre-authorisation waits for payment-service.
+- **Route:** the actual distance is the planned route until GPS-trace matching (OSRM `/match` on `driver.location`) is added. No server-side ETA refresh or route-deviation alerts (the phone app refreshes the ETA from mapping-service).
+- **Mid-trip:** no destination change or masked calls. Payment pre-authorisation waits for payment-service.
 - **No-show:** the "contact attempt" requirement isn't checked yet (no telephony).
 - **Push for backgrounded apps:** offers and status only reach open sockets. notification-service will push them from the trip events.
 

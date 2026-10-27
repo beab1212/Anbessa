@@ -20,6 +20,10 @@ abstract final class Env {
   static const tileUrl = String.fromEnvironment('TILE_URL', defaultValue: '');
   static const tileAttribution = String.fromEnvironment('TILE_ATTRIBUTION', defaultValue: '© OpenStreetMap contributors');
 
+  /// Raster tiles for dark mode. Empty: CARTO's dark style over OSM data (development only).
+  static const tileUrlDark = String.fromEnvironment('TILE_URL_DARK', defaultValue: '');
+  static const tileAttributionDark = String.fromEnvironment('TILE_ATTRIBUTION_DARK', defaultValue: '© OpenStreetMap contributors © CARTO');
+
   /// `on`: the sign-in page lists the seed accounts (auth-service DEV_LOGIN=on; debug builds only).
   static const devLogin = String.fromEnvironment('DEV_LOGIN', defaultValue: 'off');
 

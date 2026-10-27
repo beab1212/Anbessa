@@ -30,6 +30,9 @@ class Quote {
     required this.distanceMeters,
     required this.durationSeconds,
     required this.approximate,
+    this.routePolyline6,
+    this.etaToPickupSeconds,
+    this.driversNearby = 0,
     this.breakdown,
     required this.expiresAt,
   });
@@ -46,6 +49,11 @@ class Quote {
   final int durationSeconds;
   /// routing was down: straight-line distance and time
   final bool approximate;
+  /// the road line pickup → drop-off (encoded polyline, precision 6)
+  final String? routePolyline6;
+  /// how soon the nearest car of this type could reach the pickup (null: unknown or none)
+  final int? etaToPickupSeconds;
+  final int driversNearby;
   final FareBreakdown? breakdown;
   final DateTime expiresAt;
 
@@ -55,11 +63,39 @@ class Quote {
         dropoff: TripPlace.fromJson({...asJson(j['dropoff']), 'address': j['dropoffAddress']}),
         fareMinor: readInt(j, 'fareMinor'), waitingPerMinMinor: readInt(j, 'waitingPerMinMinor'), currency: str(j, 'currency', 'ETB'),
         distanceMeters: readInt(j, 'distanceMeters'), durationSeconds: readInt(j, 'durationSeconds'), approximate: readBool(j, 'approximate'),
+        routePolyline6: strOrNull(j, 'routePolyline6'),
+        etaToPickupSeconds: intOrNull(j, 'etaToPickupSeconds'),
+        driversNearby: readInt(j, 'driversNearby', 0),
         breakdown: j['breakdown'] is Map ? FareBreakdown.fromJson(asJson(j['breakdown'])) : null,
         expiresAt: readDate(j, 'expiresAt'),
       );
 
   bool isExpired(DateTime now) => !expiresAt.isAfter(now);
+}
+
+/// The road line the quotes of one estimate share.
+@immutable
+class QuoteRoute {
+  const QuoteRoute({required this.polyline6, required this.distanceMeters, required this.durationSeconds, required this.approximate});
+  final String polyline6;
+  final int distanceMeters;
+  final int durationSeconds;
+  final bool approximate;
+  factory QuoteRoute.fromJson(Json j) => QuoteRoute(
+        polyline6: str(j, 'polyline6', ''), distanceMeters: readInt(j, 'distanceMeters'), durationSeconds: readInt(j, 'durationSeconds'), approximate: readBool(j, 'approximate'),
+      );
+}
+
+/// POST /api/pricing/estimates
+@immutable
+class Estimates {
+  const Estimates({required this.quotes, this.route});
+  final List<Quote> quotes;
+  final QuoteRoute? route;
+  factory Estimates.fromJson(Json j) => Estimates(
+        quotes: asJsonList(j['quotes']).map(Quote.fromJson).toList(growable: false),
+        route: j['route'] is Map ? QuoteRoute.fromJson(asJson(j['route'])) : null,
+      );
 }
 
 @immutable

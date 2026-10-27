@@ -19,8 +19,8 @@ class FixedConfig extends ClientConfigController {
   Future<ClientConfig> build() async => ClientConfig.fromJson(fixture('client_config.json'));
 }
 
-Future<void> boot(WidgetTester tester, {String? locale}) async {
-  SharedPreferences.setMockInitialValues({'locale': ?locale});
+Future<void> boot(WidgetTester tester, {String? locale, String? themeMode, bool introSeen = true}) async {
+  SharedPreferences.setMockInitialValues({'locale': ?locale, 'theme_mode': ?themeMode, 'intro_seen': introSeen});
   final prefs = await SharedPreferences.getInstance();
   tester.view.physicalSize = const Size(360 * 3, 740 * 3);
   tester.view.devicePixelRatio = 3;
@@ -51,6 +51,23 @@ void main() {
   testWidgets('Amharic renders the same screen', (tester) async {
     await boot(tester, locale: 'am');
     expect(find.text('በስልክ ቁጥርዎ ይቀጥሉ'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('the first launch shows the intro, and Skip leads to Welcome', (tester) async {
+    await boot(tester, introSeen: false);
+    expect(find.text('Skip'), findsOneWidget);
+    expect(find.text('Continue with your phone number'), findsNothing);
+    await tester.tap(find.text('Skip'));
+    await tester.pumpAndSettle();
+    expect(find.text('Continue with your phone number'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('dark mode renders Welcome too', (tester) async {
+    await boot(tester, themeMode: 'dark');
+    expect(find.text('Continue with your phone number'), findsOneWidget);
+    expect(Theme.of(tester.element(find.text('Continue with your phone number'))).brightness, Brightness.dark);
     expect(tester.takeException(), isNull);
   });
 

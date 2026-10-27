@@ -225,6 +225,7 @@ model TripSettlement {
 
   @@id([tripId, purpose])
   @@index([beneficiaryAccountId, settledAt(sort: Desc)])
+  @@index([driverId, settledAt(sort: Desc)], map: "trip_settlement_driver_id_settled_at_idx")
   @@map("trip_settlement")
 }
 

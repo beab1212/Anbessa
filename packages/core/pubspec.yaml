@@ -14,6 +14,10 @@ dependencies:
   intl: ^0.20.2
   crypto: ^3.0.7
   meta: ^1.16.0
+  flutter_animate: ^4.5.2   # motion helpers (FadeSlideIn, Pulse)
+  shimmer: ^4.0.0           # skeleton loading
+  pinput: ^6.0.1            # OTP and trip PIN boxes (7.x is built on material_ui, not flutter/material)
+  flutter_svg: ^2.3.0       # illustrations
 
 dev_dependencies:
   flutter_test:
@@ -22,3 +26,5 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/illustrations/

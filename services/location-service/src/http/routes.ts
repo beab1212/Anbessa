@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
+import rateLimit from "@fastify/rate-limit";
 import type { Redis } from "ioredis";
 import { z } from "zod";
 import { bearerToken, type VerifyAccessToken } from "@ride-app/shared-authz";
@@ -81,5 +82,17 @@ export async function registerRoutes(
   app.get("/api/locations/trips/:tripId/driver", async (req) => {
     const { tripId } = z.object({ tripId: z.string().uuid() }).parse(req.params);
     return locations.tripDriver(await principal(req.headers.authorization, "ride-app"), tripId);
+  });
+
+  // rider home: anonymous cars around you (polled every ~10 s; 30/min per person)
+  await app.register(async (pub) => {
+    pub.addHook("onRequest", async (req) => {
+      (req as FastifyRequest & { userId?: string }).userId = (await principal(req.headers.authorization, "ride-app")).userId;
+    });
+    await pub.register(rateLimit, { max: 30, timeWindow: "1 minute", hook: "preHandler", keyGenerator: (req: FastifyRequest) => (req as FastifyRequest & { userId?: string }).userId ?? req.ip });
+    pub.get("/api/locations/nearby", async (req) => {
+      const q = z.object({ ...at, vehicleType: z.string().min(1).max(30).optional() }).parse(req.query);
+      return locations.nearbyPublic(q);
+    });
   });
 }

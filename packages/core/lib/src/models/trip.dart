@@ -68,14 +68,17 @@ class TripFare {
 
 @immutable
 class TripRoute {
-  const TripRoute({required this.estDistanceMeters, required this.estDurationSeconds, this.distanceMeters, this.durationSeconds});
+  const TripRoute({required this.estDistanceMeters, required this.estDurationSeconds, this.distanceMeters, this.durationSeconds, this.polyline});
   final int estDistanceMeters;
   final int estDurationSeconds;
   final int? distanceMeters;
   final int? durationSeconds;
+  /// the road line pickup → drop-off (encoded polyline, precision 6); null for older trips
+  final String? polyline;
   factory TripRoute.fromJson(Json j) => TripRoute(
         estDistanceMeters: readInt(j, 'estDistanceMeters'), estDurationSeconds: readInt(j, 'estDurationSeconds'),
         distanceMeters: intOrNull(j, 'distanceMeters'), durationSeconds: intOrNull(j, 'durationSeconds'),
+        polyline: strOrNull(j, 'polyline'),
       );
 }
 
@@ -184,4 +187,14 @@ class Trip {
       other is Trip && other.id == id && other.status == status && other.times.arrivedAt == times.arrivedAt && other.driver?.userId == driver?.userId && other.fare.finalMinor == fare.finalMinor;
   @override
   int get hashCode => Object.hash(id, status, times.arrivedAt, driver?.userId, fare.finalMinor);
+}
+
+/// POST /api/trips/:id/share — a link anyone can open to follow the trip.
+@immutable
+class TripShare {
+  const TripShare({required this.token, required this.url, required this.expiresAt});
+  final String token;
+  final String url;
+  final DateTime expiresAt;
+  factory TripShare.fromJson(Json j) => TripShare(token: str(j, 'token'), url: str(j, 'url'), expiresAt: readDate(j, 'expiresAt'));
 }

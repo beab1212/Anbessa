@@ -9,6 +9,16 @@ import type { Maps } from "../maps.js";
 const point = z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) });
 const queryPoint = z.object({ lat: z.coerce.number().min(-90).max(90), lng: z.coerce.number().min(-180).max(180) });
 const language = z.enum(["en", "am"]).default("en");
+/** "lat,lng" in a query string */
+const latLngPair = z.string().transform((v, ctx) => {
+  const [a, b] = v.split(",").map(Number);
+  const ok = a !== undefined && b !== undefined && Number.isFinite(a) && Number.isFinite(b) && Math.abs(a) <= 90 && Math.abs(b) <= 180;
+  if (!ok) {
+    ctx.addIssue({ code: "custom", message: "expected lat,lng" });
+    return z.NEVER;
+  }
+  return { lat: a, lng: b };
+});
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -28,8 +38,8 @@ export async function registerRoutes(app: FastifyInstance, deps: { maps: Maps; i
     });
 
     internal.post("/internal/route", { config: { rateLimit: false } }, async (req) => {
-      const body = z.object({ points: z.array(point).min(2).max(10), geometry: z.boolean().default(false) }).parse(req.body);
-      return maps.route(body.points, body.geometry);
+      const body = z.object({ points: z.array(point).min(2).max(10), geometry: z.boolean().default(false), steps: z.boolean().default(false) }).parse(req.body);
+      return maps.route(body.points, body.geometry, body.steps);
     });
 
     internal.post("/internal/table", { config: { rateLimit: false } }, async (req) => {
@@ -66,6 +76,13 @@ export async function registerRoutes(app: FastifyInstance, deps: { maps: Maps; i
 
     // move the pickup pin onto the nearest road
     pub.get("/api/maps/snap", async (req) => maps.snap(queryPoint.parse(req.query)));
+
+    // the road line (and the turns, for the driver's navigation banner) between two points
+    pub.get("/api/maps/route", async (req) => {
+      const q = z.object({ from: latLngPair, to: latLngPair, steps: z.enum(["0", "1"]).default("0") }).parse(req.query);
+      const r = await maps.route([q.from, q.to], true, q.steps === "1");
+      return { polyline6: r.geometry ?? "", distanceMeters: r.distanceMeters, durationSeconds: r.durationSeconds, approximate: r.approximate, steps: r.steps ?? [] };
+    });
   });
 }
 

@@ -8,11 +8,37 @@ interface OsrmResponse {
   message?: string;
 }
 
+export interface RouteStep {
+  maneuver: {
+    /** OSRM: depart, turn, new name, continue, merge, on ramp, off ramp, fork, end of road, roundabout, exit roundabout, arrive, … */
+    type: string;
+    /** left, right, slight left, sharp right, straight, uturn, … */
+    modifier?: string;
+    location: LatLng;
+    bearingAfter: number;
+    /** roundabouts: which exit to take */
+    exit?: number;
+  };
+  /** street name ("" when unnamed) */
+  name: string;
+  distanceMeters: number;
+  durationSeconds: number;
+}
+
 export interface RouteResult {
   distanceMeters: number;
   durationSeconds: number;
   /** encoded polyline, precision 6 (when requested) */
   geometry?: string;
+  /** turn-by-turn steps (when requested) */
+  steps?: RouteStep[];
+}
+
+interface OsrmStep {
+  distance: number;
+  duration: number;
+  name: string;
+  maneuver: { type: string; modifier?: string; location: [number, number]; bearing_after: number; exit?: number };
 }
 
 export interface TableResult {
@@ -39,17 +65,34 @@ export function osrmClient(baseUrl: string, timeoutMs: number) {
   }
 
   return {
-    async route(points: LatLng[], withGeometry: boolean): Promise<RouteResult> {
-      const r = await call<OsrmResponse & { routes: { distance: number; duration: number; geometry?: string }[] }>(
+    async route(points: LatLng[], withGeometry: boolean, withSteps = false): Promise<RouteResult> {
+      const r = await call<OsrmResponse & { routes: { distance: number; duration: number; geometry?: string; legs?: { steps?: OsrmStep[] }[] }[] }>(
         `/route/v1/driving/${points.map(coord).join(";")}`,
-        { overview: withGeometry ? "full" : "false", geometries: "polyline6", steps: "false", alternatives: "false" },
+        { overview: withGeometry ? "full" : "false", geometries: "polyline6", steps: withSteps ? "true" : "false", alternatives: "false" },
       );
       const best = r.routes[0];
       if (!best) throw new EngineError("osrm", "NoRoute", 404);
+      const steps: RouteStep[] | undefined = withSteps
+        ? (best.legs ?? []).flatMap((leg) =>
+            (leg.steps ?? []).map((st) => ({
+              maneuver: {
+                type: st.maneuver.type,
+                ...(st.maneuver.modifier ? { modifier: st.maneuver.modifier } : {}),
+                location: { lng: st.maneuver.location[0], lat: st.maneuver.location[1] },
+                bearingAfter: Math.round(st.maneuver.bearing_after ?? 0),
+                ...(st.maneuver.exit !== undefined ? { exit: st.maneuver.exit } : {}),
+              },
+              name: st.name ?? "",
+              distanceMeters: Math.round(st.distance),
+              durationSeconds: Math.round(st.duration),
+            })),
+          )
+        : undefined;
       return {
         distanceMeters: Math.round(best.distance),
         durationSeconds: Math.round(best.duration),
         ...(withGeometry && best.geometry ? { geometry: best.geometry } : {}),
+        ...(steps ? { steps } : {}),
       };
     },
 

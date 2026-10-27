@@ -23,7 +23,10 @@ void main() {
   late RealtimeHub hub;
   late ProviderContainer c;
 
+  final haptics = <HapticKind>[];
   setUp(() {
+    haptics.clear();
+    Haptics.sink = haptics.add;
     hub = fakeHub();
     c = ProviderContainer(overrides: [
       realtimeHubProvider.overrideWithValue(hub),
@@ -44,6 +47,8 @@ void main() {
     expect(s.offer?.offerId, 'o1');
     expect(s.offer!.fareEstimateMinor, 25000);
     expect(s.offer!.remaining(DateTime.now().toUtc()).inSeconds, greaterThan(10));
+    // the phone buzzes once per offer
+    expect(haptics, [HapticKind.offer]);
   });
 
   test('offer_expired for this offer clears it with a notice', () async {

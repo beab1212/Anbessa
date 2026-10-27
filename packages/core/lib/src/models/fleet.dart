@@ -24,10 +24,12 @@ DocumentKind documentKindFromApi(String? v) => enumFrom(DocumentKind.values, v, 
 
 @immutable
 class DocumentView {
-  const DocumentView({required this.id, required this.kind, required this.status, this.expiresAt, required this.expiringSoon, this.rejectReason, required this.createdAt});
+  const DocumentView({required this.id, required this.kind, required this.status, this.contentType, this.expiresAt, required this.expiringSoon, this.rejectReason, required this.createdAt});
   final String id;
   final DocumentKind kind;
   final DocumentStatus status;
+  final String? contentType;
+  bool get isImage => contentType?.startsWith('image/') ?? false;
   /// YYYY-MM-DD
   final String? expiresAt;
   final bool expiringSoon;
@@ -36,8 +38,18 @@ class DocumentView {
   factory DocumentView.fromJson(Json j) => DocumentView(
         id: str(j, 'id'), kind: documentKindFromApi(strOrNull(j, 'kind')),
         status: enumFrom(DocumentStatus.values, strOrNull(j, 'status'), DocumentStatus.unknown, apiName: (s) => s.name.toUpperCase()),
-        expiresAt: strOrNull(j, 'expiresAt'), expiringSoon: readBool(j, 'expiringSoon'), rejectReason: strOrNull(j, 'rejectReason'), createdAt: readDate(j, 'createdAt'),
+        contentType: strOrNull(j, 'contentType'), expiresAt: strOrNull(j, 'expiresAt'), expiringSoon: readBool(j, 'expiringSoon'), rejectReason: strOrNull(j, 'rejectReason'), createdAt: readDate(j, 'createdAt'),
       );
+}
+
+/// GET /api/fleet/documents/:id/url — a short-lived link to the file.
+@immutable
+class DocumentUrl {
+  const DocumentUrl({required this.url, this.contentType, required this.expiresIn});
+  final String url;
+  final String? contentType;
+  final int expiresIn;
+  factory DocumentUrl.fromJson(Json j) => DocumentUrl(url: str(j, 'url'), contentType: strOrNull(j, 'contentType'), expiresIn: readInt(j, 'expiresIn', 300));
 }
 
 /// One line of the checklist: a kind the subject needs and what's uploaded for it.

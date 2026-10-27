@@ -28,6 +28,46 @@ class MapsApi {
       _c.getJson('/api/maps/search', query: {'q': q, 'cityId': ?cityId, 'language': language, 'limit': limit}).then((j) => asJsonList(j['results']).map(Place.fromJson).toList(growable: false));
   Future<Place?> reverse(double lat, double lng, {String language = 'en'}) => _c.getJson('/api/maps/reverse', query: {'lat': lat, 'lng': lng, 'language': language}).then((j) => j.isEmpty ? null : Place.fromJson(j));
   Future<({double lat, double lng})> snap(double lat, double lng) => _c.getJson('/api/maps/snap', query: {'lat': lat, 'lng': lng}).then((j) => (lat: readDouble(j, 'lat', lat), lng: readDouble(j, 'lng', lng)));
+  /// The road line between two points, with the turns when [steps] (the driver's navigation).
+  Future<RouteSteps> route({required double fromLat, required double fromLng, required double toLat, required double toLng, bool steps = false}) =>
+      _c.getJson('/api/maps/route', query: {'from': '$fromLat,$fromLng', 'to': '$toLat,$toLng', 'steps': steps ? '1' : '0'}).then(RouteSteps.fromJson);
+}
+
+/// GET /api/maps/route
+class RouteSteps {
+  const RouteSteps({required this.polyline6, required this.distanceMeters, required this.durationSeconds, required this.approximate, required this.steps});
+  final String polyline6;
+  final int distanceMeters;
+  final int durationSeconds;
+  final bool approximate;
+  final List<RouteStep> steps;
+  factory RouteSteps.fromJson(Json j) => RouteSteps(
+        polyline6: str(j, 'polyline6', ''), distanceMeters: readInt(j, 'distanceMeters'), durationSeconds: readInt(j, 'durationSeconds'),
+        approximate: readBool(j, 'approximate'), steps: asJsonList(j['steps']).map(RouteStep.fromJson).toList(growable: false),
+      );
+}
+
+class RouteStep {
+  const RouteStep({required this.type, this.modifier, required this.lat, required this.lng, required this.bearingAfter, this.exit, required this.name, required this.distanceMeters, required this.durationSeconds});
+  /// OSRM maneuver type: depart, turn, new name, continue, merge, on ramp, off ramp, fork, end of road, roundabout, exit roundabout, arrive…
+  final String type;
+  /// left, right, slight left, sharp right, straight, uturn…
+  final String? modifier;
+  final double lat;
+  final double lng;
+  final int bearingAfter;
+  final int? exit;
+  final String name;
+  final int distanceMeters;
+  final int durationSeconds;
+  factory RouteStep.fromJson(Json j) {
+    final m = asJson(j['maneuver']);
+    final loc = asJson(m['location']);
+    return RouteStep(
+      type: str(m, 'type'), modifier: strOrNull(m, 'modifier'), lat: readDouble(loc, 'lat'), lng: readDouble(loc, 'lng'), bearingAfter: readInt(m, 'bearingAfter'), exit: intOrNull(m, 'exit'),
+      name: str(j, 'name', ''), distanceMeters: readInt(j, 'distanceMeters'), durationSeconds: readInt(j, 'durationSeconds'),
+    );
+  }
 }
 
 class PricingApi {
@@ -42,6 +82,16 @@ class PricingApi {
         'dropoffAddress': dropoff.name,
       })
       .then((j) => asJsonList(j['quotes']).map(Quote.fromJson).toList(growable: false));
+  /// The quotes plus the road line they share.
+  Future<Estimates> estimatesWithRoute({required Place pickup, required Place dropoff, List<String>? vehicleTypes}) => _c
+      .postJson('/api/pricing/estimates', body: {
+        'pickup': {'lat': pickup.lat, 'lng': pickup.lng},
+        'dropoff': {'lat': dropoff.lat, 'lng': dropoff.lng},
+        'vehicleTypes': ?vehicleTypes,
+        'pickupAddress': pickup.name,
+        'dropoffAddress': dropoff.name,
+      })
+      .then(Estimates.fromJson);
   Future<List<FareCard>> fares(String cityId) => _c.getJson('/api/pricing/fares', query: {'cityId': cityId}, auth: false).then((j) => asJsonList(j['fares']).map(FareCard.fromJson).toList(growable: false));
 }
 
@@ -66,7 +116,18 @@ class TripsApi {
   Future<Trip> complete(String id, {required String idempotencyKey}) => _c.postJson('$base/$id/complete', idempotencyKey: idempotencyKey).then(Trip.fromJson);
   Future<Trip> cancel(String id, CancelReason reason, {required String idempotencyKey}) =>
       _c.postJson('$base/$id/cancel', body: {'reason': cancelReasonToApi(reason)}, idempotencyKey: idempotencyKey).then(Trip.fromJson);
-  Future<void> rate(String id, {required int stars, String? comment}) => _c.postJson('$base/$id/rating', body: {'stars': stars, if (comment != null && comment.isNotEmpty) 'comment': comment});
+  // saved places
+  Future<List<SavedPlace>> places() => _c.getJson('$base/places').then((j) => asJsonList(j['places']).map(SavedPlace.fromJson).toList(growable: false));
+  Future<SavedPlace> setFixedPlace(PlaceLabel label, Place p) =>
+      _c.putJson('$base/places/${label.name}', body: {'name': p.name, 'address': ?p.label, 'lat': p.lat, 'lng': p.lng}).then(SavedPlace.fromJson);
+  Future<SavedPlace> addPlace(Place p) => _c.postJson('$base/places', body: {'name': p.name, 'address': ?p.label, 'lat': p.lat, 'lng': p.lng}).then(SavedPlace.fromJson);
+  Future<void> removePlace(String id) => _c.delete('$base/places/$id');
+  Future<void> rate(String id, {required int stars, String? comment, List<String> tags = const []}) =>
+      _c.postJson('$base/$id/rating', body: {'stars': stars, if (comment != null && comment.isNotEmpty) 'comment': comment, if (tags.isNotEmpty) 'tags': tags});
+  Future<GivenRating?> ratingOf(String id) => _c.getJson('$base/$id/rating').then((j) => j['mine'] is Map ? GivenRating.fromJson(asJson(j['mine'])) : null);
+  Future<MyRating> myRating() => _c.getJson('$base/me/rating').then(MyRating.fromJson);
+  Future<TripShare> share(String id) => _c.postJson('$base/$id/share').then(TripShare.fromJson);
+  Future<void> stopSharing(String id) => _c.delete('$base/$id/share');
 }
 
 class LocationsApi {
@@ -74,6 +135,8 @@ class LocationsApi {
   final ApiClient _c;
   /// The driver's last position on a trip (HTTP fallback while the socket is down).
   Future<DriverPosition?> tripDriver(String tripId) => _c.getJson('/api/locations/trips/$tripId/driver').then((j) => j['lat'] is num ? DriverPosition.fromJson(j) : null);
+  /// Anonymous cars around a point, with the nearest one's ETA.
+  Future<NearbyCars> nearby(double lat, double lng, {String? vehicleType}) => _c.getJson('/api/locations/nearby', query: {'lat': lat, 'lng': lng, 'vehicleType': ?vehicleType}).then(NearbyCars.fromJson);
 }
 
 class DriverPosition {
@@ -108,6 +171,9 @@ class PaymentsApi {
       _c.putJson('$base/balances/$accountId/payout-method', body: {'provider': provider, 'destination': destination}).then(Balance.fromJson);
   Future<TripPayments> tripPayments(String tripId) => _c.getJson('$base/trips/$tripId').then(TripPayments.fromJson);
   Future<Payment> payNow(String paymentId, {required String idempotencyKey}) => _c.postJson('$base/payments/$paymentId/pay', idempotencyKey: idempotencyKey).then(Payment.fromJson);
+  /// What the driver made: period = today | week | month, or custom with from/to (ISO dates).
+  Future<EarningsSummary> earnings({String period = 'today', String? from, String? to}) =>
+      _c.getJson('$base/earnings/me', query: {'period': period, 'from': ?from, 'to': ?to}).then(EarningsSummary.fromJson);
   Future<String?> preference() => _c.getJson('$base/me/preferences').then((j) => strOrNull(j, 'mobileMoneyProvider'));
   Future<void> setPreference(String provider) => _c.putJson('$base/me/preferences', body: {'mobileMoneyProvider': provider});
 }
@@ -138,7 +204,7 @@ class FleetApi {
   Future<void> putFile(UploadTicket t, Uint8List bytes, {void Function(int sent, int total)? onProgress}) => _c.call(
         'PUT',
         t.uploadUrl,
-        body: Stream<List<int>>.value(bytes),
+        body: _chunked(bytes, onProgress),
         headers: {...t.headers, 'content-length': '${bytes.length}'},
         auth: false,
         noRetry: true,
@@ -146,6 +212,18 @@ class FleetApi {
         parse: (_) {},
       );
 
+  /// 64 KB pieces so the caller can show progress as the socket takes them.
+  static Stream<List<int>> _chunked(Uint8List bytes, void Function(int sent, int total)? onProgress) async* {
+    const piece = 64 * 1024;
+    for (var i = 0; i < bytes.length; i += piece) {
+      final end = i + piece > bytes.length ? bytes.length : i + piece;
+      yield Uint8List.sublistView(bytes, i, end);
+      onProgress?.call(end, bytes.length);
+    }
+    if (bytes.isEmpty) onProgress?.call(0, 0);
+  }
+
+  Future<DocumentUrl> documentUrl(String id) => _c.getJson('$base/documents/$id/url').then(DocumentUrl.fromJson);
   Future<DocumentView> confirmDocument(String ticket, {String? expiresAt}) =>
       _c.postJson('$base/documents', body: {'ticket': ticket, 'expiresAt': ?expiresAt}).then(DocumentView.fromJson);
   Future<List<ChecklistItem>> documents({required String subjectType, required String subjectId}) =>

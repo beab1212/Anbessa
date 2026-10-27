@@ -263,6 +263,36 @@ describe("ETA to pickup", () => {
   });
 });
 
+describe("cars around the rider", () => {
+  const asRider = async (q: Record<string, string>) =>
+    app.inject({ method: "GET", url: "/api/locations/nearby", query: q, headers: { authorization: `Bearer ${await sign(uuid(), "ride-app", [{ r: "RIDER" }])}` } });
+
+  it("shows anonymous cars on a coarse grid, nearest first, with the nearest one's ETA", async () => {
+    const a = await onlineDriver(near(300));
+    await onlineDriver(near(900), { vehicleType: "minivan" });
+    await onlineDriver(near(5000)); // outside 2 km
+    const res = await asRider({ lat: String(BOLE.lat), lng: String(BOLE.lng) });
+    expect(res.statusCode).toBe(200);
+    const body = res.json<{ cars: { lat: number; lng: number; heading?: number; driverId?: string }[]; etaSeconds: number; driversNearby: number }>();
+    expect(body.driversNearby).toBe(2);
+    expect(body.cars).toHaveLength(2);
+    expect(body.cars[0]).not.toHaveProperty("driverId");
+    expect(JSON.stringify(body)).not.toContain(a);
+    // ~30 m grid: never the exact position
+    expect(Math.round(body.cars[0]!.lat / 0.0003) * 0.0003).toBeCloseTo(body.cars[0]!.lat, 4);
+    expect(body.etaSeconds).toBe(120);
+    // one type only
+    const vans = await asRider({ lat: String(BOLE.lat), lng: String(BOLE.lng), vehicleType: "minivan" });
+    expect(vans.json<{ cars: unknown[] }>().cars).toHaveLength(1);
+  });
+
+  it("outside the served cities there are no cars; it needs an app token", async () => {
+    const res = await asRider({ lat: "51.5", lng: "-0.12" });
+    expect(res.json()).toEqual({ cars: [], etaSeconds: null, driversNearby: 0, approximate: false });
+    expect((await app.inject({ method: "GET", url: "/api/locations/nearby", query: { lat: "9", lng: "38.7" } })).statusCode).toBe(401);
+  });
+});
+
 describe("access control", () => {
   it("internal routes need the service token", async () => {
     const res = await app.inject({ method: "GET", url: "/internal/drivers/nearby", query: { cityId: CITY, vehicleType: "economy", lat: "9", lng: "38.7" } });

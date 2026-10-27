@@ -130,4 +130,58 @@ String cancelReasonLabel(AppLocalizations l, CancelReason r) => switch (r) {
     };
 
 const providerLabels = {'telebirr': 'telebirr', 'cbebirr': 'CBE Birr', 'chapa': 'Chapa', 'bank': 'Bank'};
+/// A turn in words, from the key `maneuverKey()` gives and the street name.
+String maneuverLabel(AppLocalizations l, String key, String name) {
+  final n = name.isEmpty ? l.unnamedRoad : name;
+  return switch (key) {
+    'depart' => l.maneuverDepart,
+    'arrive' => l.maneuverArrive(n),
+    'left' => l.maneuverLeft(n),
+    'right' => l.maneuverRight(n),
+    'slightLeft' => l.maneuverSlightLeft(n),
+    'slightRight' => l.maneuverSlightRight(n),
+    'sharpLeft' => l.maneuverSharpLeft(n),
+    'sharpRight' => l.maneuverSharpRight(n),
+    'uturn' => l.maneuverUturn,
+    'roundabout' => l.maneuverRoundabout,
+    'exitRoundabout' => l.maneuverExitRoundabout(n),
+    'merge' => l.maneuverMerge(n),
+    'onRamp' => l.maneuverOnRamp(n),
+    'offRamp' => l.maneuverOffRamp(n),
+    'forkLeft' => l.maneuverForkLeft,
+    'forkRight' => l.maneuverForkRight,
+    _ => l.maneuverStraight(n),
+  };
+}
+
+/// A rating tag's words.
+String ratingTagLabel(AppLocalizations l, String tag) => switch (tag) {
+      'polite' => l.tag_polite,
+      'safe_driving' => l.tag_safe_driving,
+      'clean_car' => l.tag_clean_car,
+      'on_time' => l.tag_on_time,
+      'good_navigation' => l.tag_good_navigation,
+      'rude' => l.tag_rude,
+      'unsafe_driving' => l.tag_unsafe_driving,
+      'dirty_car' => l.tag_dirty_car,
+      'late' => l.tag_late,
+      'took_long_route' => l.tag_took_long_route,
+      'clear_pickup' => l.tag_clear_pickup,
+      'respectful' => l.tag_respectful,
+      'wrong_pickup' => l.tag_wrong_pickup,
+      'left_mess' => l.tag_left_mess,
+      _ => tag,
+    };
+
 String providerLabel(String p) => providerLabels[p] ?? p;
+
+/// What a good upload of this kind looks like.
+String documentHint(AppLocalizations l, DocumentKind k) => switch (k) {
+      DocumentKind.license => l.docHint_license,
+      DocumentKind.nationalId => l.docHint_nationalId,
+      DocumentKind.photo => l.docHint_photo,
+      DocumentKind.registration => l.docHint_registration,
+      DocumentKind.insurance => l.docHint_insurance,
+      DocumentKind.inspection => l.docHint_inspection,
+      _ => l.docHint_generic,
+    };

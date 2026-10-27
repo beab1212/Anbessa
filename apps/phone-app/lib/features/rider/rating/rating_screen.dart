@@ -1,5 +1,5 @@
-// Rating the other side after a trip (workflow 08 E): 1–5 stars and a comment; once per side,
-// within 7 days.
+// Rating the other side after a trip (workflow 08 E): 1–5 stars, what stood out, a comment;
+// once per side, within 7 days.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:ride_app_core/ride_app_core.dart';
 import '../../../core/l10n/l10n.dart';
 import '../../../core/network/providers.dart';
+import '../../flagged/flagged_modules.dart';
 import '../trip/active_trip_controller.dart';
 
 class RatingScreen extends ConsumerStatefulWidget {
@@ -20,6 +21,7 @@ class RatingScreen extends ConsumerStatefulWidget {
 
 class _RatingScreenState extends ConsumerState<RatingScreen> {
   int _stars = 0;
+  final _tags = <String>{};
   final _comment = TextEditingController();
   bool _busy = false;
   bool _done = false;
@@ -32,7 +34,8 @@ class _RatingScreenState extends ConsumerState<RatingScreen> {
       _error = null;
     });
     try {
-      await ref.read(apisProvider).trips.rate(widget.tripId, stars: _stars, comment: _comment.text.trim());
+      await ref.read(apisProvider).trips.rate(widget.tripId, stars: _stars, comment: _comment.text.trim(), tags: _tags.toList());
+      Haptics.success();
       setState(() => _done = true);
     } on AppError catch (e) {
       if (e.code == ErrorCodes.alreadyRated) {
@@ -58,33 +61,51 @@ class _RatingScreenState extends ConsumerState<RatingScreen> {
     final c = context.colors;
     final parties = ref.watch(tripPartiesProvider(widget.tripId)).value;
     final name = widget.asDriver ? (parties?.riderName ?? l.riderLabel) : (parties?.driverName ?? l.driverLabel);
+    final photo = widget.asDriver ? parties?.riderPhoto : parties?.driverPhoto;
+    final all = widget.asDriver ? RatingTags.ofRider : RatingTags.ofDriver;
+    // good tags first for good ratings, the other way round otherwise
+    final tags = _stars == 0 ? all : [...all.where((t) => RatingTags.positive.contains(t) == (_stars >= 4)), ...all.where((t) => RatingTags.positive.contains(t) != (_stars >= 4))];
     return Scaffold(
       appBar: AppBar(title: Text(l.rateTitle)),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
           if (_done) ...[
-            Notice(l.thanksRating, tone: NoticeTone.ok),
-            const SizedBox(height: 16),
-            PrimaryButton(label: l.done, onPressed: _finish),
+            IllustratedEmpty(illustration: AnbessaIllustration.celebrate, title: l.thanksRating, action: SizedBox(width: 200, child: PrimaryButton(label: l.done, onPressed: _finish))),
           ] else ...[
-            Text(widget.asDriver ? l.rateRiderLede : l.rateDriverLede(name), style: TextStyle(color: c.text2, fontSize: 16)),
-            const SizedBox(height: 20),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                for (var i = 1; i <= 5; i++)
-                  IconButton(
-                    iconSize: 44,
-                    onPressed: () => setState(() => _stars = i),
-                    icon: Icon(i <= _stars ? Icons.star : Icons.star_border, color: i <= _stars ? c.accent : c.faint),
-                    tooltip: '$i',
-                  ),
-              ],
-            ),
+            Center(child: AvatarImage(src: photo, name: name, size: 80, ring: true)),
             const SizedBox(height: 12),
+            Text(name, textAlign: TextAlign.center, style: AnbessaType.h2.copyWith(color: c.text)),
+            const SizedBox(height: 4),
+            Text(widget.asDriver ? l.rateRiderLede : l.rateDriverLede(name), textAlign: TextAlign.center, style: AnbessaType.body2.copyWith(color: c.text2)),
+            const SizedBox(height: 20),
+            Center(child: RatingStars(value: _stars, size: 46, onChanged: (v) => setState(() => _stars = v))),
+            AnimatedSwitcherX(
+              child: _stars == 0
+                  ? const SizedBox(height: 16, key: ValueKey('none'))
+                  : Padding(
+                      key: const ValueKey('tags'),
+                      padding: const EdgeInsets.only(top: 20),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(l.whatStoodOut, style: AnbessaType.label.copyWith(color: c.muted, letterSpacing: 0.4)),
+                          const SizedBox(height: 8),
+                          TagChips(tags: tags, selected: _tags, label: (t) => ratingTagLabel(l, t), onToggle: (t) => setState(() => _tags.contains(t) ? _tags.remove(t) : (_tags.length < 5 ? _tags.add(t) : null))),
+                          const SizedBox(height: 16),
+                        ],
+                      ),
+                    ),
+            ),
             TextField(controller: _comment, maxLines: 3, maxLength: 500, decoration: InputDecoration(labelText: l.ratingComment)),
-            const SizedBox(height: 8),
+            if (!widget.asDriver) ...[
+              const SizedBox(height: 8),
+              SectionGroup(
+                margin: EdgeInsets.zero,
+                children: [SettingsTile(icon: Icons.volunteer_activism_outlined, title: l.addTip, badge: kTipsEnabled ? null : StatusPill(l.comingSoon, tone: Tone.grey), chevron: false)],
+              ),
+            ],
+            const SizedBox(height: 12),
             Problem(_error, describe: (e) => describeError(l, e)),
             const SizedBox(height: 8),
             PrimaryButton(label: l.submitRating, busy: _busy, onPressed: _stars == 0 ? null : _send),

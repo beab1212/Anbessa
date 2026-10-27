@@ -46,7 +46,8 @@ describe("config", () => {
   it("refuses the quote stand-in and missing Kafka in production", () => {
     expect(() => loadConfig({ ...env, NODE_ENV: "production", PRICING: "builtin" })).toThrow(/PRICING[\s\S]*KAFKA_BROKERS|KAFKA_BROKERS[\s\S]*PRICING/);
     expect(loadConfig(env).PRICING).toBe("service");
-    expect(() => loadConfig({ ...env, NODE_ENV: "production", PRICING: "service", KAFKA_BROKERS: "k:9092" })).not.toThrow();
+    expect(() => loadConfig({ ...env, NODE_ENV: "production", PRICING: "service", KAFKA_BROKERS: "k:9092" })).toThrow(/SHARE_BASE_URL/);
+    expect(() => loadConfig({ ...env, NODE_ENV: "production", PRICING: "service", KAFKA_BROKERS: "k:9092", SHARE_BASE_URL: "https://app.anbessa.et" })).not.toThrow();
   });
 
   it("parses the radius steps", () => {

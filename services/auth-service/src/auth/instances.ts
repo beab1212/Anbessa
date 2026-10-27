@@ -2,6 +2,7 @@
 //   app   → /api/auth        phone OTP, bearer sessions, aud=ride-app,   15-min JWTs
 //   admin → /api/admin-auth  password + TOTP, cookies,   aud=ride-admin, 10-min JWTs
 
+import { APIError } from "better-auth/api";
 import { betterAuth, type BetterAuthOptions } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { admin, bearer, jwt, organization, phoneNumber, twoFactor } from "better-auth/plugins";
@@ -14,6 +15,9 @@ import { createClaimsBuilder } from "./claims.js";
 import { createOrganizationHooks } from "./hooks.js";
 import type { OtpSender } from "./otp-delivery.js";
 import { ETHIOPIAN_MOBILE, passwordHasher, phoneToEmail } from "./password.js";
+
+/** the profile photo: 48 KB of base64 plus the data-URL prefix */
+const PROFILE_IMAGE_MAX_CHARS = 48 * 1024 + 32;
 
 export interface AuthDeps {
   config: Config;
@@ -65,6 +69,17 @@ function shared(deps: AuthDeps, surface: "app" | "admin") {
         create: {
           after: async (user: { id: string; accountStatus?: string }) => {
             await writeOutbox(db, { topic: "user.created", key: user.id, payload: { userId: user.id, guest: user.accountStatus === "GUEST" } });
+          },
+        },
+        update: {
+          // the profile photo is a small JPEG data URL the app resized (≤ 48 KB); anything else is refused
+          before: async (data: { image?: string | null }) => {
+            if (data.image !== undefined && data.image !== null && data.image !== "") {
+              if (!/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(data.image) || data.image.length > PROFILE_IMAGE_MAX_CHARS) {
+                throw new APIError("BAD_REQUEST", { message: "image must be a JPEG data URL of at most 48 KB" });
+              }
+            }
+            return { data };
           },
         },
       },

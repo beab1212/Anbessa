@@ -21,7 +21,6 @@
   "errorRateLimited": "Too many attempts. Wait a minute and try again.",
   "errorMaintenance": "Anbessa is briefly unavailable. Try again in a few minutes.",
   "errorNotAvailable": "This isn't available yet.",
-
   "welcomeTitle": "Rides across Addis, at a fixed price",
   "welcomeLede": "Book a car in a minute, pay by cash or mobile money, and watch it arrive.",
   "signInWithPhone": "Continue with your phone number",
@@ -34,19 +33,30 @@
   "sendCode": "Send the code",
   "codeTitle": "Enter the code",
   "codeSent": "Sent to {phone}.",
-  "@codeSent": { "placeholders": { "phone": { "type": "String" } } },
+  "@codeSent": {
+    "placeholders": {
+      "phone": {
+        "type": "String"
+      }
+    }
+  },
   "codeLabel": "6-digit code",
   "codeInvalid": "That code isn't right. Check it and try again.",
   "verify": "Sign in",
   "resendIn": "Send again in {seconds} s",
-  "@resendIn": { "placeholders": { "seconds": { "type": "int" } } },
+  "@resendIn": {
+    "placeholders": {
+      "seconds": {
+        "type": "int"
+      }
+    }
+  },
   "resend": "Send the code again",
   "sentBySmsToo": "Nothing on Telegram? We also sent it by SMS.",
   "changeNumber": "Change the number",
   "devSignInTitle": "Sign in as…",
   "devSignInLede": "Development only: the seed accounts, signed in through the real endpoints.",
   "devNotSeeded": "Not seeded yet: run seed:dev in auth-service.",
-
   "chooseModeTitle": "How are you using Anbessa today?",
   "rideTitle": "Ride",
   "rideLede": "Book rides and track them.",
@@ -56,12 +66,10 @@
   "switchToRider": "Switch to riding",
   "becomeDriver": "Drive with Anbessa",
   "becomeDriverLede": "Earn with your own car, or with a fleet's.",
-
   "tabHome": "Home",
   "tabActivity": "Activity",
   "tabEarnings": "Earnings",
   "tabAccount": "Account",
-
   "updateRequiredTitle": "Update Anbessa",
   "updateRequiredBody": "This version is too old to keep working. Update it from the store to continue.",
   "openStore": "Open the store",
@@ -70,7 +78,6 @@
   "maintenanceTitle": "Maintenance",
   "announcementsTitle": "Announcements",
   "mapTilesUnavailable": "Map tiles aren't loading. Positions still update.",
-
   "whereTo": "Where to?",
   "searchPlaces": "Search a place or address",
   "pickupLabel": "Pickup",
@@ -87,12 +94,17 @@
   "openSettings": "Open settings",
   "outsideServiceArea": "That place is outside the cities Anbessa serves.",
   "recentPlaces": "Recent",
-
   "chooseRide": "Choose your ride",
   "fareFixed": "Fixed price",
   "estimateApproximate": "Routing is offline, so distance and time are estimates. You still pay the quoted fare.",
   "quoteExpiresIn": "Price valid for {time}",
-  "@quoteExpiresIn": { "placeholders": { "time": { "type": "String" } } },
+  "@quoteExpiresIn": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
   "quoteExpired": "The price has expired.",
   "getNewQuote": "Get a new price",
   "paymentMethod": "Pay with",
@@ -101,32 +113,76 @@
   "card": "Card",
   "corporate": "Company account",
   "requestRide": "Request {type}",
-  "@requestRide": { "placeholders": { "type": { "type": "String" } } },
+  "@requestRide": {
+    "placeholders": {
+      "type": {
+        "type": "String"
+      }
+    }
+  },
   "requestingRide": "Requesting…",
   "newTripsPaused": "New trips are paused for a moment.",
   "activeTripExists": "You already have a trip in progress.",
   "goToTrip": "Open the trip",
   "distanceTime": "{km} · {time}",
-  "@distanceTime": { "placeholders": { "km": { "type": "String" }, "time": { "type": "String" } } },
+  "@distanceTime": {
+    "placeholders": {
+      "km": {
+        "type": "String"
+      },
+      "time": {
+        "type": "String"
+      }
+    }
+  },
   "paymentMethodUnavailable": "That payment method isn't available here right now.",
   "vehicleTypeUnavailable": "That kind of car isn't offered here.",
-
   "findingDriver": "Finding your driver",
   "findingDriverLede": "Drivers nearby are being asked, one at a time. This usually takes under two minutes.",
   "driverOnTheWay": "{name} is on the way",
-  "@driverOnTheWay": { "placeholders": { "name": { "type": "String" } } },
+  "@driverOnTheWay": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
   "driverAssigned": "Driver assigned",
   "driverArrived": "{name} has arrived",
-  "@driverArrived": { "placeholders": { "name": { "type": "String" } } },
+  "@driverArrived": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
   "driverArrivedLede": "Meet your driver at the pickup.",
   "inTrip": "On the way to {place}",
-  "@inTrip": { "placeholders": { "place": { "type": "String" } } },
+  "@inTrip": {
+    "placeholders": {
+      "place": {
+        "type": "String"
+      }
+    }
+  },
   "etaMinutes": "{min} min away",
-  "@etaMinutes": { "placeholders": { "min": { "type": "int" } } },
+  "@etaMinutes": {
+    "placeholders": {
+      "min": {
+        "type": "int"
+      }
+    }
+  },
   "tripCompleted": "You've arrived",
   "tripCancelled": "Trip cancelled",
   "cancelledBy": "Cancelled by {by}",
-  "@cancelledBy": { "placeholders": { "by": { "type": "String" } } },
+  "@cancelledBy": {
+    "placeholders": {
+      "by": {
+        "type": "String"
+      }
+    }
+  },
   "noDriverFound": "No driver was free this time. Try again in a moment.",
   "cancelTrip": "Cancel trip",
   "cancelReasonTitle": "Why are you cancelling?",
@@ -139,7 +195,13 @@
   "reasonOther": "Other",
   "cancelFree": "Cancelling now is free.",
   "cancelFeeWarning": "A cancellation fee of up to {amount} may apply.",
-  "@cancelFeeWarning": { "placeholders": { "amount": { "type": "String" } } },
+  "@cancelFeeWarning": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
   "keepTrip": "Keep the trip",
   "confirmCancel": "Cancel the trip",
   "yourPin": "Your PIN",
@@ -152,23 +214,58 @@
   "yourDriver": "Your driver",
   "liveTracking": "Live",
   "positionStale": "Last seen {ago}",
-  "@positionStale": { "placeholders": { "ago": { "type": "String" } } },
-
+  "@positionStale": {
+    "placeholders": {
+      "ago": {
+        "type": "String"
+      }
+    }
+  },
   "payTitle": "Payment",
   "payCashInstruction": "Pay {amount} in cash to the driver.",
-  "@payCashInstruction": { "placeholders": { "amount": { "type": "String" } } },
+  "@payCashInstruction": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
   "payCorporateInstruction": "Billed to your company account.",
   "approvePayment": "Approve {amount}",
-  "@approvePayment": { "placeholders": { "amount": { "type": "String" } } },
+  "@approvePayment": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
   "approveIn": "Approve the payment in {provider}.",
-  "@approveIn": { "placeholders": { "provider": { "type": "String" } } },
+  "@approveIn": {
+    "placeholders": {
+      "provider": {
+        "type": "String"
+      }
+    }
+  },
   "openPaymentPage": "Open the payment page",
   "waitingForProvider": "Waiting for {provider} to confirm…",
-  "@waitingForProvider": { "placeholders": { "provider": { "type": "String" } } },
+  "@waitingForProvider": {
+    "placeholders": {
+      "provider": {
+        "type": "String"
+      }
+    }
+  },
   "paymentPaid": "Paid. Thanks for riding with Anbessa.",
   "paymentFailed": "The payment didn't go through.",
   "paymentRetrying": "We'll ask again at {time}, or pay now.",
-  "@paymentRetrying": { "placeholders": { "time": { "type": "String" } } },
+  "@paymentRetrying": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
   "paymentOwed": "This fare is still owed. Pay it whenever you're ready.",
   "payNow": "Pay now",
   "checkStatus": "Check status",
@@ -178,22 +275,32 @@
   "waitingFeeLabel": "Waiting",
   "totalLabel": "Total",
   "paidBy": "Paid by {method}",
-  "@paidBy": { "placeholders": { "method": { "type": "String" } } },
+  "@paidBy": {
+    "placeholders": {
+      "method": {
+        "type": "String"
+      }
+    }
+  },
   "commissionLabel": "Commission",
   "vatLabel": "VAT",
   "yourBalanceChange": "Your balance",
   "tripIdLabel": "Trip",
-
   "rateTitle": "How was the trip?",
   "rateDriverLede": "Rate {name}. It helps every rider after you.",
-  "@rateDriverLede": { "placeholders": { "name": { "type": "String" } } },
+  "@rateDriverLede": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
   "rateRiderLede": "Rate the rider.",
   "ratingComment": "Anything to add? (optional)",
   "submitRating": "Send rating",
   "thanksRating": "Thanks for the rating.",
   "alreadyRated": "You already rated this trip.",
   "ratingClosed": "Ratings close 7 days after a trip.",
-
   "activityTitle": "Your trips",
   "noTrips": "No trips yet",
   "noTripsLede": "Your trips appear here once you take one.",
@@ -203,7 +310,6 @@
   "statusInProgress": "on a trip",
   "statusCompleted": "completed",
   "statusCancelled": "cancelled",
-
   "accountTitle": "Account",
   "profile": "Profile",
   "nameLabel": "Your name",
@@ -222,10 +328,15 @@
   "preferredMobileMoney": "Mobile money provider",
   "preferredMobileMoneyLede": "The one that asks you to approve trip payments.",
   "appVersion": "Version {version}",
-  "@appVersion": { "placeholders": { "version": { "type": "String" } } },
+  "@appVersion": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
   "deleteAccount": "Delete my account",
   "phoneLabelShort": "Phone",
-
   "onboardingTitle": "Drive with Anbessa",
   "onboardingLede": "Apply, upload your documents and your car's, and our team reviews them within a day.",
   "applyTitle": "Your details",
@@ -239,7 +350,13 @@
   "statusActive": "Approved to drive",
   "statusSuspended": "Suspended",
   "reviewNote": "From our team: {note}",
-  "@reviewNote": { "placeholders": { "note": { "type": "String" } } },
+  "@reviewNote": {
+    "placeholders": {
+      "note": {
+        "type": "String"
+      }
+    }
+  },
   "driverDocuments": "Your documents",
   "docLicense": "Driving licence",
   "docNationalId": "National ID or passport",
@@ -259,7 +376,13 @@
   "docPending": "Waiting for review",
   "docApproved": "Approved",
   "docRejected": "Rejected: {reason}",
-  "@docRejected": { "placeholders": { "reason": { "type": "String" } } },
+  "@docRejected": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
   "docExpired": "Expired: upload the renewed one",
   "expiringSoon": "Expires soon",
   "uploading": "Uploading…",
@@ -278,7 +401,13 @@
   "submitForReview": "Submit for review",
   "submittedForReview": "Submitted. Our team reviews it within a day.",
   "missingDocs": "Upload these first: {list}",
-  "@missingDocs": { "placeholders": { "list": { "type": "String" } } },
+  "@missingDocs": {
+    "placeholders": {
+      "list": {
+        "type": "String"
+      }
+    }
+  },
   "vehicleVerified": "Verified",
   "vehiclePending": "Waiting for review",
   "vehicleRejected": "Rejected",
@@ -289,7 +418,6 @@
   "refresh": "Refresh",
   "fleetCar": "Fleet car",
   "noVehicles": "Register a car, or ask your fleet to give you one.",
-
   "youAreOffline": "You're offline",
   "goOnline": "Go online",
   "goingOnline": "Going online…",
@@ -297,11 +425,23 @@
   "chooseVehicle": "Car",
   "online": "Online",
   "onlineSince": "Online since {time}",
-  "@onlineSince": { "placeholders": { "time": { "type": "String" } } },
+  "@onlineSince": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
   "gpsPoor": "Your GPS signal is poor. Riders may not see you.",
   "pingsOk": "Sharing your location",
   "forcedOffline": "You were taken offline: {reason}",
-  "@forcedOffline": { "placeholders": { "reason": { "type": "String" } } },
+  "@forcedOffline": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
   "noDrivableVehicle": "None of your cars can go online right now.",
   "offlineReasonConnectionLost": "no location for 10 minutes",
   "offlineReasonBalanceBlocked": "your balance is blocked",
@@ -320,14 +460,19 @@
   "locationNeededToDrive": "Anbessa needs your location while you're online so riders can find you.",
   "notificationsNeeded": "Allow notifications so you don't miss trip offers.",
   "waitingForOffers": "Waiting for trips nearby…",
-
   "newTrip": "New trip",
   "acceptOffer": "Accept",
   "decline": "Decline",
   "offerExpired": "The offer went to another driver.",
   "offerCancelled": "The rider cancelled.",
   "pickupIn": "{min} min to pickup",
-  "@pickupIn": { "placeholders": { "min": { "type": "int" } } },
+  "@pickupIn": {
+    "placeholders": {
+      "min": {
+        "type": "int"
+      }
+    }
+  },
   "toPickup": "To the pickup",
   "onMyWay": "On my way",
   "arrived": "I've arrived",
@@ -337,54 +482,140 @@
   "wrongPin": "Wrong PIN. Ask the rider to read it again.",
   "completeTrip": "Complete the trip",
   "collectCash": "Collect {amount} in cash",
-  "@collectCash": { "placeholders": { "amount": { "type": "String" } } },
+  "@collectCash": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
   "paidDigitally": "Paid digitally. Nothing to collect.",
   "paidByCompany": "Billed to the rider's company. Nothing to collect.",
   "noShow": "Rider didn't show up",
   "noShowAfter": "You can report a no-show {min} min after arriving.",
-  "@noShowAfter": { "placeholders": { "min": { "type": "int" } } },
+  "@noShowAfter": {
+    "placeholders": {
+      "min": {
+        "type": "int"
+      }
+    }
+  },
   "waitingFor": "Waiting {time}",
-  "@waitingFor": { "placeholders": { "time": { "type": "String" } } },
+  "@waitingFor": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
   "freeWaiting": "Free for {time}, then charged per minute.",
-  "@freeWaiting": { "placeholders": { "time": { "type": "String" } } },
+  "@freeWaiting": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
   "navigate": "Navigate",
   "callRider": "Call",
   "tooFarFromPickup": "You're {m} m from the pickup. Get closer first.",
-  "@tooFarFromPickup": { "placeholders": { "m": { "type": "int" } } },
+  "@tooFarFromPickup": {
+    "placeholders": {
+      "m": {
+        "type": "int"
+      }
+    }
+  },
   "positionUnknown": "Your position is unknown. Check that location is on.",
   "notArrived": "Tap \"I've arrived\" at the pickup first.",
   "tripDone": "Trip done",
   "rateRider": "Rate the rider",
   "backToDriving": "Back to driving",
-
   "earningsTitle": "Earnings",
   "balanceTitle": "Balance",
   "youOwe": "You owe {amount}",
-  "@youOwe": { "placeholders": { "amount": { "type": "String" } } },
+  "@youOwe": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
   "weOweYou": "{amount} to be paid out",
-  "@weOweYou": { "placeholders": { "amount": { "type": "String" } } },
+  "@weOweYou": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
   "balanceZero": "All settled",
   "balanceOkLede": "You can take every trip.",
   "balanceWarningLede": "Close to the cash limit: pay soon to keep cash trips.",
   "balanceCashBlockedLede": "Cash trips are paused. Card and mobile money trips continue and repay it.",
   "balanceBlockedLede": "No trips until a payment comes in.",
   "limitsLine": "Warning {warning} · cash paused {cash} · blocked {hard}",
-  "@limitsLine": { "placeholders": { "warning": { "type": "String" }, "cash": { "type": "String" }, "hard": { "type": "String" } } },
+  "@limitsLine": {
+    "placeholders": {
+      "warning": {
+        "type": "String"
+      },
+      "cash": {
+        "type": "String"
+      },
+      "hard": {
+        "type": "String"
+      }
+    }
+  },
   "prepaidLine": "Prepaid: keep at least {amount}",
-  "@prepaidLine": { "placeholders": { "amount": { "type": "String" } } },
+  "@prepaidLine": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
   "paymentDueLine": "Pay at least {minimum} by {date} to keep driving.",
-  "@paymentDueLine": { "placeholders": { "minimum": { "type": "String" }, "date": { "type": "String" } } },
+  "@paymentDueLine": {
+    "placeholders": {
+      "minimum": {
+        "type": "String"
+      },
+      "date": {
+        "type": "String"
+      }
+    }
+  },
   "paymentOverdue": "Overdue",
   "topUp": "Top up",
   "topUpTitle": "Top up your balance",
   "topUpAmount": "Amount (ETB)",
   "topUpProvider": "Pay with",
   "payTopUp": "Pay {amount}",
-  "@payTopUp": { "placeholders": { "amount": { "type": "String" } } },
+  "@payTopUp": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
   "topUpStarted": "Approve the payment with {provider}. Your balance updates as soon as it confirms.",
-  "@topUpStarted": { "placeholders": { "provider": { "type": "String" } } },
+  "@topUpStarted": {
+    "placeholders": {
+      "provider": {
+        "type": "String"
+      }
+    }
+  },
   "topUpCredited": "{amount} added to your balance.",
-  "@topUpCredited": { "placeholders": { "amount": { "type": "String" } } },
+  "@topUpCredited": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
   "topUps": "Top-ups",
   "statement": "Statement",
   "statementEmpty": "Nothing on your balance yet.",
@@ -395,11 +626,23 @@
   "savePayoutMethod": "Save",
   "noPayoutMethod": "Add a payout method so earnings reach you.",
   "payoutsWeekly": "Paid out weekly, from {min}.",
-  "@payoutsWeekly": { "placeholders": { "min": { "type": "String" } } },
+  "@payoutsWeekly": {
+    "placeholders": {
+      "min": {
+        "type": "String"
+      }
+    }
+  },
   "referenceCode": "Bank transfer reference",
   "referenceCodeHint": "Quote it when you pay by bank transfer or at an office.",
   "suggestedTopUp": "{amount} brings you back to OK",
-  "@suggestedTopUp": { "placeholders": { "amount": { "type": "String" } } },
+  "@suggestedTopUp": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
   "amountOutOfRange": "Top up between 10 and 100,000 ETB.",
   "entryTrip": "Trip",
   "entryCancellationFee": "Cancellation fee",
@@ -409,7 +652,6 @@
   "entryRefund": "Refund",
   "entryLatePayment": "Late payment",
   "simulatedProvider": "simulated",
-
   "scheduledRides": "Scheduled rides",
   "scheduledRidesLede": "Book a ride for later. Coming soon.",
   "scheduleRide": "Schedule a ride",
@@ -426,5 +668,494 @@
   "redeemCode": "Redeem a code",
   "deleteAccountTitle": "Delete your account",
   "deleteAccountLede": "Your account is closed after 14 days. Settle any balance first; trip records stay as the law requires.",
-  "notAvailableYet": "Not available yet. It's on the way."
+  "notAvailableYet": "Not available yet. It's on the way.",
+  "navLoading": "Finding the route…",
+  "navRerouting": "Rerouting…",
+  "navNoRoute": "No route found",
+  "navArrive": "You have arrived",
+  "navIn": "In {distance}",
+  "@navIn": {
+    "placeholders": {
+      "distance": {
+        "type": "String"
+      }
+    }
+  },
+  "navThen": "then",
+  "navOverview": "Overview",
+  "navFollow": "Follow",
+  "navOpenIn": "Open in…",
+  "navGoogleMaps": "Google Maps",
+  "navWaze": "Waze",
+  "navSystemMaps": "Maps app",
+  "navTurns": "Turns",
+  "maneuverDepart": "Head out",
+  "maneuverArrive": "Arrive at {name}",
+  "@maneuverArrive": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "maneuverStraight": "Continue on {name}",
+  "@maneuverStraight": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "maneuverLeft": "Turn left onto {name}",
+  "@maneuverLeft": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "maneuverRight": "Turn right onto {name}",
+  "@maneuverRight": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "maneuverSlightLeft": "Keep left onto {name}",
+  "@maneuverSlightLeft": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "maneuverSlightRight": "Keep right onto {name}",
+  "@maneuverSlightRight": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "maneuverSharpLeft": "Sharp left onto {name}",
+  "@maneuverSharpLeft": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "maneuverSharpRight": "Sharp right onto {name}",
+  "@maneuverSharpRight": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "maneuverUturn": "Make a U-turn",
+  "maneuverRoundabout": "Enter the roundabout",
+  "maneuverExitRoundabout": "Exit the roundabout onto {name}",
+  "@maneuverExitRoundabout": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "maneuverMerge": "Merge onto {name}",
+  "@maneuverMerge": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "maneuverOnRamp": "Take the ramp onto {name}",
+  "@maneuverOnRamp": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "maneuverOffRamp": "Take the exit onto {name}",
+  "@maneuverOffRamp": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "maneuverForkLeft": "Keep left at the fork",
+  "maneuverForkRight": "Keep right at the fork",
+  "unnamedRoad": "the road",
+  "recenter": "Recenter",
+  "resetNorth": "North up",
+  "introSkip": "Skip",
+  "introNext": "Next",
+  "introStart": "Get started",
+  "introTitle1": "Rides across the city, at a fixed price",
+  "introBody1": "See the fare before you book. No surprises at the end of the trip.",
+  "introTitle2": "Pay your way",
+  "introBody2": "Cash, telebirr, CBE Birr, card, or your company account.",
+  "introTitle3": "Drive with Anbessa",
+  "introBody3": "Go online when you want, take the trips you like, and see your earnings grow.",
+  "greetingMorning": "Good morning, {name}",
+  "@greetingMorning": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "greetingAfternoon": "Good afternoon, {name}",
+  "@greetingAfternoon": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "greetingEvening": "Good evening, {name}",
+  "@greetingEvening": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "savedHome": "Home",
+  "savedWork": "Work",
+  "addPlace": "Add",
+  "setHome": "Set home",
+  "setWork": "Set work",
+  "notSet": "Not set",
+  "carsNearby": "{count, plural, =0{No cars nearby} =1{1 car nearby} other{{count} cars nearby}}",
+  "@carsNearby": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "minutesAway": "{minutes} min away",
+  "@minutesAway": {
+    "placeholders": {
+      "minutes": {
+        "type": "int"
+      }
+    }
+  },
+  "routeTitle": "Your route",
+  "swapPlaces": "Swap pickup and drop-off",
+  "savedPlacesHeader": "Saved",
+  "currentLocation": "Current location",
+  "savePlaceTitle": "Save a place",
+  "placeName": "Name",
+  "savePlace": "Save",
+  "savedPlaces": "Saved places",
+  "savedPlacesLede": "One tap to book a ride home, to work, or anywhere you go often.",
+  "removePlace": "Remove",
+  "placeSaved": "Place saved",
+  "fareBreakdown": "Fare breakdown",
+  "baseFare": "Base fare",
+  "distanceFare": "Distance",
+  "timeFare": "Time",
+  "minimumFareApplied": "Minimum fare applied",
+  "changePayment": "Change",
+  "promoCode": "Promo code",
+  "comingSoon": "Coming soon",
+  "pickupHint": "Pickup",
+  "dropoffHint": "Where to?",
+  "searchResults": "Results",
+  "now": "Now",
+  "edit": "Edit",
+  "progressMatched": "Assigned",
+  "progressEnRoute": "On the way",
+  "progressArrived": "Arrived",
+  "progressRiding": "Riding",
+  "arrivesIn": "Arrives in {time}",
+  "@arrivesIn": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "arrivingIn": "Arriving in {time}",
+  "@arrivingIn": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "newDriver": "New driver",
+  "shareTrip": "Share trip",
+  "contact": "Contact",
+  "whatStoodOut": "What stood out?",
+  "addTip": "Add a tip",
+  "tag_polite": "Polite",
+  "tag_safe_driving": "Safe driving",
+  "tag_clean_car": "Clean car",
+  "tag_on_time": "On time",
+  "tag_good_navigation": "Knew the way",
+  "tag_rude": "Rude",
+  "tag_unsafe_driving": "Unsafe driving",
+  "tag_dirty_car": "Dirty car",
+  "tag_late": "Late",
+  "tag_took_long_route": "Took a long route",
+  "tag_clear_pickup": "Clear pickup spot",
+  "tag_respectful": "Respectful",
+  "tag_wrong_pickup": "Wrong pickup spot",
+  "tag_left_mess": "Left a mess",
+  "paymentStepStarted": "Charge started",
+  "paymentStepApprove": "Approve with {provider}",
+  "@paymentStepApprove": {
+    "placeholders": {
+      "provider": {
+        "type": "String"
+      }
+    }
+  },
+  "paymentStepPaid": "Paid",
+  "paymentStepFailed": "Didn't go through",
+  "shareReceipt": "Share receipt",
+  "receiptShareText": "Anbessa trip on {date}: {from} → {to}, {amount}. Trip {id}.",
+  "@receiptShareText": {
+    "placeholders": {
+      "date": {
+        "type": "String"
+      },
+      "from": {
+        "type": "String"
+      },
+      "to": {
+        "type": "String"
+      },
+      "amount": {
+        "type": "String"
+      },
+      "id": {
+        "type": "String"
+      }
+    }
+  },
+  "today": "Today",
+  "yesterday": "Yesterday",
+  "asRider": "As rider",
+  "asDriver": "As driver",
+  "filterAll": "All",
+  "filterThisWeek": "This week",
+  "filterThisMonth": "This month",
+  "tripTimeline": "Timeline",
+  "requestedAtLabel": "Requested",
+  "startedAtLabel": "Started",
+  "completedAtLabel": "Completed",
+  "cancelledAtLabel": "Cancelled",
+  "driverLabelShort": "Driver",
+  "riderLabelShort": "Rider",
+  "loadMore": "Load more",
+  "cancelNoFee": "Free to cancel",
+  "youAreHere": "You",
+  "appearance": "Appearance",
+  "themeSystem": "Follow the system",
+  "themeLight": "Light",
+  "themeDark": "Dark",
+  "notifications": "Notifications",
+  "notifTripUpdates": "Trip updates",
+  "notifTripUpdatesLede": "Driver assigned, arrived, payment",
+  "notifPromos": "Offers and news",
+  "notifSound": "Sound",
+  "notifVibrateOffer": "Vibrate on a new offer",
+  "notifHaptics": "Haptic feedback",
+  "notifLocalOnly": "These settings apply on this phone.",
+  "safety": "Safety",
+  "emergencyContact": "Emergency contact",
+  "emergencyContactLede": "Someone we show you a quick way to reach from a trip. Kept on this phone.",
+  "contactName": "Name",
+  "contactPhone": "Phone number",
+  "saved": "Saved",
+  "organizations": "Companies and fleets",
+  "organizationsLede": "Your company accounts for business rides, and fleets you drive for.",
+  "noOrganizations": "You're not part of a company or fleet yet.",
+  "invitations": "Invitations",
+  "accept": "Accept",
+  "invitedToJoin": "Invited to join {org}",
+  "@invitedToJoin": {
+    "placeholders": {
+      "org": {
+        "type": "String"
+      }
+    }
+  },
+  "defaultBilling": "Default for business rides",
+  "ride": "Ride",
+  "preferences": "Preferences",
+  "account": "Account",
+  "about": "About",
+  "changePhoto": "Change photo",
+  "removePhoto": "Remove photo",
+  "photoSaved": "Photo updated",
+  "takePhotoOption": "Take a photo",
+  "chooseFromGalleryOption": "Choose from gallery",
+  "tripsCount": "{count, plural, =0{No trips yet} =1{1 trip} other{{count} trips}}",
+  "@tripsCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "yourRating": "Your rating",
+  "navigation": "Navigation",
+  "navFollowBearing": "Turn the map the way I'm driving",
+  "navApp": "Open directions in",
+  "navAsk": "Ask every time",
+  "keepAwake": "Keep the screen on while driving",
+  "vehicles": "Vehicles",
+  "documents": "Documents",
+  "slideToGoOnline": "Slide to go online",
+  "slideToGoOffline": "Slide to go offline",
+  "slideToAccept": "Slide to accept",
+  "slideOnMyWay": "Slide: on my way",
+  "slideArrived": "Slide: I've arrived",
+  "slideStart": "Slide to start the trip",
+  "slideComplete": "Slide to complete",
+  "toPickupDistance": "{distance} to the pickup",
+  "@toPickupDistance": {
+    "placeholders": {
+      "distance": {
+        "type": "String"
+      }
+    }
+  },
+  "onlineFor": "Online {time}",
+  "@onlineFor": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "gpsGood": "GPS good",
+  "socketLive": "Connected",
+  "devTools": "Dev",
+  "ready": "Ready",
+  "notEligible": "Can't drive this car now",
+  "waiting": "Waiting",
+  "freeUntil": "free for {time}",
+  "@freeUntil": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "pinSheetTitle": "Rider's PIN",
+  "pinSheetLede": "Ask the rider for the 4-digit code in their app.",
+  "noShowIn": "No-show in {time}",
+  "@noShowIn": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "tripOf": "{distance} · {duration}",
+  "@tripOf": {
+    "placeholders": {
+      "distance": {
+        "type": "String"
+      },
+      "duration": {
+        "type": "String"
+      }
+    }
+  },
+  "openDirections": "Directions",
+  "navOverviewMode": "Overview",
+  "navFollowMode": "Follow",
+  "earningsToday": "Today",
+  "tripsToday": "Trips",
+  "timeOnline": "Online",
+  "collectCashTitle": "Collect cash",
+  "riderPaysDigital": "The rider pays in the app",
+  "companyPays": "Billed to the rider's company",
+  "youEarn": "You earn",
+  "cancelTripDriver": "Can't do this trip",
+  "riderIsWaiting": "The rider is waiting at the pickup",
+  "netEarnings": "Net earnings",
+  "grossFares": "Fares",
+  "cashCollected": "Cash collected",
+  "noEarningsPeriod": "No trips in this period yet.",
+  "periodToday": "Today",
+  "periodWeek": "This week",
+  "periodMonth": "This month",
+  "earningsBreakdown": "Where it went",
+  "stepApply": "Apply",
+  "stepDocuments": "Documents",
+  "stepVehicle": "Vehicle",
+  "stepReview": "Review",
+  "nextStep": "Next step",
+  "checklistProgress": "{done} of {total} done",
+  "@checklistProgress": {
+    "placeholders": {
+      "done": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "approvedLede": "You're approved. Go online whenever you're ready.",
+  "uploadingPercent": "Uploading {percent}%",
+  "@uploadingPercent": {
+    "placeholders": {
+      "percent": {
+        "type": "int"
+      }
+    }
+  },
+  "viewDocument": "View",
+  "balanceCard": "Balance",
+  "limitsTitle": "Limits",
+  "yourApplication": "Your application",
+  "uploadDocuments": "Upload your documents",
+  "registerCar": "Register your car",
+  "reviewAndSubmit": "Review and submit",
+  "docsMissingCount": "{n} still to upload",
+  "@docsMissingCount": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "allDocsIn": "All documents are in",
+  "applyLede": "Your name as on your licence, and the licence number. Our team checks them against your documents.",
+  "vehicleFormLede": "The car you'll drive. Fleet cars are assigned to you by the fleet and don't need registering here.",
+  "docUploaded": "Uploaded",
+  "docHint_license": "Both sides, readable, not expired.",
+  "docHint_nationalId": "Kebele ID, passport or national ID.",
+  "docHint_photo": "A clear photo of your face, no hat or sunglasses.",
+  "docHint_registration": "The libre (ownership booklet).",
+  "docHint_insurance": "Third-party insurance certificate.",
+  "docHint_inspection": "Annual inspection (bolo) certificate.",
+  "docHint_generic": "A clear photo or scan.",
+  "optional": "Optional",
+  "shareTripText": "Follow my Anbessa trip live: {url}",
+  "@shareTripText": {
+    "placeholders": {
+      "url": {
+        "type": "String"
+      }
+    }
+  },
+  "stopSharing": "Stop sharing",
+  "sharingStopped": "The link no longer works.",
+  "sharingOn": "Sharing live"
 }

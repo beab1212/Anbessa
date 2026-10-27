@@ -1,6 +1,6 @@
-// Earnings (workflow 09): the balance and its state, limits and dues; top-ups by mobile money
-// (the provider's page, then `balance:topped_up`); the payout method; the statement and the list
-// of top-ups.
+// Earnings (workflow 09): what the driver made today / this week / this month, where the fare
+// went, the balance and its state, limits and dues; top-ups by mobile money (the provider's
+// page, then `balance:topped_up`); the payout method; the statement and the list of top-ups.
 
 import 'dart:async';
 
@@ -13,7 +13,9 @@ import '../../../core/l10n/l10n.dart';
 import '../../../core/network/providers.dart';
 import '../../../core/router/routes.dart';
 import '../../rider/booking/booking_controller.dart';
+import 'earnings_chart.dart';
 import 'earnings_controller.dart';
+import 'earnings_summary_controller.dart';
 
 Tone balanceTone(BalanceState s) => switch (s) { BalanceState.ok => Tone.green, BalanceState.warning => Tone.amber, _ => Tone.red };
 
@@ -25,102 +27,171 @@ String balanceStateLabel(AppLocalizations l, BalanceState s) => switch (s) {
       BalanceState.unknown => '—',
     };
 
-class EarningsScreen extends ConsumerWidget {
+class EarningsScreen extends ConsumerStatefulWidget {
   const EarningsScreen({super.key});
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<EarningsScreen> createState() => _EarningsScreenState();
+}
+
+class _EarningsScreenState extends ConsumerState<EarningsScreen> {
+  String _period = 'today';
+
+  @override
+  Widget build(BuildContext context) {
     final l = context.l10n;
     final c = context.colors;
     final loc = context.localeTag;
     final bAsync = ref.watch(balanceProvider);
     final b = bAsync.value;
+    final sAsync = ref.watch(earningsSummaryProvider(_period));
+    final s = sAsync.value;
     return Scaffold(
-      appBar: AppBar(title: Text(l.earningsTitle), actions: [IconButton(onPressed: () => ref.read(balanceProvider.notifier).refresh(), icon: const Icon(Icons.refresh), tooltip: l.refresh)]),
       body: RefreshIndicator(
-        onRefresh: () => ref.read(balanceProvider.notifier).refresh(),
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            if (bAsync.hasError) Problem(bAsync.error, describe: (e) => describeError(l, e), onRetry: () => ref.read(balanceProvider.notifier).refresh(), retryLabel: l.retry),
-            if (b == null && !bAsync.hasError) const Center(child: Padding(padding: EdgeInsets.all(32), child: CircularProgressIndicator())),
-            if (b != null) ...[
-              SectionCard(
-                title: l.balanceTitle,
-                trailing: StatusPill(balanceStateLabel(l, b.state), tone: balanceTone(b.state)),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Text(
-                      b.balanceMinor == 0 ? l.balanceZero : b.owes ? l.youOwe(birr(-b.balanceMinor, locale: loc)) : l.weOweYou(birr(b.balanceMinor, locale: loc)),
-                      style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: b.owes ? c.danger : c.text, fontFamilyFallback: monoFamilyFallback),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      switch (b.state) {
-                        BalanceState.ok => l.balanceOkLede,
-                        BalanceState.warning => l.balanceWarningLede,
-                        BalanceState.cashBlocked => l.balanceCashBlockedLede,
-                        BalanceState.blocked => l.balanceBlockedLede,
-                        BalanceState.unknown => '',
-                      },
-                      style: TextStyle(color: c.text2),
-                    ),
-                    const SizedBox(height: 10),
-                    Text(
-                      b.policy.prepaid ? l.prepaidLine(birr(b.policy.prepaidMinimumMinor, locale: loc)) : l.limitsLine(birr(b.policy.warningMinor, locale: loc), birr(b.policy.cashLimitMinor, locale: loc), birr(b.policy.hardLimitMinor, locale: loc)),
-                      style: TextStyle(color: c.muted, fontSize: 12),
-                    ),
-                    for (final d in b.openDues) ...[
-                      const SizedBox(height: 10),
-                      Notice(
-                        '${d.status == 'OVERDUE' ? '${l.paymentOverdue}: ' : ''}${l.paymentDueLine(birr(d.minimumLeftMinor, locale: loc), dayOf(d.dueAt, locale: loc))}',
-                        tone: d.status == 'OVERDUE' ? NoticeTone.error : NoticeTone.warning,
-                      ),
-                    ],
-                    const SizedBox(height: 12),
-                    Row(
+        onRefresh: () async {
+          await ref.read(balanceProvider.notifier).refresh();
+          await ref.read(earningsSummaryProvider(_period).notifier).refresh();
+        },
+        child: CustomScrollView(
+          slivers: [
+            SliverAppBar(pinned: true, title: Text(l.earningsTitle)),
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+              sliver: SliverList.list(
+                children: [
+                  PillTabs<String>(items: [('today', l.periodToday), ('week', l.periodWeek), ('month', l.periodMonth)], selected: _period, onChanged: (v) => setState(() => _period = v)),
+                  const SizedBox(height: 14),
+                  // the hero
+                  FloatingCard(
+                    radius: AnbessaRadius.lg,
+                    child: sAsync.isLoading && s == null
+                        ? const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Skeleton.line(width: 90, height: 12), SizedBox(height: 10), Skeleton.line(width: 160, height: 28), SizedBox(height: 14), Skeleton.box(height: 110, radius: 8)])
+                        : sAsync.hasError && s == null
+                            ? Problem(sAsync.error, describe: (e) => describeError(l, e), onRetry: () => ref.read(earningsSummaryProvider(_period).notifier).refresh(), retryLabel: l.retry)
+                            : Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(l.netEarnings, style: AnbessaType.label.copyWith(color: c.muted, letterSpacing: 0.4)),
+                                  const SizedBox(height: 4),
+                                  AnimatedMoney(s!.netMinor, locale: loc, style: AnbessaType.display.copyWith(color: s.netMinor < 0 ? c.danger : c.text)),
+                                  const SizedBox(height: 12),
+                                  StatRow(
+                                    children: [
+                                      StatTile(label: l.tripsToday, icon: Icons.route_outlined, value: AnimatedCounter(value: s.trips, format: (v) => v.round().toString())),
+                                      StatTile(label: l.grossFares, icon: Icons.receipt_long_outlined, value: AnimatedMoney(s.grossMinor, locale: loc)),
+                                      StatTile(label: l.cashCollected, icon: Icons.payments_outlined, value: AnimatedMoney(s.cashCollectedMinor, locale: loc)),
+                                    ],
+                                  ),
+                                  if (s.byDay.length > 1) ...[const SizedBox(height: 16), EarningsChart(days: s.byDay)],
+                                  if (s.trips == 0) Padding(padding: const EdgeInsets.only(top: 12), child: Text(l.noEarningsPeriod, style: AnbessaType.caption.copyWith(color: c.muted))),
+                                ],
+                              ),
+                  ),
+                  if (s != null && s.trips > 0) ...[
+                    const SizedBox(height: 14),
+                    SectionGroup(
+                      title: l.earningsBreakdown,
+                      margin: EdgeInsets.zero,
                       children: [
-                        Expanded(child: PrimaryButton(label: l.topUp, icon: Icons.add, onPressed: () => context.push(Routes.driverTopUp))),
-                        const SizedBox(width: 8),
-                        Expanded(child: OutlinedButton(onPressed: b.accountId == null ? null : () => context.push(Routes.driverStatement), child: Text(l.statement))),
+                        _MoneyRow(l.grossFares, s.grossMinor),
+                        _MoneyRow(l.commissionLabel, -s.commissionMinor),
+                        _MoneyRow(l.vatLabel, -s.vatMinor),
+                        _MoneyRow(l.netEarnings, s.netMinor, strong: true),
                       ],
                     ),
-                    if (b.suggestedTopUpMinor > 0) Padding(padding: const EdgeInsets.only(top: 8), child: Text(l.suggestedTopUp(birr(b.suggestedTopUpMinor, locale: loc)), style: TextStyle(color: c.muted, fontSize: 12))),
                   ],
-                ),
-              ),
-              const SizedBox(height: 12),
-              SectionCard(
-                title: l.payoutMethod,
-                trailing: TextButton(onPressed: b.accountId == null ? null : () => context.push(Routes.driverPayoutMethod), child: Text(l.save)),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(b.payoutMethod == null ? l.noPayoutMethod : '${providerLabel(b.payoutMethod!.provider)} ${b.payoutMethod!.destination ?? ''}', style: TextStyle(color: b.payoutMethod == null ? c.warning : c.text, fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 4),
-                    Text(l.payoutsWeekly(birr(b.policy.minPayoutMinor, locale: loc)), style: TextStyle(color: c.muted, fontSize: 12)),
+                  const SizedBox(height: 18),
+                  // the balance
+                  if (bAsync.hasError && b == null) Problem(bAsync.error, describe: (e) => describeError(l, e), onRetry: () => ref.read(balanceProvider.notifier).refresh(), retryLabel: l.retry),
+                  if (b == null && !bAsync.hasError) const SkeletonCard(height: 160),
+                  if (b != null) ...[
+                    SectionCard(
+                      title: l.balanceCard,
+                      trailing: StatusPill(balanceStateLabel(l, b.state), tone: balanceTone(b.state)),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text(b.balanceMinor == 0 ? l.balanceZero : b.owes ? l.youOwe(birr(-b.balanceMinor, locale: loc)) : l.weOweYou(birr(b.balanceMinor, locale: loc)), style: AnbessaType.h1.copyWith(color: b.owes ? c.danger : c.text, fontFeatures: AnbessaType.tabular)),
+                          const SizedBox(height: 4),
+                          Text(
+                            switch (b.state) {
+                              BalanceState.ok => l.balanceOkLede,
+                              BalanceState.warning => l.balanceWarningLede,
+                              BalanceState.cashBlocked => l.balanceCashBlockedLede,
+                              BalanceState.blocked => l.balanceBlockedLede,
+                              BalanceState.unknown => '',
+                            },
+                            style: AnbessaType.body2.copyWith(color: c.text2),
+                          ),
+                          const SizedBox(height: 10),
+                          Text(
+                            b.policy.prepaid ? l.prepaidLine(birr(b.policy.prepaidMinimumMinor, locale: loc)) : l.limitsLine(birr(b.policy.warningMinor, locale: loc), birr(b.policy.cashLimitMinor, locale: loc), birr(b.policy.hardLimitMinor, locale: loc)),
+                            style: AnbessaType.caption.copyWith(color: c.muted),
+                          ),
+                          for (final d in b.openDues) ...[
+                            const SizedBox(height: 10),
+                            Notice('${d.status == 'OVERDUE' ? '${l.paymentOverdue}: ' : ''}${l.paymentDueLine(birr(d.minimumLeftMinor, locale: loc), dayOf(d.dueAt, locale: loc))}', tone: d.status == 'OVERDUE' ? NoticeTone.error : NoticeTone.warning),
+                          ],
+                          const SizedBox(height: 14),
+                          Row(
+                            children: [
+                              Expanded(child: PrimaryButton(label: l.topUp, icon: Icons.add, onPressed: () => context.push(Routes.driverTopUp))),
+                              const SizedBox(width: 8),
+                              Expanded(child: OutlinedButton(onPressed: b.accountId == null ? null : () => context.push(Routes.driverStatement), child: Text(l.statement))),
+                            ],
+                          ),
+                          if (b.suggestedTopUpMinor > 0) Padding(padding: const EdgeInsets.only(top: 8), child: Text(l.suggestedTopUp(birr(b.suggestedTopUpMinor, locale: loc)), style: AnbessaType.caption.copyWith(color: c.muted))),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    SectionGroup(
+                      margin: EdgeInsets.zero,
+                      children: [
+                        SettingsTile(
+                          icon: Icons.account_balance_outlined,
+                          title: l.payoutMethod,
+                          subtitle: b.payoutMethod == null ? l.noPayoutMethod : '${providerLabel(b.payoutMethod!.provider)} ${b.payoutMethod!.destination ?? ''}',
+                          iconTone: b.payoutMethod == null ? c.warning : null,
+                          onTap: b.accountId == null ? null : () => context.push(Routes.driverPayoutMethod),
+                        ),
+                        if (b.referenceCode != null)
+                          SettingsTile(
+                            icon: Icons.tag,
+                            title: l.referenceCode,
+                            subtitle: l.referenceCodeHint,
+                            chevron: false,
+                            trailing: MonoText(b.referenceCode!, style: AnbessaType.title.copyWith(color: c.text, letterSpacing: 1.5)),
+                          ),
+                        if (b.accountId != null) SettingsTile(icon: Icons.history, title: l.topUps, onTap: () => context.push(Routes.driverTopUps)),
+                      ],
+                    ),
+                    Padding(padding: const EdgeInsets.only(top: 8), child: Text(l.payoutsWeekly(birr(b.policy.minPayoutMinor, locale: loc)), style: AnbessaType.caption.copyWith(color: c.muted))),
                   ],
-                ),
+                ],
               ),
-              if (b.referenceCode != null) ...[
-                const SizedBox(height: 12),
-                SectionCard(
-                  title: l.referenceCode,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      MonoText(b.referenceCode!, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: 2)),
-                      const SizedBox(height: 4),
-                      Text(l.referenceCodeHint, style: TextStyle(color: c.muted, fontSize: 12)),
-                    ],
-                  ),
-                ),
-              ],
-              const SizedBox(height: 12),
-              if (b.accountId != null) ListTile(leading: const Icon(Icons.history), title: Text(l.topUps), trailing: const Icon(Icons.chevron_right), onTap: () => context.push(Routes.driverTopUps)),
-            ],
+            ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _MoneyRow extends StatelessWidget {
+  const _MoneyRow(this.label, this.minor, {this.strong = false});
+  final String label;
+  final int minor;
+  final bool strong;
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      child: Row(
+        children: [
+          Expanded(child: Text(label, style: (strong ? AnbessaType.body.copyWith(fontWeight: FontWeight.w700) : AnbessaType.body2).copyWith(color: strong ? c.text : c.text2))),
+          MoneyText(minor, locale: context.localeTag, signed: !strong && minor > 0, style: (strong ? AnbessaType.title : AnbessaType.body2).copyWith(color: minor < 0 && !strong ? c.danger : c.text)),
+        ],
       ),
     );
   }
@@ -151,6 +222,7 @@ class _TopUpScreenState extends ConsumerState<TopUpScreen> {
   Future<void> _pay(String provider) async {
     final minor = toMinor(_amount.text);
     if (minor == null) return;
+    Haptics.medium();
     setState(() {
       _busy = true;
       _error = null;
@@ -167,10 +239,12 @@ class _TopUpScreenState extends ConsumerState<TopUpScreen> {
         setState(() => _started = u);
         if (!u.isOpen) {
           _poll?.cancel();
+          if (u.status == TopUpStatus.succeeded) Haptics.success();
           ref.read(balanceProvider.notifier).refresh();
         }
       });
     } catch (e) {
+      Haptics.error();
       setState(() => _error = e);
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -187,6 +261,8 @@ class _TopUpScreenState extends ConsumerState<TopUpScreen> {
     final provider = _provider ?? providers.firstOrNull?.provider;
     final minor = toMinor(_amount.text);
     final started = _started;
+    final suggested = ref.watch(balanceProvider).value?.suggestedTopUpMinor ?? 0;
+    final chips = {if (suggested > 0) suggested, 50000, 100000, 200000, 500000}.toList()..sort();
     return Scaffold(
       appBar: AppBar(title: Text(l.topUpTitle)),
       body: ListView(
@@ -194,25 +270,50 @@ class _TopUpScreenState extends ConsumerState<TopUpScreen> {
         children: [
           if (started != null) ...[
             if (started.status == TopUpStatus.succeeded)
-              Notice(l.topUpCredited(birr(started.amountMinor, locale: loc)), tone: NoticeTone.ok)
+              IllustratedEmpty(illustration: AnbessaIllustration.celebrate, title: l.topUpCredited(birr(started.amountMinor, locale: loc)), compact: true)
             else if (started.status == TopUpStatus.failed)
               Notice(started.failure ?? l.paymentFailed, tone: NoticeTone.error)
             else
-              Notice(started.instructions ?? l.topUpStarted(providerLabel(started.provider ?? '')), tone: NoticeTone.info),
+              Column(children: [const LinearProgressIndicator(), const SizedBox(height: 12), Notice(started.instructions ?? l.topUpStarted(providerLabel(started.provider ?? '')), tone: NoticeTone.info)]),
             const SizedBox(height: 12),
             if (started.isOpen && started.checkoutUrl != null) OutlinedButton.icon(onPressed: () => launchUrl(Uri.parse(started.checkoutUrl!), mode: LaunchMode.inAppBrowserView), icon: const Icon(Icons.open_in_new), label: Text(l.openPaymentPage)),
             const SizedBox(height: 8),
             PrimaryButton(label: l.done, onPressed: () => context.pop()),
           ] else ...[
-            TextField(controller: _amount, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: InputDecoration(labelText: l.topUpAmount, prefixText: 'ETB '), onChanged: (_) => setState(() {})),
-            const SizedBox(height: 16),
-            Text(l.topUpProvider, style: TextStyle(color: c.muted, fontWeight: FontWeight.w600, fontSize: 12)),
-            RadioGroup<String>(
-              groupValue: provider,
-              onChanged: (v) => setState(() => _provider = v),
-              child: Column(children: [for (final p in providers) RadioListTile(value: p.provider, title: Text(p.label), subtitle: p.isSimulated ? Text(l.simulatedProvider) : null, contentPadding: EdgeInsets.zero)]),
+            TextField(
+              controller: _amount,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              style: AnbessaType.h1.copyWith(fontFeatures: AnbessaType.tabular),
+              decoration: InputDecoration(labelText: l.topUpAmount, prefixText: 'ETB '),
+              onChanged: (_) => setState(() {}),
             ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final a in chips)
+                  ChoiceChip(
+                    label: Text(birr(a, locale: loc)),
+                    selected: minor == a,
+                    onSelected: (_) {
+                      Haptics.selection();
+                      setState(() => _amount.text = (a / 100).toStringAsFixed(0));
+                    },
+                  ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            Text(l.topUpProvider, style: AnbessaType.label.copyWith(color: c.muted, letterSpacing: 0.4)),
             const SizedBox(height: 8),
+            SectionGroup(
+              margin: EdgeInsets.zero,
+              children: [
+                for (final p in providers)
+                  ChoiceRow(title: p.label, subtitle: p.isSimulated ? l.simulatedProvider : null, leading: Icon(Icons.account_balance_wallet_outlined, color: c.accentStrong), selected: provider == p.provider, onTap: () => setState(() => _provider = p.provider)),
+              ],
+            ),
+            const SizedBox(height: 12),
             Problem(_error, describe: (e) => describeError(l, e)),
             const SizedBox(height: 8),
             PrimaryButton(label: minor == null ? l.topUp : l.payTopUp(birr(minor, locale: loc)), busy: _busy, onPressed: minor == null || provider == null ? null : () => _pay(provider)),
@@ -245,6 +346,7 @@ class _PayoutMethodScreenState extends ConsumerState<PayoutMethodScreen> {
     try {
       await ref.read(apisProvider).payments.setPayoutMethod(b!.accountId!, provider: _provider, destination: _dest.text.trim());
       await ref.read(balanceProvider.notifier).refresh();
+      Haptics.success();
       if (mounted) context.pop();
     } catch (e) {
       setState(() => _error = e);
@@ -262,16 +364,17 @@ class _PayoutMethodScreenState extends ConsumerState<PayoutMethodScreen> {
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          Text(l.payoutMethodLede, style: TextStyle(color: c.text2)),
-          const SizedBox(height: 12),
-          DropdownButtonFormField<String>(
-            initialValue: _provider,
-            decoration: InputDecoration(labelText: l.payoutProvider),
-            items: const [DropdownMenuItem(value: 'telebirr', child: Text('telebirr')), DropdownMenuItem(value: 'cbebirr', child: Text('CBE Birr')), DropdownMenuItem(value: 'chapa', child: Text('Bank account (Chapa)'))],
-            onChanged: (v) => setState(() => _provider = v ?? _provider),
+          Text(l.payoutMethodLede, style: AnbessaType.body2.copyWith(color: c.text2)),
+          const SizedBox(height: 14),
+          SectionGroup(
+            margin: EdgeInsets.zero,
+            children: [
+              for (final (code, name) in const [('telebirr', 'telebirr'), ('cbebirr', 'CBE Birr'), ('chapa', 'Bank account (Chapa)')])
+                ChoiceRow(title: name, leading: Icon(code == 'chapa' ? Icons.account_balance_outlined : Icons.phone_iphone, color: c.accentStrong), selected: _provider == code, onTap: () => setState(() => _provider = code)),
+            ],
           ),
-          const SizedBox(height: 12),
-          TextField(controller: _dest, keyboardType: TextInputType.phone, decoration: InputDecoration(labelText: l.payoutDestination, hintText: _provider == 'chapa' ? '1000123456789' : '+251 911 22 33 44'), onChanged: (_) => setState(() {})),
+          const SizedBox(height: 14),
+          TextField(controller: _dest, keyboardType: TextInputType.phone, decoration: InputDecoration(labelText: l.payoutDestination, hintText: _provider == 'chapa' ? '1000123456789' : '+251 911 22 33 44', prefixIcon: Icon(_provider == 'chapa' ? Icons.numbers : Icons.phone_outlined)), onChanged: (_) => setState(() {})),
           const SizedBox(height: 12),
           Problem(_error, describe: (e) => describeError(l, e)),
           const SizedBox(height: 8),
@@ -293,11 +396,21 @@ class _StatementScreenState extends ConsumerState<StatementScreen> {
   String? _next;
   bool _loading = true;
   Object? _error;
+  final _scroll = ScrollController();
 
   @override
   void initState() {
     super.initState();
     _load();
+    _scroll.addListener(() {
+      if (_scroll.position.extentAfter < 300 && _next != null && !_loading) _load(more: true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
   }
 
   Future<void> _load({bool more = false}) async {
@@ -318,25 +431,51 @@ class _StatementScreenState extends ConsumerState<StatementScreen> {
     }
   }
 
+  IconData _icon(String kind) => switch (kind) {
+        'TRIP_SETTLEMENT' => Icons.directions_car_outlined,
+        'TOP_UP' => Icons.add_card_outlined,
+        'PAYOUT' => Icons.account_balance_outlined,
+        'REFUND' => Icons.undo,
+        'CANCELLATION_FEE' => Icons.close_rounded,
+        _ => Icons.receipt_long_outlined,
+      };
+
   @override
   Widget build(BuildContext context) {
     final l = context.l10n;
     final c = context.colors;
+    final groups = <String, List<StatementEntry>>{};
+    for (final e in _entries) {
+      groups.putIfAbsent(dayOf(e.at, locale: context.localeTag), () => []).add(e);
+    }
     return Scaffold(
       appBar: AppBar(title: Text(l.statement)),
       body: _loading && _entries.isEmpty
-          ? const Center(child: CircularProgressIndicator())
+          ? const Padding(padding: EdgeInsets.all(16), child: SkeletonList(rows: 6))
           : ListView(
+              controller: _scroll,
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
               children: [
-                if (_error != null) Padding(padding: const EdgeInsets.all(16), child: Problem(_error, describe: (e) => describeError(l, e), onRetry: _load, retryLabel: l.retry)),
-                if (_entries.isEmpty && _error == null) EmptyState(icon: Icons.receipt_long_outlined, title: l.statementEmpty),
-                for (final e in _entries)
-                  ListTile(
-                    title: Text(statementKindLabel(l, e.kind)),
-                    subtitle: Text('${dayAndTime(e.at, locale: context.localeTag)}${e.memo != null ? ' · ${e.memo}' : ''}'),
-                    trailing: MoneyText(e.amountMinor, locale: context.localeTag, signed: true, style: TextStyle(fontWeight: FontWeight.w700, color: e.amountMinor < 0 ? c.danger : c.success)),
+                if (_error != null) Padding(padding: const EdgeInsets.only(top: 12), child: Problem(_error, describe: (e) => describeError(l, e), onRetry: _load, retryLabel: l.retry)),
+                if (_entries.isEmpty && _error == null) Padding(padding: const EdgeInsets.only(top: 40), child: IllustratedEmpty(illustration: AnbessaIllustration.wallet, title: l.statementEmpty)),
+                for (final g in groups.entries) ...[
+                  Padding(padding: const EdgeInsets.fromLTRB(4, 14, 4, 6), child: Text(g.key, style: AnbessaType.label.copyWith(color: c.muted, letterSpacing: 0.4))),
+                  SectionGroup(
+                    margin: EdgeInsets.zero,
+                    children: [
+                      for (final e in g.value)
+                        SettingsTile(
+                          icon: _icon(e.kind),
+                          iconTone: e.amountMinor < 0 ? c.danger : c.success,
+                          title: statementKindLabel(l, e.kind),
+                          subtitle: '${clockOf(e.at)}${e.memo != null ? ' · ${e.memo}' : ''}',
+                          chevron: false,
+                          trailing: MoneyText(e.amountMinor, locale: context.localeTag, signed: true, style: AnbessaType.body.copyWith(fontWeight: FontWeight.w700, color: e.amountMinor < 0 ? c.danger : c.success)),
+                        ),
+                    ],
                   ),
-                if (_next != null) TextButton(onPressed: () => _load(more: true), child: Text(l.next)),
+                ],
+                if (_next != null) const Padding(padding: EdgeInsets.all(16), child: Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)))),
               ],
             ),
     );
@@ -348,30 +487,39 @@ class TopUpsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l = context.l10n;
+    final c = context.colors;
     final b = ref.watch(balanceProvider).value;
     return Scaffold(
       appBar: AppBar(title: Text(l.topUps)),
       body: b?.accountId == null
-          ? EmptyState(title: l.statementEmpty)
+          ? IllustratedEmpty(illustration: AnbessaIllustration.wallet, title: l.statementEmpty)
           : FutureBuilder(
               future: ref.read(apisProvider).payments.topUps(b!.accountId!),
               builder: (context, snap) {
                 if (snap.hasError) return Padding(padding: const EdgeInsets.all(16), child: Problem(snap.error, describe: (e) => describeError(l, e)));
                 final list = snap.data;
-                if (list == null) return const Center(child: CircularProgressIndicator());
-                if (list.isEmpty) return EmptyState(title: l.statementEmpty);
+                if (list == null) return const Padding(padding: EdgeInsets.all(16), child: SkeletonList(rows: 4));
+                if (list.isEmpty) return IllustratedEmpty(illustration: AnbessaIllustration.wallet, title: l.statementEmpty);
                 return ListView(
+                  padding: const EdgeInsets.all(16),
                   children: [
-                    for (final t in list)
-                      ListTile(
-                        title: Text('${t.channel == 'MOBILE_MONEY' ? l.mobileMoney : t.channel == 'OFFICE_CASH' ? l.cash : 'Bank'}${t.provider != null && t.provider != 'bank' ? ' · ${providerLabel(t.provider!)}' : ''}'),
-                        subtitle: Text(dayAndTime(t.createdAt, locale: context.localeTag)),
-                        trailing: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [MoneyText(t.amountMinor, locale: context.localeTag, style: const TextStyle(fontWeight: FontWeight.w700)), StatusPill(t.status.name, tone: t.status == TopUpStatus.succeeded ? Tone.green : t.isOpen ? Tone.amber : Tone.red)],
-                        ),
-                      ),
+                    SectionGroup(
+                      margin: EdgeInsets.zero,
+                      children: [
+                        for (final t in list)
+                          SettingsTile(
+                            icon: t.channel == 'MOBILE_MONEY' ? Icons.phone_iphone : t.channel == 'OFFICE_CASH' ? Icons.payments_outlined : Icons.account_balance_outlined,
+                            title: '${t.channel == 'MOBILE_MONEY' ? l.mobileMoney : t.channel == 'OFFICE_CASH' ? l.cash : 'Bank'}${t.provider != null && t.provider != 'bank' ? ' · ${providerLabel(t.provider!)}' : ''}',
+                            subtitle: dayAndTime(t.createdAt, locale: context.localeTag),
+                            chevron: false,
+                            trailing: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [MoneyText(t.amountMinor, locale: context.localeTag, style: AnbessaType.body.copyWith(fontWeight: FontWeight.w700, color: c.text)), StatusPill(t.status.name, tone: t.status == TopUpStatus.succeeded ? Tone.green : t.isOpen ? Tone.amber : Tone.red)],
+                            ),
+                          ),
+                      ],
+                    ),
                   ],
                 );
               },

@@ -28,8 +28,8 @@ export async function createHarness() {
   const mappingState = { down: false };
 
   const mapping: MappingClient = {
-    async route() {
-      return { distanceMeters: 7400, durationSeconds: 900, approximate: false };
+    async route(_points, geometry = false) {
+      return { distanceMeters: 7400, durationSeconds: 900, approximate: false, ...(geometry ? { geometry: "_p~iF~ps|U_ulLnnqC" } : {}) };
     },
     async table(sources) {
       if (mappingState.down) throw new Error("mapping 503");
@@ -38,11 +38,12 @@ export async function createHarness() {
     },
   };
   // auth names and fleet cars for /parties; tests set names and can take the upstreams down
-  const partiesState = { names: new Map<string, string>(), down: false };
+  const partiesState = { names: new Map<string, string>(), photos: new Map<string, string>(), down: false };
   const parties: PartiesClient = {
-    async userName(id) {
+    async user(id) {
       if (partiesState.down) throw new Error("auth 503");
-      return partiesState.names.get(id) ?? null;
+      const name = partiesState.names.get(id);
+      return name === undefined ? null : { name, image: partiesState.photos.get(id) ?? null };
     },
     async vehicle(id) {
       if (partiesState.down) throw new Error("fleet 503");
@@ -95,7 +96,7 @@ export async function createHarness() {
     return { id, token: await token(id, [{ r: "DRIVER" }, { r: "RIDER" }]), ping };
   }
 
-  const req = (method: "GET" | "POST", url: string, who: { token: string }, payload?: object, headers: Record<string, string> = {}) =>
+  const req = (method: "GET" | "POST" | "PUT" | "DELETE", url: string, who: { token: string }, payload?: object, headers: Record<string, string> = {}) =>
     app.inject({ method, url, payload, headers: { authorization: `Bearer ${who.token}`, ...headers } });
 
   async function quote(who: { token: string }, from = BOLE, to = PIASSA, vehicleType = "economy") {

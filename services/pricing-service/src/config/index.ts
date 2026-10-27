@@ -15,6 +15,8 @@ export const envSchema = z.object({
   AUTH_INTERNAL_URL: z.string().url().default("http://localhost:3001"),
   // routes (distance and time) for each quote
   MAPPING_INTERNAL_URL: z.string().url().default("http://localhost:3007"),
+  // ETA to the pickup per vehicle type on each quote (GET /internal/eta-to-pickup)
+  LOCATION_INTERNAL_URL: z.string().url().default("http://localhost:3003"),
   // live fares (admin dashboard → Settings → Fares): GET /internal/settings/snapshot
   PLATFORM_INTERNAL_URL: z.string().url().default("http://localhost:3011"),
 });

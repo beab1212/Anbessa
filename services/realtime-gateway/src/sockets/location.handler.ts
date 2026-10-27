@@ -41,8 +41,9 @@ export function registerLocationHandlers(io: Server, socket: Socket, deps: { red
 
     // Fan-out only to the trip location-service assigned this driver to (never a trip id from the client).
     if (state.status === "on_trip" && state.tripId) {
+      // speed lets the rider's map move the car smoothly between pings
       io.to(`trip:${state.tripId}`).emit("driver:location", {
-        tripId: state.tripId, driverId: principal.userId, lat: ping.lat, lng: ping.lng, heading: ping.heading, at: ping.at,
+        tripId: state.tripId, driverId: principal.userId, lat: ping.lat, lng: ping.lng, heading: ping.heading, speed: ping.speed, at: ping.at,
       });
     }
 

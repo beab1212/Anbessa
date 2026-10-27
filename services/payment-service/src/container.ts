@@ -9,6 +9,7 @@ import { createDb, type Db } from "./db.js";
 import { createGateways } from "./gateways/index.js";
 import { httpDeliver, simStore, type Deliver, type SimStore } from "./gateways/simulator.js";
 import { noRealtime, socketEmitter, type Realtime } from "./lib/realtime.js";
+import { createEarnings } from "./money/earnings.js";
 import { createBalanceService } from "./money/balance-service.js";
 import { createPayments } from "./money/payments.js";
 import { createPayouts } from "./money/payouts.js";
@@ -59,6 +60,7 @@ export function createContainer(config: Config, logger: Logger, opts: ContainerO
   const payouts = createPayouts({ db, gateways, logger, notifyUrl, now });
   const ruleChanges = createRuleChanges({ db, now });
   const balances = createBalanceService({ db, gateways, now });
+  const earnings = createEarnings({ db, now });
   const webhooks = createWebhooks({ db, gateways, payments, topUps, payouts, logger, now });
 
   // tokens of suspended users, and tokens older than a role change, are refused (Auth.md §9.5)
@@ -79,7 +81,7 @@ export function createContainer(config: Config, logger: Logger, opts: ContainerO
     });
 
   return {
-    config, db, redis, settings, settingsClient, gateways, payments, topUps, payouts, ruleChanges, balances, webhooks, verifyAccessToken, now,
+    config, db, redis, settings, settingsClient, gateways, payments, topUps, payouts, ruleChanges, balances, earnings, webhooks, verifyAccessToken, now,
     internalToken: config.INTERNAL_SERVICE_TOKEN,
     async close() {
       gateways.simulator.stop();

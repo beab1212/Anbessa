@@ -14,6 +14,11 @@ import '../../core/router/routes.dart';
 
 const _notAvailable = AppError(status: 501, code: ErrorCodes.notAvailable, message: 'Not available yet');
 
+// Pieces of finished screens that wait for their backend (workflow 08 tips, 06 masked calls and chat).
+const kTipsEnabled = false;
+const kMaskedCallsEnabled = false;
+const kChatEnabled = false;
+
 // ── scheduled rides (workflow 12) ─────────────────────────────────────────────
 
 @immutable
@@ -55,9 +60,22 @@ class ScheduledRidesScreen extends ConsumerWidget {
       appBar: AppBar(title: Text(l.scheduledRides)),
       body: FutureBuilder(
         future: ref.read(scheduledRidesRepositoryProvider).list(),
-        builder: (context, snap) => (snap.data ?? const []).isEmpty
-            ? EmptyState(icon: Icons.schedule, title: l.scheduledRides, body: l.scheduledRidesLede, action: PrimaryButton(label: l.scheduleRide, onPressed: () => context.push(Routes.scheduledNew)))
-            : ListView(children: [for (final t in snap.data!) ListTile(title: Text(t.dropoff.name), subtitle: Text(dayAndTime(t.at, locale: context.localeTag)))]),
+        builder: (context, snap) {
+          if (snap.connectionState != ConnectionState.done) return const Padding(padding: EdgeInsets.all(16), child: SkeletonList(rows: 3));
+          final list = snap.data ?? const [];
+          if (list.isEmpty) {
+            return _Soon(illustration: AnbessaIllustration.carWaiting, title: l.scheduledRides, body: l.scheduledRidesLede, action: PrimaryButton(label: l.scheduleRide, icon: Icons.schedule, onPressed: () => context.push(Routes.scheduledNew)));
+          }
+          return ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              SectionGroup(
+                margin: EdgeInsets.zero,
+                children: [for (final t in list) SettingsTile(icon: Icons.schedule, title: t.dropoff.name, subtitle: dayAndTime(t.at, locale: context.localeTag), trailing: StatusPill(t.status, tone: Tone.grey), chevron: false)],
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -98,13 +116,34 @@ class _SosScreenState extends ConsumerState<SosScreen> {
     final l = context.l10n;
     final c = context.colors;
     return Scaffold(
-      appBar: AppBar(title: Text(l.sosTitle), backgroundColor: c.dangerSoft),
+      appBar: AppBar(title: Text(l.sosTitle)),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          Text(l.sosLede, style: TextStyle(fontSize: 16, color: c.text2)),
+          Center(
+            child: Pulse(
+              child: Container(
+                width: 112,
+                height: 112,
+                decoration: BoxDecoration(shape: BoxShape.circle, color: c.danger.withValues(alpha: 0.12)),
+                child: Center(
+                  child: Container(
+                    width: 76,
+                    height: 76,
+                    decoration: BoxDecoration(shape: BoxShape.circle, color: c.danger),
+                    child: const Icon(Icons.sos, color: Colors.white, size: 38),
+                  ),
+                ),
+              ),
+            ),
+          ),
           const SizedBox(height: 20),
-          PrimaryButton(label: l.callPolice, icon: Icons.phone, danger: true, onPressed: () => launchUrl(Uri.parse('tel:991'))),
+          Text(l.sosLede, textAlign: TextAlign.center, style: AnbessaType.body.copyWith(color: c.text2)),
+          const SizedBox(height: 24),
+          PrimaryButton(label: l.callPolice, icon: Icons.phone, danger: true, onPressed: () {
+            Haptics.heavy();
+            launchUrl(Uri.parse('tel:991'));
+          }),
           const SizedBox(height: 12),
           if (_sent) Notice(l.done, tone: NoticeTone.ok) else Problem(_error, describe: (e) => describeError(l, e)),
           const SizedBox(height: 8),
@@ -159,7 +198,7 @@ class SupportScreen extends StatelessWidget {
     final l = context.l10n;
     return Scaffold(
       appBar: AppBar(title: Text(l.support)),
-      body: EmptyState(icon: Icons.help_outline, title: l.support, body: l.supportLede, action: PrimaryButton(label: l.newTicket, onPressed: () => context.push(Routes.supportNew))),
+      body: _Soon(illustration: AnbessaIllustration.searchEmpty, title: l.support, body: l.supportLede, action: PrimaryButton(label: l.newTicket, icon: Icons.edit_outlined, onPressed: () => context.push(Routes.supportNew))),
     );
   }
 }
@@ -193,7 +232,7 @@ class PromosScreen extends StatelessWidget {
     final l = context.l10n;
     return Scaffold(
       appBar: AppBar(title: Text(l.promos)),
-      body: EmptyState(icon: Icons.local_offer_outlined, title: l.promos, body: l.promosLede, action: PrimaryButton(label: l.redeemCode, onPressed: () => context.push(Routes.promosRedeem))),
+      body: _Soon(illustration: AnbessaIllustration.wallet, title: l.promos, body: l.promosLede, action: PrimaryButton(label: l.redeemCode, icon: Icons.local_offer_outlined, onPressed: () => context.push(Routes.promosRedeem))),
     );
   }
 }
@@ -233,7 +272,7 @@ class _DeleteAccountScreenState extends ConsumerState<DeleteAccountScreen> {
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          Text(l.deleteAccountLede, style: TextStyle(color: context.colors.text2, fontSize: 15)),
+          Notice(l.deleteAccountLede, tone: NoticeTone.warning),
           const SizedBox(height: 16),
           Problem(_error, describe: (e) => describeError(l, e)),
           const SizedBox(height: 8),
@@ -258,5 +297,36 @@ class _NotYet extends StatelessWidget {
   const _NotYet({required this.title});
   final String title;
   @override
-  Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: Text(title)), body: EmptyState(icon: Icons.construction_outlined, title: title, body: context.l10n.notAvailableYet));
+  Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: Text(title)), body: _Soon(illustration: AnbessaIllustration.documents, title: title, body: context.l10n.notAvailableYet));
+}
+
+/// The empty state of a module that's on its way: illustration, a "Coming soon" chip, the lede.
+class _Soon extends StatelessWidget {
+  const _Soon({required this.illustration, required this.title, required this.body, this.action});
+  final AnbessaIllustration illustration;
+  final String title;
+  final String body;
+  final Widget? action;
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return LayoutBuilder(
+      builder: (context, box) => SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: box.maxHeight - 48),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              StatusPill(context.l10n.comingSoon, tone: Tone.amber),
+              const SizedBox(height: 12),
+              FadeSlideIn(child: IllustratedEmpty(illustration: illustration, title: title, body: body, action: action)),
+              const SizedBox(height: 8),
+              Text(context.l10n.notAvailableYet, textAlign: TextAlign.center, style: AnbessaType.caption.copyWith(color: c.muted)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }

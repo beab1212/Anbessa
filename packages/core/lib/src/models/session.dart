@@ -105,3 +105,39 @@ class DevAccount {
   final bool seeded;
   factory DevAccount.fromJson(Json j) => DevAccount(key: str(j, 'key'), name: str(j, 'name'), label: str(j, 'label'), phone: str(j, 'phone'), app: str(j, 'app', 'web'), seeded: readBool(j, 'seeded'));
 }
+
+/// A company (CORPORATE) or fleet (FLEET) the person belongs to (Better Auth organizations).
+@immutable
+class Organization {
+  const Organization({required this.id, required this.name, required this.kind, required this.status, this.slug, this.cityId});
+  final String id;
+  final String name;
+  /// FLEET | CORPORATE | STAFF_CITY | STAFF_HQ
+  final String kind;
+  /// PENDING | ACTIVE | SUSPENDED
+  final String status;
+  final String? slug;
+  final String? cityId;
+  factory Organization.fromJson(Json j) => Organization(
+        id: str(j, 'id'), name: str(j, 'name'), kind: str(j, 'kind', ''), status: str(j, 'status', ''), slug: strOrNull(j, 'slug'), cityId: strOrNull(j, 'cityId'),
+      );
+  bool get isCorporate => kind == 'CORPORATE';
+  bool get isFleet => kind == 'FLEET';
+}
+
+/// An invitation to join an organisation (fleet driver, company employee).
+@immutable
+class OrgInvitation {
+  const OrgInvitation({required this.id, required this.organizationId, this.organizationName, required this.role, required this.status, this.expiresAt});
+  final String id;
+  final String organizationId;
+  final String? organizationName;
+  final String role;
+  /// pending | accepted | rejected | canceled
+  final String status;
+  final DateTime? expiresAt;
+  factory OrgInvitation.fromJson(Json j) => OrgInvitation(
+        id: str(j, 'id'), organizationId: str(j, 'organizationId'), organizationName: strOrNull(j, 'organizationName'), role: str(j, 'role', ''), status: str(j, 'status', 'pending'), expiresAt: dateOrNull(j, 'expiresAt'),
+      );
+  bool get isPending => status == 'pending' && (expiresAt == null || expiresAt!.isAfter(DateTime.now().toUtc()));
+}

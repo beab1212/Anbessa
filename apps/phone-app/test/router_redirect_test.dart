@@ -5,6 +5,7 @@ import 'package:phone_app/core/router/routes.dart';
 import 'package:phone_app/core/session/session_controller.dart';
 import 'package:phone_app/features/config/client_config_provider.dart';
 import 'package:phone_app/features/driver/shift/shift_controller.dart';
+import 'package:phone_app/features/intro/intro_screen.dart';
 import 'package:phone_app/features/rider/trip/active_trip_controller.dart';
 import 'package:ride_app_core/ride_app_core.dart';
 
@@ -21,8 +22,10 @@ Future<String?> redirect(
   Trip? trip,
   DriverHome? driverHome,
   bool updateRequired = false,
+  bool introSeen = true,
 }) async {
   final c = ProviderContainer(overrides: [
+    introSeenProvider.overrideWith(() => FixedIntroSeen(introSeen)),
     sessionProvider.overrideWith(() => FixedSession(signedIn)),
     modeProvider.overrideWith(() => FixedMode(mode)),
     activeTripProvider.overrideWith(() => FixedActiveTrip(trip)),
@@ -37,7 +40,21 @@ Future<String?> redirect(
   return c.read(probe);
 }
 
+class FixedIntroSeen extends IntroSeen {
+  FixedIntroSeen(this.value);
+  final bool value;
+  @override
+  bool build() => value;
+}
+
 void main() {
+  test('first launch: the intro comes before welcome, once', () async {
+    expect(await redirect(Routes.welcome, introSeen: false), Routes.intro);
+    expect(await redirect(Routes.intro, introSeen: false), isNull);
+    expect(await redirect(Routes.intro), Routes.welcome);
+    expect(await redirect(Routes.intro, signedIn: session()), Routes.splash);
+  });
+
   test('signed out: everything leads to welcome, sign-in screens stay', () async {
     expect(await redirect(Routes.riderHome), Routes.welcome);
     expect(await redirect(Routes.signIn), isNull);

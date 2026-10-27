@@ -8,6 +8,8 @@ import { withIdempotency } from "../lib/idempotency.js";
 import { notFound, unauthorized } from "../lib/errors.js";
 import type { builtinQuotes } from "../quotes.js";
 import type { PartiesService } from "../trips/parties.js";
+import type { PlacesService } from "../trips/places.js";
+import type { SharesService } from "../trips/share.js";
 import { tripView, type TripService } from "../trips/service.js";
 
 const id = z.object({ id: z.string().uuid() });
@@ -19,6 +21,8 @@ export interface RouteDeps {
   db: Db;
   trips: TripService;
   parties: PartiesService;
+  places: PlacesService;
+  shares: SharesService;
   verifyAccessToken: VerifyAccessToken;
   internalToken: string;
   /** the development quote stand-in (PRICING=builtin) */
@@ -50,6 +54,35 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
     const r = await withIdempotency(db, p.userId, idemKey(req), { url: req.url, body: req.body }, work);
     return reply.status(r.statusCode).send(r.body);
   }
+
+  // ── my rating (static path before /api/trips/:id) ───────────────────────────
+  app.get("/api/trips/me/rating", async (req) => trips.ratingOfUser((await principal(req)).userId));
+
+  // ── saved places (static paths before /api/trips/:id) ───────────────────────
+  const placeBody = z.object({ name: z.string().trim().min(1).max(120), address: z.string().trim().max(240).optional(), lat: point.shape.lat, lng: point.shape.lng });
+  app.get("/api/trips/places", async (req) => ({ places: await deps.places.list(await principal(req)) }));
+  app.put("/api/trips/places/:label", async (req) => {
+    const p = await principal(req);
+    const { label } = z.object({ label: z.enum(["home", "work"]) }).parse(req.params);
+    return deps.places.setFixed(p, label.toUpperCase() as "HOME" | "WORK", placeBody.parse(req.body));
+  });
+  app.post("/api/trips/places", async (req, reply) => {
+    const p = await principal(req);
+    return reply.status(201).send(await deps.places.add(p, placeBody.parse(req.body)));
+  });
+  app.delete("/api/trips/places/:id", async (req, reply) => {
+    const p = await principal(req);
+    await deps.places.remove(p, id.parse(req.params).id);
+    return reply.status(204).send();
+  });
+
+  // ── share my trip: the public view (no token; the share token is the secret) ─
+  app.get("/api/trips/shared/:token", { config: { rateLimit: { max: 30, timeWindow: "1 minute" } } }, async (req, reply) => {
+    const { token } = z.object({ token: z.string().regex(/^[A-Za-z0-9_-]{16,64}$/) }).parse(req.params);
+    reply.header("cache-control", "no-store");
+    reply.header("referrer-policy", "no-referrer");
+    return deps.shares.view(token);
+  });
 
   // ── workflow 05: request ────────────────────────────────────────────────────
   app.post("/api/trips", async (req, reply) => {
@@ -176,8 +209,24 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
 
   app.post("/api/trips/:id/rating", async (req, reply) => {
     const p = await principal(req);
-    const body = z.object({ stars: z.number().int().min(1).max(5), comment: z.string().max(500).optional() }).parse(req.body);
+    const body = z.object({ stars: z.number().int().min(1).max(5), comment: z.string().max(500).optional(), tags: z.array(z.string().max(40)).max(5).optional() }).parse(req.body);
     return reply.status(201).send(await trips.rate(p, id.parse(req.params).id, body));
+  });
+
+  app.post("/api/trips/:id/share", async (req, reply) => {
+    const p = await principal(req);
+    return reply.status(201).send(await deps.shares.create(p, id.parse(req.params).id));
+  });
+
+  app.delete("/api/trips/:id/share", async (req, reply) => {
+    const p = await principal(req);
+    await deps.shares.revoke(p, id.parse(req.params).id);
+    return reply.status(204).send();
+  });
+
+  app.get("/api/trips/:id/rating", async (req) => {
+    const p = await principal(req);
+    return trips.ratingOf(p, id.parse(req.params).id);
   });
 
   // ── development stand-in for pricing-service's estimates (PRICING=builtin only) ──

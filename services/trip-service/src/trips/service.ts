@@ -11,7 +11,7 @@ import { randomInt } from "node:crypto";
 import type { Redis } from "ioredis";
 import { authorize, can, type Principal } from "@ride-app/shared-authz";
 import { haversineMeters, keys as locationKeys } from "@ride-app/shared-location";
-import type { Beneficiary, PaymentMethod } from "@ride-app/shared-types";
+import { RATING_TAGS, type Beneficiary, type PaymentMethod } from "@ride-app/shared-types";
 import type { Logger } from "@ride-app/shared-utils";
 import { Prisma, type Trip } from "../generated/prisma/client.js";
 import type { Db } from "../db.js";
@@ -76,7 +76,7 @@ export function tripView(t: Trip, viewer?: Principal) {
       estimateMinor: Number(t.fareEstimateMinor), finalMinor: n(t.fareFinalMinor),
       waitingFeeMinor: n(t.waitingFeeMinor), currency: t.currency,
     },
-    route: { estDistanceMeters: t.estDistanceM, estDurationSeconds: t.estDurationS, distanceMeters: t.distanceM, durationSeconds: t.durationS },
+    route: { estDistanceMeters: t.estDistanceM, estDurationSeconds: t.estDurationS, distanceMeters: t.distanceM, durationSeconds: t.durationS, polyline: t.routePolyline },
     times: { requestedAt: t.createdAt, matchedAt: t.matchedAt, arrivedAt: t.arrivedAt, startedAt: t.startedAt, completedAt: t.completedAt, cancelledAt: t.cancelledAt },
     cancellation: t.cancelledAt
       ? { by: t.cancelledBy, reason: t.cancelReason, feeMinor: n(t.cancelFeeMinor), driverCompensationMinor: n(t.driverCompensationMinor) }
@@ -140,6 +140,16 @@ export function createTripService(deps: TripServiceDeps) {
       if (event) await writeOutbox(tx, event(updated));
       return updated;
     });
+  }
+
+  const ratingKey = (userId: string) => `rating:user:${userId}`;
+  async function ratingOfUser(userId: string): Promise<{ average: number | null; count: number }> {
+    const cached = await redis.get(ratingKey(userId));
+    if (cached) return JSON.parse(cached) as { average: number | null; count: number };
+    const agg = await db.tripRating.aggregate({ where: { rateeUserId: userId }, _avg: { stars: true }, _count: { stars: true } });
+    const out = { average: agg._avg.stars === null ? null : Math.round(agg._avg.stars * 10) / 10, count: agg._count.stars };
+    await redis.set(ratingKey(userId), JSON.stringify(out), "EX", 300);
+    return out;
   }
 
   function notify(t: Trip, event = "trip:status") {
@@ -300,7 +310,7 @@ export function createTripService(deps: TripServiceDeps) {
               pickupLat: quote.pickup.lat, pickupLng: quote.pickup.lng, dropoffLat: quote.dropoff.lat, dropoffLng: quote.dropoff.lng,
               pickupAddress: quote.pickupAddress ?? null, dropoffAddress: quote.dropoffAddress ?? null,
               fareEstimateMinor: BigInt(quote.fareMinor), waitingPerMinMinor: BigInt(quote.waitingPerMinMinor), currency: quote.currency,
-              estDistanceM: quote.distanceMeters, estDurationS: quote.durationSeconds,
+              estDistanceM: quote.distanceMeters, estDurationS: quote.durationSeconds, routePolyline: quote.routePolyline6 ?? null,
               pin: String(randomInt(0, 10_000)).padStart(4, "0"), createdAt: now(),
             },
           });
@@ -477,20 +487,38 @@ export function createTripService(deps: TripServiceDeps) {
     },
 
     // ── workflow 08: rating ───────────────────────────────────────────────────
-    async rate(p: Principal, tripId: string, input: { stars: number; comment?: string }) {
+    async rate(p: Principal, tripId: string, input: { stars: number; comment?: string; tags?: string[] }) {
       const t = await load(tripId);
       const byRole = p.userId === t.riderUserId ? "RIDER" : p.userId === t.driverUserId ? "DRIVER" : undefined;
       if (!byRole) throw notFound("trip");
       if (t.status !== "completed" || !t.completedAt) throw invalidState(t.status);
       if (now().getTime() - t.completedAt.getTime() > 7 * 86_400_000) throw conflict("ratings close 7 days after the trip", "rating_closed");
+      const allowed: readonly string[] = RATING_TAGS[byRole];
+      const tags = [...new Set(input.tags ?? [])];
+      const unknown = tags.filter((x) => !allowed.includes(x));
+      if (unknown.length) throw badRequest(`unknown tags: ${unknown.join(", ")}`, "invalid_tags");
+      const rateeUserId = byRole === "RIDER" ? t.driverUserId : t.riderUserId;
       try {
-        await db.tripRating.create({ data: { tripId, byRole, byUserId: p.userId, stars: input.stars, comment: input.comment?.trim() || null } });
+        await db.tripRating.create({ data: { tripId, byRole, byUserId: p.userId, rateeUserId, stars: input.stars, tags, comment: input.comment?.trim() || null } });
       } catch (err) {
         if (isP2002(err)) throw conflict("you already rated this trip", "already_rated");
         throw err;
       }
-      return { tripId, byRole, stars: input.stars };
+      if (rateeUserId) await redis.del(ratingKey(rateeUserId));
+      return { tripId, byRole, stars: input.stars, tags };
     },
+
+    /** My rating of a trip (null when I haven't rated it). */
+    async ratingOf(p: Principal, tripId: string) {
+      const t = await readable(p, tripId);
+      const byRole = p.userId === t.riderUserId ? "RIDER" : p.userId === t.driverUserId ? "DRIVER" : undefined;
+      if (!byRole) return { mine: null };
+      const r = await db.tripRating.findUnique({ where: { tripId_byRole: { tripId: t.id, byRole } } });
+      return { mine: r ? { stars: r.stars, tags: r.tags, comment: r.comment } : null };
+    },
+
+    /** The average a person has received (cached 5 min; rate() clears it). */
+    ratingOfUser: (userId: string) => ratingOfUser(userId),
 
     // ── reads ─────────────────────────────────────────────────────────────────
     readable,

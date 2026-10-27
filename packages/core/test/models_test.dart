@@ -97,6 +97,24 @@ void main() {
     test('parses every registered event name and ignores unknown ones', () {
       final trip = fixture('trip');
       expect(RealtimeEvent.fromSocket('trip:status', {'tripId': trip['id'], 'status': 'en_route', 'trip': trip}), isA<TripStatusEvent>());
+      expect(Trip.fromJson(trip).route.polyline, '_p~iF~ps|U_ulLnnqC');
+      final loc = RealtimeEvent.fromSocket('driver:location', {'tripId': 't', 'driverId': 'd', 'lat': 9.01, 'lng': 38.76, 'heading': 90, 'speed': 8.5, 'at': 1700000000000});
+      expect((loc as DriverLocationEvent).speed, 8.5);
+      final est = Estimates.fromJson({
+        'quotes': [{'id': 'q1', 'cityId': 'addis-ababa', 'vehicleType': 'economy', 'pickup': {'lat': 9.0, 'lng': 38.7}, 'dropoff': {'lat': 9.1, 'lng': 38.8}, 'fareMinor': 20000, 'waitingPerMinMinor': 300, 'distanceMeters': 6000, 'durationSeconds': 900, 'approximate': false, 'routePolyline6': 'abc', 'etaToPickupSeconds': 240, 'driversNearby': 3, 'expiresAt': '2026-10-27T10:00:00Z'}],
+        'route': {'polyline6': 'abc', 'distanceMeters': 6000, 'durationSeconds': 900, 'approximate': false},
+      });
+      expect(est.route!.polyline6, 'abc');
+      expect(est.quotes.single.etaToPickupSeconds, 240);
+      final steps = RouteSteps.fromJson({'polyline6': 'abc', 'distanceMeters': 100, 'durationSeconds': 20, 'approximate': false, 'steps': [{'maneuver': {'type': 'turn', 'modifier': 'left', 'location': {'lat': 9.0, 'lng': 38.7}, 'bearingAfter': 270}, 'name': 'Churchill Avenue', 'distanceMeters': 100, 'durationSeconds': 20}]});
+      expect(steps.steps.single.modifier, 'left');
+      final place = SavedPlace.fromJson({'id': 'p1', 'label': 'HOME', 'name': 'Home', 'address': 'Bole', 'lat': 8.99, 'lng': 38.79});
+      expect(place.label, PlaceLabel.home);
+      expect(place.place.label, 'Bole');
+      expect(SavedPlace.fromJson({'id': 'p2', 'label': 'SCHOOL', 'name': 'x', 'lat': 1, 'lng': 2}).label, PlaceLabel.unknown);
+      final cars = NearbyCars.fromJson({'cars': [{'lat': 9.0, 'lng': 38.7, 'heading': 90}], 'etaSeconds': 120, 'driversNearby': 1, 'approximate': false});
+      expect(cars.cars.single.heading, 90);
+      expect(cars.etaSeconds, 120);
       final offer = RealtimeEvent.fromSocket('trip:offer', {
         'tripId': 't', 'offerId': 'o', 'expiresAt': '2026-10-26T13:07:29.000Z', 'etaToPickupSeconds': 180,
         'pickup': trip['pickup'], 'dropoff': trip['dropoff'], 'vehicleType': 'economy', 'fare': {'estimateMinor': 22000, 'currency': 'ETB'}, 'paymentMethod': 'CASH',

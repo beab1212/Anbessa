@@ -21,7 +21,6 @@
   "errorRateLimited": "ብዙ ሙከራዎች። አንድ ደቂቃ ጠብቀው እንደገና ይሞክሩ።",
   "errorMaintenance": "አንበሳ ለአጭር ጊዜ አይገኝም። ከጥቂት ደቂቃዎች በኋላ ይሞክሩ።",
   "errorNotAvailable": "ይህ ገና አይገኝም።",
-
   "welcomeTitle": "በአዲስ አበባ ውስጥ ጉዞ፣ በቋሚ ዋጋ",
   "welcomeLede": "በአንድ ደቂቃ መኪና ይያዙ፣ በጥሬ ገንዘብ ወይም በሞባይል ገንዘብ ይክፈሉ፣ ሲመጣም ይመልከቱ።",
   "signInWithPhone": "በስልክ ቁጥርዎ ይቀጥሉ",
@@ -34,19 +33,30 @@
   "sendCode": "ኮድ ላክ",
   "codeTitle": "ኮዱን ያስገቡ",
   "codeSent": "ወደ {phone} ተልኳል።",
-  "@codeSent": { "placeholders": { "phone": { "type": "String" } } },
+  "@codeSent": {
+    "placeholders": {
+      "phone": {
+        "type": "String"
+      }
+    }
+  },
   "codeLabel": "ባለ 6 አሃዝ ኮድ",
   "codeInvalid": "ኮዱ ትክክል አይደለም። አረጋግጠው እንደገና ይሞክሩ።",
   "verify": "ግባ",
   "resendIn": "በ {seconds} ሰ. እንደገና ላክ",
-  "@resendIn": { "placeholders": { "seconds": { "type": "int" } } },
+  "@resendIn": {
+    "placeholders": {
+      "seconds": {
+        "type": "int"
+      }
+    }
+  },
   "resend": "ኮዱን እንደገና ላክ",
   "sentBySmsToo": "በቴሌግራም አልደረሰም? በኤስኤምኤስም ልከናል።",
   "changeNumber": "ቁጥሩን ቀይር",
   "devSignInTitle": "እንደ… ግባ",
   "devSignInLede": "ለልማት ብቻ፦ የሙከራ መለያዎች፣ በእውነተኛ መንገድ የሚገቡ።",
   "devNotSeeded": "ገና አልተዘጋጀም፦ በ auth-service ውስጥ seed:dev ያስኪዱ።",
-
   "chooseModeTitle": "ዛሬ አንበሳን እንዴት ይጠቀማሉ?",
   "rideTitle": "ጉዞ",
   "rideLede": "ጉዞ ይያዙ እና ይከታተሉ።",
@@ -56,12 +66,10 @@
   "switchToRider": "ወደ ጉዞ ቀይር",
   "becomeDriver": "ከአንበሳ ጋር ያሽከርክሩ",
   "becomeDriverLede": "በራስዎ መኪና ወይም በፍሊት መኪና ይስሩ።",
-
   "tabHome": "መነሻ",
   "tabActivity": "ጉዞዎች",
   "tabEarnings": "ገቢ",
   "tabAccount": "መለያ",
-
   "updateRequiredTitle": "አንበሳን ያዘምኑ",
   "updateRequiredBody": "ይህ ስሪት በጣም አርጅቷል። ለመቀጠል ከመደብሩ ያዘምኑት።",
   "openStore": "መደብሩን ክፈት",
@@ -70,7 +78,6 @@
   "maintenanceTitle": "ጥገና",
   "announcementsTitle": "ማስታወቂያዎች",
   "mapTilesUnavailable": "ካርታው አልተጫነም። አካባቢዎች አሁንም ይዘመናሉ።",
-
   "whereTo": "ወዴት?",
   "searchPlaces": "ቦታ ወይም አድራሻ ይፈልጉ",
   "pickupLabel": "መነሻ",
@@ -87,12 +94,17 @@
   "openSettings": "ቅንብሮችን ክፈት",
   "outsideServiceArea": "ይህ ቦታ አንበሳ ከሚያገለግላቸው ከተሞች ውጭ ነው።",
   "recentPlaces": "የቅርብ ጊዜ",
-
   "chooseRide": "ጉዞዎን ይምረጡ",
   "fareFixed": "ቋሚ ዋጋ",
   "estimateApproximate": "መንገድ ፍለጋ ከመስመር ውጭ ስለሆነ ርቀትና ጊዜ ግምት ናቸው። የተጠቀሰውን ዋጋ ብቻ ይከፍላሉ።",
   "quoteExpiresIn": "ዋጋው ለ {time} ይሰራል",
-  "@quoteExpiresIn": { "placeholders": { "time": { "type": "String" } } },
+  "@quoteExpiresIn": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
   "quoteExpired": "ዋጋው ጊዜው አልፎበታል።",
   "getNewQuote": "አዲስ ዋጋ አግኝ",
   "paymentMethod": "የሚከፍሉበት",
@@ -101,32 +113,76 @@
   "card": "ካርድ",
   "corporate": "የኩባንያ መለያ",
   "requestRide": "{type} ጠይቅ",
-  "@requestRide": { "placeholders": { "type": { "type": "String" } } },
+  "@requestRide": {
+    "placeholders": {
+      "type": {
+        "type": "String"
+      }
+    }
+  },
   "requestingRide": "በመጠየቅ ላይ…",
   "newTripsPaused": "አዲስ ጉዞዎች ለጊዜው ቆመዋል።",
   "activeTripExists": "አስቀድሞ በሂደት ላይ ያለ ጉዞ አለዎት።",
   "goToTrip": "ጉዞውን ክፈት",
   "distanceTime": "{km} · {time}",
-  "@distanceTime": { "placeholders": { "km": { "type": "String" }, "time": { "type": "String" } } },
+  "@distanceTime": {
+    "placeholders": {
+      "km": {
+        "type": "String"
+      },
+      "time": {
+        "type": "String"
+      }
+    }
+  },
   "paymentMethodUnavailable": "ያ የክፍያ መንገድ እዚህ አሁን አይገኝም።",
   "vehicleTypeUnavailable": "ያ ዓይነት መኪና እዚህ አይቀርብም።",
-
   "findingDriver": "ሹፌር በመፈለግ ላይ",
   "findingDriverLede": "በአቅራቢያ ያሉ ሹፌሮች አንድ በአንድ እየተጠየቁ ነው። ብዙውን ጊዜ ከሁለት ደቂቃ በታች ይወስዳል።",
   "driverOnTheWay": "{name} በመንገድ ላይ ነው",
-  "@driverOnTheWay": { "placeholders": { "name": { "type": "String" } } },
+  "@driverOnTheWay": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
   "driverAssigned": "ሹፌር ተመድቧል",
   "driverArrived": "{name} ደርሷል",
-  "@driverArrived": { "placeholders": { "name": { "type": "String" } } },
+  "@driverArrived": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
   "driverArrivedLede": "ሹፌርዎን በመነሻው ያግኙ።",
   "inTrip": "ወደ {place} በመሄድ ላይ",
-  "@inTrip": { "placeholders": { "place": { "type": "String" } } },
+  "@inTrip": {
+    "placeholders": {
+      "place": {
+        "type": "String"
+      }
+    }
+  },
   "etaMinutes": "{min} ደቂቃ ይቀራል",
-  "@etaMinutes": { "placeholders": { "min": { "type": "int" } } },
+  "@etaMinutes": {
+    "placeholders": {
+      "min": {
+        "type": "int"
+      }
+    }
+  },
   "tripCompleted": "ደርሰዋል",
   "tripCancelled": "ጉዞው ተሰርዟል",
   "cancelledBy": "በ{by} ተሰርዟል",
-  "@cancelledBy": { "placeholders": { "by": { "type": "String" } } },
+  "@cancelledBy": {
+    "placeholders": {
+      "by": {
+        "type": "String"
+      }
+    }
+  },
   "noDriverFound": "በዚህ ጊዜ ነፃ ሹፌር አልተገኘም። ትንሽ ቆይተው ይሞክሩ።",
   "cancelTrip": "ጉዞውን ሰርዝ",
   "cancelReasonTitle": "ለምን ይሰርዛሉ?",
@@ -139,7 +195,13 @@
   "reasonOther": "ሌላ",
   "cancelFree": "አሁን መሰረዝ ነፃ ነው።",
   "cancelFeeWarning": "እስከ {amount} የመሰረዣ ክፍያ ሊኖር ይችላል።",
-  "@cancelFeeWarning": { "placeholders": { "amount": { "type": "String" } } },
+  "@cancelFeeWarning": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
   "keepTrip": "ጉዞውን አቆይ",
   "confirmCancel": "ጉዞውን ሰርዝ",
   "yourPin": "የእርስዎ ፒን",
@@ -152,23 +214,58 @@
   "yourDriver": "ሹፌርዎ",
   "liveTracking": "ቀጥታ",
   "positionStale": "ለመጨረሻ ጊዜ የታየው {ago}",
-  "@positionStale": { "placeholders": { "ago": { "type": "String" } } },
-
+  "@positionStale": {
+    "placeholders": {
+      "ago": {
+        "type": "String"
+      }
+    }
+  },
   "payTitle": "ክፍያ",
   "payCashInstruction": "{amount} በጥሬ ገንዘብ ለሹፌሩ ይክፈሉ።",
-  "@payCashInstruction": { "placeholders": { "amount": { "type": "String" } } },
+  "@payCashInstruction": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
   "payCorporateInstruction": "ለኩባንያዎ መለያ ተከፍሏል።",
   "approvePayment": "{amount} አጽድቅ",
-  "@approvePayment": { "placeholders": { "amount": { "type": "String" } } },
+  "@approvePayment": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
   "approveIn": "ክፍያውን በ{provider} ያጽድቁ።",
-  "@approveIn": { "placeholders": { "provider": { "type": "String" } } },
+  "@approveIn": {
+    "placeholders": {
+      "provider": {
+        "type": "String"
+      }
+    }
+  },
   "openPaymentPage": "የክፍያ ገጹን ክፈት",
   "waitingForProvider": "{provider} እንዲያረጋግጥ በመጠበቅ ላይ…",
-  "@waitingForProvider": { "placeholders": { "provider": { "type": "String" } } },
+  "@waitingForProvider": {
+    "placeholders": {
+      "provider": {
+        "type": "String"
+      }
+    }
+  },
   "paymentPaid": "ተከፍሏል። ከአንበሳ ጋር ስለተጓዙ እናመሰግናለን።",
   "paymentFailed": "ክፍያው አልተሳካም።",
   "paymentRetrying": "በ {time} እንደገና እንጠይቃለን፣ ወይም አሁን ይክፈሉ።",
-  "@paymentRetrying": { "placeholders": { "time": { "type": "String" } } },
+  "@paymentRetrying": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
   "paymentOwed": "ይህ ክፍያ አሁንም ይቀራል። በፈለጉት ጊዜ ይክፈሉ።",
   "payNow": "አሁን ክፈል",
   "checkStatus": "ሁኔታ አረጋግጥ",
@@ -178,22 +275,32 @@
   "waitingFeeLabel": "መጠበቂያ",
   "totalLabel": "ጠቅላላ",
   "paidBy": "በ{method} ተከፍሏል",
-  "@paidBy": { "placeholders": { "method": { "type": "String" } } },
+  "@paidBy": {
+    "placeholders": {
+      "method": {
+        "type": "String"
+      }
+    }
+  },
   "commissionLabel": "ኮሚሽን",
   "vatLabel": "ተ.እ.ታ",
   "yourBalanceChange": "ቀሪ ሂሳብዎ",
   "tripIdLabel": "ጉዞ",
-
   "rateTitle": "ጉዞው እንዴት ነበር?",
   "rateDriverLede": "{name}ን ይገምግሙ። ከእርስዎ በኋላ ላለው ተሳፋሪ ሁሉ ይረዳል።",
-  "@rateDriverLede": { "placeholders": { "name": { "type": "String" } } },
+  "@rateDriverLede": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
   "rateRiderLede": "ተሳፋሪውን ይገምግሙ።",
   "ratingComment": "የሚጨምሩት አለ? (አማራጭ)",
   "submitRating": "ግምገማ ላክ",
   "thanksRating": "ስለ ግምገማው እናመሰግናለን።",
   "alreadyRated": "ይህን ጉዞ አስቀድመው ገምግመዋል።",
   "ratingClosed": "ግምገማ ከጉዞ 7 ቀናት በኋላ ይዘጋል።",
-
   "activityTitle": "ጉዞዎችዎ",
   "noTrips": "እስካሁን ጉዞ የለም",
   "noTripsLede": "ጉዞ ሲያደርጉ እዚህ ይታያል።",
@@ -203,7 +310,6 @@
   "statusInProgress": "በጉዞ ላይ",
   "statusCompleted": "ተጠናቋል",
   "statusCancelled": "ተሰርዟል",
-
   "accountTitle": "መለያ",
   "profile": "መገለጫ",
   "nameLabel": "ስምዎ",
@@ -222,10 +328,15 @@
   "preferredMobileMoney": "የሞባይል ገንዘብ አቅራቢ",
   "preferredMobileMoneyLede": "የጉዞ ክፍያዎችን እንዲያጸድቁ የሚጠይቅዎ።",
   "appVersion": "ስሪት {version}",
-  "@appVersion": { "placeholders": { "version": { "type": "String" } } },
+  "@appVersion": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
   "deleteAccount": "መለያዬን ሰርዝ",
   "phoneLabelShort": "ስልክ",
-
   "onboardingTitle": "ከአንበሳ ጋር ያሽከርክሩ",
   "onboardingLede": "ያመልክቱ፣ የእርስዎንና የመኪናዎን ሰነዶች ይስቀሉ፣ ቡድናችን በአንድ ቀን ውስጥ ይገመግማል።",
   "applyTitle": "ዝርዝርዎ",
@@ -239,7 +350,13 @@
   "statusActive": "ለማሽከርከር ጸድቋል",
   "statusSuspended": "ታግዷል",
   "reviewNote": "ከቡድናችን፦ {note}",
-  "@reviewNote": { "placeholders": { "note": { "type": "String" } } },
+  "@reviewNote": {
+    "placeholders": {
+      "note": {
+        "type": "String"
+      }
+    }
+  },
   "driverDocuments": "ሰነዶችዎ",
   "docLicense": "የመንጃ ፈቃድ",
   "docNationalId": "ብሔራዊ መታወቂያ ወይም ፓስፖርት",
@@ -259,7 +376,13 @@
   "docPending": "ግምገማ በመጠበቅ ላይ",
   "docApproved": "ጸድቋል",
   "docRejected": "ውድቅ ተደርጓል፦ {reason}",
-  "@docRejected": { "placeholders": { "reason": { "type": "String" } } },
+  "@docRejected": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
   "docExpired": "ጊዜው አልፏል፦ የታደሰውን ይስቀሉ",
   "expiringSoon": "በቅርቡ ያበቃል",
   "uploading": "በመስቀል ላይ…",
@@ -278,7 +401,13 @@
   "submitForReview": "ለግምገማ አስገባ",
   "submittedForReview": "ገብቷል። ቡድናችን በአንድ ቀን ውስጥ ይገመግማል።",
   "missingDocs": "መጀመሪያ እነዚህን ይስቀሉ፦ {list}",
-  "@missingDocs": { "placeholders": { "list": { "type": "String" } } },
+  "@missingDocs": {
+    "placeholders": {
+      "list": {
+        "type": "String"
+      }
+    }
+  },
   "vehicleVerified": "ተረጋግጧል",
   "vehiclePending": "ግምገማ በመጠበቅ ላይ",
   "vehicleRejected": "ውድቅ ተደርጓል",
@@ -289,7 +418,6 @@
   "refresh": "አድስ",
   "fleetCar": "የፍሊት መኪና",
   "noVehicles": "መኪና ይመዝግቡ፣ ወይም ፍሊትዎ መኪና እንዲሰጥዎ ይጠይቁ።",
-
   "youAreOffline": "ከመስመር ውጭ ነዎት",
   "goOnline": "መስመር ላይ ሁን",
   "goingOnline": "መስመር ላይ በመሆን ላይ…",
@@ -297,11 +425,23 @@
   "chooseVehicle": "መኪና",
   "online": "መስመር ላይ",
   "onlineSince": "ከ {time} ጀምሮ መስመር ላይ",
-  "@onlineSince": { "placeholders": { "time": { "type": "String" } } },
+  "@onlineSince": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
   "gpsPoor": "የጂፒኤስ ምልክትዎ ደካማ ነው። ተሳፋሪዎች ላያዩዎት ይችላሉ።",
   "pingsOk": "አካባቢዎ እየተጋራ ነው",
   "forcedOffline": "ከመስመር ወጥተዋል፦ {reason}",
-  "@forcedOffline": { "placeholders": { "reason": { "type": "String" } } },
+  "@forcedOffline": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
   "noDrivableVehicle": "ከመኪኖችዎ አንዱም አሁን መስመር ላይ መሆን አይችልም።",
   "offlineReasonConnectionLost": "ለ10 ደቂቃ አካባቢ አልተገኘም",
   "offlineReasonBalanceBlocked": "ቀሪ ሂሳብዎ ታግዷል",
@@ -320,14 +460,19 @@
   "locationNeededToDrive": "ተሳፋሪዎች እንዲያገኙዎት አንበሳ መስመር ላይ ሲሆኑ አካባቢዎን ይፈልጋል።",
   "notificationsNeeded": "የጉዞ ጥያቄዎችን እንዳያመልጡዎ ማሳወቂያዎችን ይፍቀዱ።",
   "waitingForOffers": "በአቅራቢያ ጉዞዎችን በመጠበቅ ላይ…",
-
   "newTrip": "አዲስ ጉዞ",
   "acceptOffer": "ተቀበል",
   "decline": "አትቀበል",
   "offerExpired": "ጥያቄው ወደ ሌላ ሹፌር ሄዷል።",
   "offerCancelled": "ተሳፋሪው ሰርዟል።",
   "pickupIn": "እስከ መነሻው {min} ደቂቃ",
-  "@pickupIn": { "placeholders": { "min": { "type": "int" } } },
+  "@pickupIn": {
+    "placeholders": {
+      "min": {
+        "type": "int"
+      }
+    }
+  },
   "toPickup": "ወደ መነሻው",
   "onMyWay": "በመንገድ ላይ ነኝ",
   "arrived": "ደርሻለሁ",
@@ -337,54 +482,140 @@
   "wrongPin": "የተሳሳተ ፒን። ተሳፋሪው እንደገና እንዲያነብልዎ ይጠይቁ።",
   "completeTrip": "ጉዞውን አጠናቅቅ",
   "collectCash": "{amount} በጥሬ ገንዘብ ይቀበሉ",
-  "@collectCash": { "placeholders": { "amount": { "type": "String" } } },
+  "@collectCash": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
   "paidDigitally": "በዲጂታል ተከፍሏል። የሚቀበሉት የለም።",
   "paidByCompany": "ለተሳፋሪው ኩባንያ ተከፍሏል። የሚቀበሉት የለም።",
   "noShow": "ተሳፋሪው አልመጣም",
   "noShowAfter": "ከደረሱ ከ{min} ደቂቃ በኋላ አለመምጣትን ሪፖርት ማድረግ ይችላሉ።",
-  "@noShowAfter": { "placeholders": { "min": { "type": "int" } } },
+  "@noShowAfter": {
+    "placeholders": {
+      "min": {
+        "type": "int"
+      }
+    }
+  },
   "waitingFor": "{time} በመጠበቅ ላይ",
-  "@waitingFor": { "placeholders": { "time": { "type": "String" } } },
+  "@waitingFor": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
   "freeWaiting": "ለ{time} ነፃ፣ ከዚያ በደቂቃ ይከፈላል።",
-  "@freeWaiting": { "placeholders": { "time": { "type": "String" } } },
+  "@freeWaiting": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
   "navigate": "መንገድ አሳይ",
   "callRider": "ደውል",
   "tooFarFromPickup": "ከመነሻው {m} ሜ. ርቀዋል። መጀመሪያ ይቅረቡ።",
-  "@tooFarFromPickup": { "placeholders": { "m": { "type": "int" } } },
+  "@tooFarFromPickup": {
+    "placeholders": {
+      "m": {
+        "type": "int"
+      }
+    }
+  },
   "positionUnknown": "አካባቢዎ አይታወቅም። ሎኬሽን መብራቱን ያረጋግጡ።",
   "notArrived": "መጀመሪያ በመነሻው \"ደርሻለሁ\" የሚለውን ይንኩ።",
   "tripDone": "ጉዞው ተጠናቋል",
   "rateRider": "ተሳፋሪውን ገምግም",
   "backToDriving": "ወደ ማሽከርከር ተመለስ",
-
   "earningsTitle": "ገቢ",
   "balanceTitle": "ቀሪ ሂሳብ",
   "youOwe": "{amount} ዕዳ አለብዎ",
-  "@youOwe": { "placeholders": { "amount": { "type": "String" } } },
+  "@youOwe": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
   "weOweYou": "{amount} ይከፈልዎታል",
-  "@weOweYou": { "placeholders": { "amount": { "type": "String" } } },
+  "@weOweYou": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
   "balanceZero": "ሁሉም ተከፍሏል",
   "balanceOkLede": "ማንኛውንም ጉዞ መውሰድ ይችላሉ።",
   "balanceWarningLede": "ወደ ጥሬ ገንዘብ ገደብ ቀርበዋል፤ የጥሬ ገንዘብ ጉዞዎችን ለማቆየት በቅርቡ ይክፈሉ።",
   "balanceCashBlockedLede": "የጥሬ ገንዘብ ጉዞዎች ቆመዋል። የካርድና የሞባይል ገንዘብ ጉዞዎች ይቀጥላሉ፣ ዕዳውንም ይከፍላሉ።",
   "balanceBlockedLede": "ክፍያ እስኪመጣ ድረስ ጉዞ የለም።",
   "limitsLine": "ማስጠንቀቂያ {warning} · ጥሬ ገንዘብ ይቆማል {cash} · ይታገዳል {hard}",
-  "@limitsLine": { "placeholders": { "warning": { "type": "String" }, "cash": { "type": "String" }, "hard": { "type": "String" } } },
+  "@limitsLine": {
+    "placeholders": {
+      "warning": {
+        "type": "String"
+      },
+      "cash": {
+        "type": "String"
+      },
+      "hard": {
+        "type": "String"
+      }
+    }
+  },
   "prepaidLine": "ቅድመ ክፍያ፦ ቢያንስ {amount} ያቆዩ",
-  "@prepaidLine": { "placeholders": { "amount": { "type": "String" } } },
+  "@prepaidLine": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
   "paymentDueLine": "ማሽከርከርዎን ለመቀጠል እስከ {date} ድረስ ቢያንስ {minimum} ይክፈሉ።",
-  "@paymentDueLine": { "placeholders": { "minimum": { "type": "String" }, "date": { "type": "String" } } },
+  "@paymentDueLine": {
+    "placeholders": {
+      "minimum": {
+        "type": "String"
+      },
+      "date": {
+        "type": "String"
+      }
+    }
+  },
   "paymentOverdue": "ጊዜው አልፏል",
   "topUp": "ገንዘብ ጨምር",
   "topUpTitle": "ቀሪ ሂሳብዎን ይሙሉ",
   "topUpAmount": "መጠን (ብር)",
   "topUpProvider": "የሚከፍሉበት",
   "payTopUp": "{amount} ክፈል",
-  "@payTopUp": { "placeholders": { "amount": { "type": "String" } } },
+  "@payTopUp": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
   "topUpStarted": "ክፍያውን በ{provider} ያጽድቁ። እንደተረጋገጠ ቀሪ ሂሳብዎ ይዘመናል።",
-  "@topUpStarted": { "placeholders": { "provider": { "type": "String" } } },
+  "@topUpStarted": {
+    "placeholders": {
+      "provider": {
+        "type": "String"
+      }
+    }
+  },
   "topUpCredited": "{amount} ወደ ቀሪ ሂሳብዎ ተጨምሯል።",
-  "@topUpCredited": { "placeholders": { "amount": { "type": "String" } } },
+  "@topUpCredited": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
   "topUps": "የተጨመሩ ገንዘቦች",
   "statement": "መግለጫ",
   "statementEmpty": "በቀሪ ሂሳብዎ ላይ እስካሁን ምንም የለም።",
@@ -395,11 +626,23 @@
   "savePayoutMethod": "አስቀምጥ",
   "noPayoutMethod": "ገቢዎ እንዲደርስዎ የክፍያ መቀበያ ያክሉ።",
   "payoutsWeekly": "በየሳምንቱ ይከፈላል፣ ከ{min} ጀምሮ።",
-  "@payoutsWeekly": { "placeholders": { "min": { "type": "String" } } },
+  "@payoutsWeekly": {
+    "placeholders": {
+      "min": {
+        "type": "String"
+      }
+    }
+  },
   "referenceCode": "የባንክ ዝውውር ማጣቀሻ",
   "referenceCodeHint": "በባንክ ዝውውር ወይም በቢሮ ሲከፍሉ ይጥቀሱት።",
   "suggestedTopUp": "{amount} ወደ መልካም ሁኔታ ይመልስዎታል",
-  "@suggestedTopUp": { "placeholders": { "amount": { "type": "String" } } },
+  "@suggestedTopUp": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
   "amountOutOfRange": "ከ10 እስከ 100,000 ብር ይሙሉ።",
   "entryTrip": "ጉዞ",
   "entryCancellationFee": "የመሰረዣ ክፍያ",
@@ -409,7 +652,6 @@
   "entryRefund": "ተመላሽ",
   "entryLatePayment": "ዘግይቶ ክፍያ",
   "simulatedProvider": "የማስመሰል",
-
   "scheduledRides": "የታቀዱ ጉዞዎች",
   "scheduledRidesLede": "ለኋላ ጉዞ ይያዙ። በቅርቡ ይመጣል።",
   "scheduleRide": "ጉዞ ያቅዱ",
@@ -426,5 +668,245 @@
   "redeemCode": "ኮድ ተጠቀም",
   "deleteAccountTitle": "መለያዎን ይሰርዙ",
   "deleteAccountLede": "መለያዎ ከ14 ቀናት በኋላ ይዘጋል። መጀመሪያ ማንኛውንም ቀሪ ሂሳብ ያጠናቅቁ፤ የጉዞ መዝገቦች ሕጉ እንደሚጠይቀው ይቆያሉ።",
-  "notAvailableYet": "ገና አይገኝም። በመንገድ ላይ ነው።"
+  "notAvailableYet": "ገና አይገኝም። በመንገድ ላይ ነው።",
+  "navLoading": "መንገድ በመፈለግ ላይ…",
+  "navRerouting": "መንገድ እንደገና በመወሰን ላይ…",
+  "navNoRoute": "መንገድ አልተገኘም",
+  "navArrive": "ደርሰዋል",
+  "navIn": "በ{distance} ውስጥ",
+  "navThen": "ከዚያ",
+  "navOverview": "አጠቃላይ እይታ",
+  "navFollow": "ተከተል",
+  "navOpenIn": "በሌላ መተግበሪያ ክፈት…",
+  "navGoogleMaps": "Google Maps",
+  "navWaze": "Waze",
+  "navSystemMaps": "የካርታ መተግበሪያ",
+  "navTurns": "መታጠፊያዎች",
+  "maneuverDepart": "ጉዞ ይጀምሩ",
+  "maneuverArrive": "{name} ላይ ይደርሳሉ",
+  "maneuverStraight": "በ{name} ይቀጥሉ",
+  "maneuverLeft": "ወደ ግራ ወደ {name} ይታጠፉ",
+  "maneuverRight": "ወደ ቀኝ ወደ {name} ይታጠፉ",
+  "maneuverSlightLeft": "በግራ ይያዙ ወደ {name}",
+  "maneuverSlightRight": "በቀኝ ይያዙ ወደ {name}",
+  "maneuverSharpLeft": "በጣም ወደ ግራ ወደ {name}",
+  "maneuverSharpRight": "በጣም ወደ ቀኝ ወደ {name}",
+  "maneuverUturn": "ዩ-ተርን ያድርጉ",
+  "maneuverRoundabout": "ወደ አደባባዩ ይግቡ",
+  "maneuverExitRoundabout": "ከአደባባዩ ወደ {name} ይውጡ",
+  "maneuverMerge": "ወደ {name} ይቀላቀሉ",
+  "maneuverOnRamp": "መውጫውን ወደ {name} ይያዙ",
+  "maneuverOffRamp": "መውጫውን ወደ {name} ይውሰዱ",
+  "maneuverForkLeft": "በመገንጠያው በግራ ይያዙ",
+  "maneuverForkRight": "በመገንጠያው በቀኝ ይያዙ",
+  "unnamedRoad": "መንገዱ",
+  "recenter": "ወደ መሃል መልስ",
+  "resetNorth": "ሰሜን ወደ ላይ",
+  "introSkip": "ዝለል",
+  "introNext": "ቀጣይ",
+  "introStart": "ይጀምሩ",
+  "introTitle1": "በከተማው ውስጥ ጉዞ፣ በቋሚ ዋጋ",
+  "introBody1": "ከመያዝዎ በፊት ዋጋውን ይመልከቱ። በጉዞ መጨረሻ ላይ ድንገተኛ ነገር የለም።",
+  "introTitle2": "እንደፈለጉ ይክፈሉ",
+  "introBody2": "ጥሬ ገንዘብ፣ ቴሌብር፣ ሲቢኢ ብር፣ ካርድ፣ ወይም የኩባንያዎ መለያ።",
+  "introTitle3": "ከአንበሳ ጋር ያሽከርክሩ",
+  "introBody3": "በፈለጉት ጊዜ መስመር ላይ ይግቡ፣ የሚወዷቸውን ጉዞዎች ይውሰዱ፣ ገቢዎ ሲያድግ ይመልከቱ።",
+  "greetingMorning": "እንደምን አደሩ፣ {name}",
+  "greetingAfternoon": "እንደምን ዋሉ፣ {name}",
+  "greetingEvening": "እንደምን አመሹ፣ {name}",
+  "savedHome": "ቤት",
+  "savedWork": "ሥራ",
+  "addPlace": "ጨምር",
+  "setHome": "ቤትን ያስቀምጡ",
+  "setWork": "ሥራን ያስቀምጡ",
+  "notSet": "አልተቀመጠም",
+  "carsNearby": "{count, plural, =0{በአቅራቢያ መኪና የለም} =1{1 መኪና በአቅራቢያ} other{{count} መኪናዎች በአቅራቢያ}}",
+  "minutesAway": "{minutes} ደቂቃ ርቀት",
+  "routeTitle": "መንገድዎ",
+  "swapPlaces": "መነሻና መድረሻ ቀይር",
+  "savedPlacesHeader": "የተቀመጡ",
+  "currentLocation": "አሁን ያሉበት ቦታ",
+  "savePlaceTitle": "ቦታ ያስቀምጡ",
+  "placeName": "ስም",
+  "savePlace": "አስቀምጥ",
+  "savedPlaces": "የተቀመጡ ቦታዎች",
+  "savedPlacesLede": "ወደ ቤት፣ ወደ ሥራ ወይም ብዙ ጊዜ ወደሚሄዱበት ቦታ በአንድ ንክኪ ጉዞ ይያዙ።",
+  "removePlace": "አስወግድ",
+  "placeSaved": "ቦታው ተቀምጧል",
+  "fareBreakdown": "የዋጋ ዝርዝር",
+  "baseFare": "መነሻ ዋጋ",
+  "distanceFare": "ርቀት",
+  "timeFare": "ጊዜ",
+  "minimumFareApplied": "ዝቅተኛ ዋጋ ተተግብሯል",
+  "changePayment": "ቀይር",
+  "promoCode": "የማስተዋወቂያ ኮድ",
+  "comingSoon": "በቅርቡ",
+  "pickupHint": "መነሻ",
+  "dropoffHint": "ወዴት?",
+  "searchResults": "ውጤቶች",
+  "now": "አሁን",
+  "edit": "አርትዕ",
+  "progressMatched": "ተመድቧል",
+  "progressEnRoute": "በመንገድ ላይ",
+  "progressArrived": "ደርሷል",
+  "progressRiding": "በጉዞ ላይ",
+  "arrivesIn": "በ{time} ውስጥ ይደርሳል",
+  "arrivingIn": "በ{time} ውስጥ ይደርሳሉ",
+  "newDriver": "አዲስ ሹፌር",
+  "shareTrip": "ጉዞ አጋራ",
+  "contact": "ያግኙ",
+  "whatStoodOut": "ምን ጎልቶ ታየ?",
+  "addTip": "ጉርሻ ይጨምሩ",
+  "tag_polite": "ትሁት",
+  "tag_safe_driving": "ደህንነቱ የተጠበቀ ማሽከርከር",
+  "tag_clean_car": "ንጹህ መኪና",
+  "tag_on_time": "በሰዓቱ",
+  "tag_good_navigation": "መንገዱን ያውቃል",
+  "tag_rude": "ባለጌ",
+  "tag_unsafe_driving": "አደገኛ ማሽከርከር",
+  "tag_dirty_car": "ቆሻሻ መኪና",
+  "tag_late": "ዘግይቷል",
+  "tag_took_long_route": "ረጅም መንገድ ወሰደ",
+  "tag_clear_pickup": "ግልጽ መነሻ ቦታ",
+  "tag_respectful": "አክባሪ",
+  "tag_wrong_pickup": "የተሳሳተ መነሻ ቦታ",
+  "tag_left_mess": "ቆሻሻ ትቶ ሄደ",
+  "paymentStepStarted": "ክፍያ ተጀምሯል",
+  "paymentStepApprove": "በ{provider} ያጽድቁ",
+  "paymentStepPaid": "ተከፍሏል",
+  "paymentStepFailed": "አልተሳካም",
+  "shareReceipt": "ደረሰኝ አጋራ",
+  "receiptShareText": "የአንበሳ ጉዞ በ{date}፡ {from} → {to}፣ {amount}። ጉዞ {id}።",
+  "today": "ዛሬ",
+  "yesterday": "ትናንት",
+  "asRider": "እንደ ተሳፋሪ",
+  "asDriver": "እንደ ሹፌር",
+  "filterAll": "ሁሉም",
+  "filterThisWeek": "በዚህ ሳምንት",
+  "filterThisMonth": "በዚህ ወር",
+  "tripTimeline": "የጊዜ መስመር",
+  "requestedAtLabel": "ተጠይቋል",
+  "startedAtLabel": "ተጀምሯል",
+  "completedAtLabel": "ተጠናቋል",
+  "cancelledAtLabel": "ተሰርዟል",
+  "driverLabelShort": "ሹፌር",
+  "riderLabelShort": "ተሳፋሪ",
+  "loadMore": "ተጨማሪ ጫን",
+  "cancelNoFee": "ያለ ክፍያ መሰረዝ ይቻላል",
+  "youAreHere": "እርስዎ",
+  "appearance": "መልክ",
+  "themeSystem": "የስልኩን ተከተል",
+  "themeLight": "ብሩህ",
+  "themeDark": "ጨለማ",
+  "notifications": "ማሳወቂያዎች",
+  "notifTripUpdates": "የጉዞ ዝማኔዎች",
+  "notifTripUpdatesLede": "ሹፌር ተመድቧል፣ ደርሷል፣ ክፍያ",
+  "notifPromos": "ቅናሾች እና ዜናዎች",
+  "notifSound": "ድምፅ",
+  "notifVibrateOffer": "አዲስ ጥያቄ ሲመጣ ንዘር",
+  "notifHaptics": "የንክኪ ምላሽ",
+  "notifLocalOnly": "እነዚህ ቅንብሮች በዚህ ስልክ ላይ ብቻ ይሠራሉ።",
+  "safety": "ደህንነት",
+  "emergencyContact": "የአደጋ ጊዜ ተጠሪ",
+  "emergencyContactLede": "ከጉዞ ውስጥ በፍጥነት የሚያገኙት ሰው። በዚህ ስልክ ላይ ይቀመጣል።",
+  "contactName": "ስም",
+  "contactPhone": "ስልክ ቁጥር",
+  "saved": "ተቀምጧል",
+  "organizations": "ኩባንያዎች እና ፍሊቶች",
+  "organizationsLede": "ለሥራ ጉዞዎች የኩባንያ መለያዎችዎ፣ እና የሚያሽከረክሩላቸው ፍሊቶች።",
+  "noOrganizations": "እስካሁን የኩባንያ ወይም የፍሊት አባል አይደሉም።",
+  "invitations": "ግብዣዎች",
+  "accept": "ተቀበል",
+  "invitedToJoin": "{org}ን እንዲቀላቀሉ ተጋብዘዋል",
+  "defaultBilling": "ለሥራ ጉዞዎች ነባሪ",
+  "ride": "ጉዞ",
+  "preferences": "ምርጫዎች",
+  "account": "መለያ",
+  "about": "ስለ",
+  "changePhoto": "ፎቶ ቀይር",
+  "removePhoto": "ፎቶ አስወግድ",
+  "photoSaved": "ፎቶ ተዘምኗል",
+  "takePhotoOption": "ፎቶ አንሳ",
+  "chooseFromGalleryOption": "ከጋለሪ ምረጥ",
+  "tripsCount": "{count, plural, =0{እስካሁን ጉዞ የለም} =1{1 ጉዞ} other{{count} ጉዞዎች}}",
+  "yourRating": "የእርስዎ ደረጃ",
+  "navigation": "አቅጣጫ",
+  "navFollowBearing": "ካርታውን በማሽከርከሪያ አቅጣጫ አዙር",
+  "navApp": "አቅጣጫዎችን ክፈት በ",
+  "navAsk": "ሁልጊዜ ጠይቅ",
+  "keepAwake": "በማሽከርከር ላይ ስክሪኑን ክፍት አድርግ",
+  "vehicles": "ተሽከርካሪዎች",
+  "documents": "ሰነዶች",
+  "slideToGoOnline": "መስመር ላይ ለመግባት ያንሸራትቱ",
+  "slideToGoOffline": "ከመስመር ለመውጣት ያንሸራትቱ",
+  "slideToAccept": "ለመቀበል ያንሸራትቱ",
+  "slideOnMyWay": "ያንሸራትቱ፡ በመንገድ ላይ ነኝ",
+  "slideArrived": "ያንሸራትቱ፡ ደርሻለሁ",
+  "slideStart": "ጉዞ ለመጀመር ያንሸራትቱ",
+  "slideComplete": "ለመጨረስ ያንሸራትቱ",
+  "toPickupDistance": "ወደ መነሻው {distance}",
+  "onlineFor": "መስመር ላይ {time}",
+  "gpsGood": "GPS ጥሩ ነው",
+  "socketLive": "ተገናኝቷል",
+  "devTools": "Dev",
+  "ready": "ዝግጁ",
+  "notEligible": "ይህን መኪና አሁን ማሽከርከር አይቻልም",
+  "waiting": "በመጠበቅ ላይ",
+  "freeUntil": "ለ{time} ነጻ",
+  "pinSheetTitle": "የተሳፋሪው ፒን",
+  "pinSheetLede": "ተሳፋሪውን በመተግበሪያቸው ያለውን ባለ4 አሃዝ ኮድ ይጠይቁ።",
+  "noShowIn": "አለመቅረብ በ{time} ውስጥ",
+  "tripOf": "{distance} · {duration}",
+  "openDirections": "አቅጣጫዎች",
+  "navOverviewMode": "አጠቃላይ",
+  "navFollowMode": "ተከተል",
+  "earningsToday": "ዛሬ",
+  "tripsToday": "ጉዞዎች",
+  "timeOnline": "መስመር ላይ",
+  "collectCashTitle": "ጥሬ ገንዘብ ይሰብስቡ",
+  "riderPaysDigital": "ተሳፋሪው በመተግበሪያው ይከፍላል",
+  "companyPays": "ለተሳፋሪው ኩባንያ ይከፈላል",
+  "youEarn": "ያገኙት",
+  "cancelTripDriver": "ይህን ጉዞ ማድረግ አልችልም",
+  "riderIsWaiting": "ተሳፋሪው በመነሻው ላይ እየጠበቀ ነው",
+  "netEarnings": "የተጣራ ገቢ",
+  "grossFares": "ዋጋዎች",
+  "cashCollected": "የተሰበሰበ ጥሬ ገንዘብ",
+  "noEarningsPeriod": "በዚህ ጊዜ ውስጥ እስካሁን ጉዞ የለም።",
+  "periodToday": "ዛሬ",
+  "periodWeek": "በዚህ ሳምንት",
+  "periodMonth": "በዚህ ወር",
+  "earningsBreakdown": "የት ሄደ",
+  "stepApply": "ያመልክቱ",
+  "stepDocuments": "ሰነዶች",
+  "stepVehicle": "ተሽከርካሪ",
+  "stepReview": "ግምገማ",
+  "nextStep": "ቀጣይ እርምጃ",
+  "checklistProgress": "{done} ከ{total} ተጠናቋል",
+  "approvedLede": "ጸድቀዋል። ዝግጁ ሲሆኑ መስመር ላይ ይግቡ።",
+  "uploadingPercent": "በመስቀል ላይ {percent}%",
+  "viewDocument": "ይመልከቱ",
+  "balanceCard": "ሂሳብ",
+  "limitsTitle": "ገደቦች",
+  "yourApplication": "ማመልከቻዎ",
+  "uploadDocuments": "ሰነዶችዎን ይስቀሉ",
+  "registerCar": "መኪናዎን ይመዝግቡ",
+  "reviewAndSubmit": "ይገምግሙ እና ያስገቡ",
+  "docsMissingCount": "{n} ገና መስቀል ይቀራል",
+  "allDocsIn": "ሁሉም ሰነዶች ገብተዋል",
+  "applyLede": "በመንጃ ፈቃድዎ ላይ እንዳለ ስምዎ እና የፈቃድ ቁጥሩ። ቡድናችን ከሰነዶችዎ ጋር ያነጻጽራል።",
+  "vehicleFormLede": "የሚነዱት መኪና። የፍሊት መኪናዎች በፍሊቱ ይመደቡልዎታል እና እዚህ መመዝገብ አያስፈልጋቸውም።",
+  "docUploaded": "ተሰቅሏል",
+  "docHint_license": "ሁለቱም ገጾች፣ የሚነበብ፣ ያላለፈበት።",
+  "docHint_nationalId": "የቀበሌ መታወቂያ፣ ፓስፖርት ወይም ብሔራዊ መታወቂያ።",
+  "docHint_photo": "የፊትዎ ግልጽ ፎቶ፣ ያለ ኮፍያ ወይም የፀሐይ መነጽር።",
+  "docHint_registration": "ሊብሬ (የባለቤትነት ደብተር)።",
+  "docHint_insurance": "የሶስተኛ ወገን ኢንሹራንስ የምስክር ወረቀት።",
+  "docHint_inspection": "ዓመታዊ ምርመራ (ቦሎ) የምስክር ወረቀት።",
+  "docHint_generic": "ግልጽ ፎቶ ወይም ስካን።",
+  "optional": "አማራጭ",
+  "shareTripText": "የአንበሳ ጉዞዬን በቀጥታ ይከታተሉ፦ {url}",
+  "stopSharing": "ማጋራት አቁም",
+  "sharingStopped": "ሊንኩ ከእንግዲህ አይሰራም።",
+  "sharingOn": "በቀጥታ እየተጋራ"
 }

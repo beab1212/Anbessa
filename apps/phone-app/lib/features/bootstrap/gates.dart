@@ -6,6 +6,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:ride_app_core/ride_app_core.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/l10n/l10n.dart';
+import '../../core/network/providers.dart';
+import '../../core/prefs_keys.dart';
 import '../../core/realtime/realtime_hub.dart';
 import '../../core/session/session_controller.dart';
 import '../config/client_config_provider.dart';
@@ -70,10 +72,11 @@ class UpdateRequiredScreen extends ConsumerWidget {
   }
 }
 
-/// Maintenance, offline and announcements, stacked above a page's content.
+/// Maintenance, reconnecting and announcements, floating under the status bar.
 class Banners extends ConsumerWidget {
-  const Banners({super.key, this.audience = 'rider'});
+  const Banners({super.key, this.audience = 'rider', this.onHeightChanged});
   final String audience;
+  final ValueChanged<double>? onHeightChanged;
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l = context.l10n;
@@ -82,27 +85,40 @@ class Banners extends ConsumerWidget {
     final signedIn = ref.watch(currentSessionProvider) != null;
     final dismissed = ref.watch(dismissedAnnouncementsProvider);
     final items = <Widget>[
-      if (cfg.maintenance.newTripsPaused) Notice(cfg.maintenance.message.isEmpty ? l.newTripsPaused : cfg.maintenance.message, tone: NoticeTone.warning),
-      if (signedIn && rt == RealtimeState.reconnecting) Notice(l.reconnecting, tone: NoticeTone.info),
+      if (cfg.maintenance.newTripsPaused)
+        FloatingBanner(key: const ValueKey('maintenance'), text: cfg.maintenance.message.isEmpty ? l.newTripsPaused : cfg.maintenance.message, tone: NoticeTone.warning, icon: Icons.build_circle_outlined),
+      if (signedIn && rt == RealtimeState.reconnecting) FloatingBanner(key: const ValueKey('reconnecting'), text: l.reconnecting, tone: NoticeTone.warning, pulse: true),
       for (final a in cfg.announcements.where((a) => a.audiences.contains(audience) && !dismissed.contains(a.id)))
-        Notice(
-          '${a.title}: ${a.body}',
+        FloatingBanner(
+          key: ValueKey('ann-${a.id}'),
+          title: a.title,
+          text: a.body,
           tone: a.severity == 'warning' ? NoticeTone.warning : NoticeTone.info,
-          action: IconButton(icon: const Icon(Icons.close, size: 18), onPressed: () => ref.read(dismissedAnnouncementsProvider.notifier).dismiss(a.id), tooltip: l.close),
+          icon: Icons.campaign_outlined,
+          onDismiss: () => ref.read(dismissedAnnouncementsProvider.notifier).dismiss(a.id),
         ),
     ];
-    if (items.isEmpty) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-      child: Column(children: [for (final w in items) Padding(padding: const EdgeInsets.only(bottom: 8), child: w)]),
-    );
+    if (items.isEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => onHeightChanged?.call(0));
+      return const SizedBox.shrink();
+    }
+    return FloatingBannerStack(onHeightChanged: onHeightChanged, children: items);
   }
 }
 
+/// Announcements the person closed, kept across launches (they'd come back on every refresh).
 class DismissedAnnouncements extends Notifier<Set<String>> {
   @override
-  Set<String> build() => {};
-  void dismiss(String id) => state = {...state, id};
+  Set<String> build() => ref.watch(prefsProvider).getStringList(PrefsKeys.dismissedAnnouncements)?.toSet() ?? {};
+  Future<void> dismiss(String id) async {
+    state = {...state, id};
+    // keep the list short: ids of announcements that no longer exist are harmless
+    await ref.read(prefsProvider).setStringList(PrefsKeys.dismissedAnnouncements, state.toList().takeLast(50));
+  }
+}
+
+extension<T> on List<T> {
+  List<T> takeLast(int n) => length <= n ? this : sublist(length - n);
 }
 
 final dismissedAnnouncementsProvider = NotifierProvider<DismissedAnnouncements, Set<String>>(DismissedAnnouncements.new);

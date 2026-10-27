@@ -77,6 +77,7 @@ model Trip {
   offers  TripOffer[]
   active  DriverActiveTrip?
   ratings TripRating[]
+  shares  TripShare[]
 
   @@index([riderUserId, createdAt(sort: Desc)], map: "ix_trip_rider_recent")
   @@index([bookedByUserId, createdAt(sort: Desc)], map: "ix_trip_booked_by_recent")
@@ -127,15 +128,20 @@ model TripEvent {
 }
 
 model TripRating {
-  tripId    String   @map("trip_id") @db.Uuid
-  trip      Trip     @relation(fields: [tripId], references: [id])
-  byRole    String   @map("by_role")
-  byUserId  String   @map("by_user_id") @db.Uuid
-  stars     Int
-  comment   String?
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  tripId      String   @map("trip_id") @db.Uuid
+  trip        Trip     @relation(fields: [tripId], references: [id])
+  byRole      String   @map("by_role")
+  byUserId    String   @map("by_user_id") @db.Uuid
+  /// the person being rated (the driver when a rider rates, the rider when a driver rates)
+  rateeUserId String?  @map("ratee_user_id") @db.Uuid
+  stars       Int
+  /// shared-types RATING_TAGS
+  tags        String[] @default([])
+  comment     String?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   @@id([tripId, byRole])
+  @@index([rateeUserId], map: "trip_rating_ratee_user_id_idx")
   @@map("trip_rating")
 }
 
@@ -163,4 +169,35 @@ model Outbox {
   publishedAt DateTime? @map("published_at") @db.Timestamptz
 
   @@map("outbox")
+}
+
+/// A rider's Home, Work and other saved places (workflow 05: one tap to book to them).
+model SavedPlace {
+  id        String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  /// HOME | WORK | OTHER (one HOME and one WORK per person; see the migration's partial unique index)
+  label     String
+  name      String
+  address   String?
+  lat       Float
+  lng       Float
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@index([userId, createdAt], map: "saved_place_user_id_created_at_idx")
+  @@map("saved_place")
+}
+
+/// Share-my-trip links (see the migration). The token is the key: 128 random bits, base64url.
+model TripShare {
+  token           String    @id
+  tripId          String    @map("trip_id") @db.Uuid
+  trip            Trip      @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  createdByUserId String    @map("created_by_user_id") @db.Uuid
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  expiresAt       DateTime  @map("expires_at") @db.Timestamptz
+  revokedAt       DateTime? @map("revoked_at") @db.Timestamptz
+
+  @@index([tripId], map: "trip_share_trip_id_idx")
+  @@map("trip_share")
 }

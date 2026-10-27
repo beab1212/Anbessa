@@ -56,21 +56,52 @@ class TripOffer {
 /// GET /api/trips/:id/parties: who the other side is, as much as each side may see.
 @immutable
 class TripParties {
-  const TripParties({this.driverName, this.riderName, this.vehicle, this.driverRating});
+  const TripParties({this.driverName, this.riderName, this.vehicle, this.driverRating, this.driverRatingCount = 0, this.driverPhoto, this.riderPhoto});
   final String? driverName;
   final String? riderName;
   final PartyVehicle? vehicle;
+  /// shown from three ratings on; null before that
   final double? driverRating;
+  final int driverRatingCount;
+  /// data URL or https
+  final String? driverPhoto;
+  final String? riderPhoto;
 
   factory TripParties.fromJson(Json j) {
     final driver = asJson(j['driver']);
     final rider = asJson(j['rider']);
     return TripParties(
-      driverName: strOrNull(driver, 'name'), driverRating: doubleOrNull(driver, 'rating'),
-      riderName: strOrNull(rider, 'name'),
+      driverName: strOrNull(driver, 'name'), driverRating: doubleOrNull(driver, 'rating'), driverRatingCount: readInt(driver, 'ratingCount', 0), driverPhoto: strOrNull(driver, 'photo'),
+      riderName: strOrNull(rider, 'name'), riderPhoto: strOrNull(rider, 'photo'),
       vehicle: j['vehicle'] is Map ? PartyVehicle.fromJson(asJson(j['vehicle'])) : null,
     );
   }
+}
+
+/// GET /api/trips/me/rating
+@immutable
+class MyRating {
+  const MyRating({this.average, required this.count});
+  final double? average;
+  final int count;
+  factory MyRating.fromJson(Json j) => MyRating(average: doubleOrNull(j, 'average'), count: readInt(j, 'count', 0));
+}
+
+/// GET /api/trips/:id/rating → `mine`
+@immutable
+class GivenRating {
+  const GivenRating({required this.stars, this.tags = const [], this.comment});
+  final int stars;
+  final List<String> tags;
+  final String? comment;
+  factory GivenRating.fromJson(Json j) => GivenRating(stars: readInt(j, 'stars'), tags: strList(j, 'tags'), comment: strOrNull(j, 'comment'));
+}
+
+/// What a rider may tick about a driver, and a driver about a rider (shared-types RATING_TAGS).
+abstract final class RatingTags {
+  static const ofDriver = ['polite', 'safe_driving', 'clean_car', 'on_time', 'good_navigation', 'rude', 'unsafe_driving', 'dirty_car', 'late', 'took_long_route'];
+  static const ofRider = ['polite', 'on_time', 'clear_pickup', 'respectful', 'rude', 'late', 'wrong_pickup', 'left_mess'];
+  static const positive = {'polite', 'safe_driving', 'clean_car', 'on_time', 'good_navigation', 'clear_pickup', 'respectful'};
 }
 
 @immutable

@@ -17,6 +17,13 @@ const outbox = (tripId: string, topic: string) =>
   h.c.db.outbox.findMany({ where: { key: tripId, topic } }).then((rows) => rows.map((r) => r.payload as Record<string, unknown>));
 
 describe("request (workflow 05, part C)", () => {
+  it("keeps the quote's road line on the trip, for the apps' maps", async () => {
+    const r = await h.rider();
+    const res = await h.requestTrip(r);
+    expect(res.statusCode).toBe(201);
+    expect(res.json()).toMatchObject({ route: { polyline: "_p~iF~ps|U_ulLnnqC", estDistanceMeters: 7400 } });
+  });
+
   it("creates a requested trip from the quote, with the PIN for the rider only", async () => {
     const r = await h.rider();
     const q = await h.quote(r);
@@ -265,6 +272,33 @@ describe("execution (workflow 06)", () => {
     expect((await h.req("POST", `/api/trips/${tripId}/rating`, d, { stars: 4 })).statusCode).toBe(201);
     expect((await h.req("POST", `/api/trips/${tripId}/rating`, await h.rider(), { stars: 1 })).statusCode).toBe(404);
   });
+
+  it("ratings carry tags, can be read back, and add up to the driver's average (shown from three)", async () => {
+    const completed = async () => {
+      const { r, d, tripId } = await h.matchedTrip();
+      await h.req("POST", `/api/trips/${tripId}/en-route`, d);
+      await d.ping(near(BOLE, 10));
+      await h.req("POST", `/api/trips/${tripId}/arrive`, d);
+      await h.req("POST", `/api/trips/${tripId}/start`, d);
+      await h.req("POST", `/api/trips/${tripId}/complete`, d);
+      return { r, d, tripId };
+    };
+    const first = await completed();
+    expect((await h.req("POST", `/api/trips/${first.tripId}/rating`, first.r, { stars: 5, tags: ["helicopter"] })).json()).toMatchObject({ error: "invalid_tags" });
+    expect((await h.req("POST", `/api/trips/${first.tripId}/rating`, first.r, { stars: 5, tags: ["polite", "clean_car"] })).statusCode).toBe(201);
+    expect((await h.req("GET", `/api/trips/${first.tripId}/rating`, first.r)).json()).toEqual({ mine: { stars: 5, tags: ["polite", "clean_car"], comment: null } });
+    expect((await h.req("GET", `/api/trips/${first.tripId}/rating`, first.d)).json()).toEqual({ mine: null });
+    expect((await h.req("GET", "/api/trips/me/rating", first.d)).json()).toEqual({ average: 5, count: 1 });
+    // one rating: the average is still hidden from riders
+    expect((await h.req("GET", `/api/trips/${first.tripId}/parties`, first.r)).json()).toMatchObject({ driver: { rating: null, ratingCount: 1 } });
+    // two more ratings of the same driver (the harness makes a new driver per trip, so write them directly)
+    for (const stars of [4, 3]) {
+      await h.c.db.tripRating.create({ data: { tripId: (await completed()).tripId, byRole: "RIDER", byUserId: crypto.randomUUID(), rateeUserId: first.d.id, stars, tags: [] } });
+    }
+    await h.redis.del(`rating:user:${first.d.id}`);
+    expect((await h.req("GET", "/api/trips/me/rating", first.d)).json()).toEqual({ average: 4, count: 3 });
+    expect((await h.req("GET", `/api/trips/${first.tripId}/parties`, first.r)).json()).toMatchObject({ driver: { rating: 4, ratingCount: 3 } });
+  });
 });
 
 describe("cancellations (workflow 07)", () => {
@@ -314,22 +348,105 @@ describe("cancellations (workflow 07)", () => {
   });
 });
 
+describe("saved places", () => {
+  it("home and work are one each; others add up to the limit; only the owner sees them", async () => {
+    const r = await h.rider();
+    const home = { name: "Home", address: "Bole, Addis Ababa", lat: 8.99, lng: 38.79 };
+    expect((await h.req("PUT", "/api/trips/places/home", r, home)).statusCode).toBe(200);
+    expect((await h.req("PUT", "/api/trips/places/home", r, { ...home, name: "Home (new)" })).statusCode).toBe(200);
+    expect((await h.req("POST", "/api/trips/places", r, { name: "Gym", lat: 9.01, lng: 38.76 })).statusCode).toBe(201);
+    const list = (await h.req("GET", "/api/trips/places", r)).json<{ places: { id: string; label: string; name: string }[] }>().places;
+    expect(list.map((p) => [p.label, p.name])).toEqual([["HOME", "Home (new)"], ["OTHER", "Gym"]]);
+
+    const other = await h.rider();
+    expect((await h.req("GET", "/api/trips/places", other)).json()).toEqual({ places: [] });
+    expect((await h.req("DELETE", `/api/trips/places/${list[1]!.id}`, other)).statusCode).toBe(404);
+    expect((await h.req("DELETE", `/api/trips/places/${list[1]!.id}`, r)).statusCode).toBe(204);
+    expect((await h.req("GET", "/api/trips/places", r)).json<{ places: unknown[] }>().places).toHaveLength(1);
+    expect((await h.req("PUT", "/api/trips/places/school", r, home)).statusCode).toBe(400);
+  });
+});
+
+describe("share my trip", () => {
+  const view = (token: string) => h.app.inject({ method: "GET", url: `/api/trips/shared/${token}` });
+
+  it("the rider makes one link; anyone with it sees the trip live, without ids or the PIN", async () => {
+    const { r, d, tripId } = await h.matchedTrip();
+    h.partiesState.names.set(d.id, "Abebe Kebede");
+    const a = await h.req("POST", `/api/trips/${tripId}/share`, r);
+    expect(a.statusCode).toBe(201);
+    const share = a.json<{ token: string; url: string; expiresAt: string }>();
+    expect(share.url).toBe(`http://localhost:5173/t/${share.token}`);
+    expect(share.token).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    // asking again gives the same link
+    expect((await h.req("POST", `/api/trips/${tripId}/share`, r)).json<{ token: string }>().token).toBe(share.token);
+    // nobody else can make one
+    expect((await h.req("POST", `/api/trips/${tripId}/share`, d)).statusCode).toBe(404);
+    expect((await h.req("POST", `/api/trips/${tripId}/share`, await h.rider())).statusCode).toBe(404);
+
+    await d.ping(near(BOLE, 300));
+    const res = await view(share.token);
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["cache-control"]).toBe("no-store");
+    expect(res.json()).toMatchObject({
+      status: "matched",
+      driver: { firstName: "Abebe" },
+      vehicle: { plateNumber: "3-A40402", make: "Toyota" },
+      position: { lat: expect.closeTo(near(BOLE, 300).lat, 5), lng: expect.closeTo(BOLE.lng, 5) },
+      pickup: { lat: expect.any(Number) },
+    });
+    expect(res.body).not.toContain(r.id);
+    expect(res.body).not.toContain(d.id);
+    expect(res.json()).not.toHaveProperty("pin");
+  });
+
+  it("works for 30 minutes after the trip ends, then reads as gone; stopping sharing kills it", async () => {
+    const { r, d, tripId } = await h.matchedTrip();
+    const token = (await h.req("POST", `/api/trips/${tripId}/share`, r)).json<{ token: string }>().token;
+    await h.req("POST", `/api/trips/${tripId}/en-route`, d);
+    await d.ping(near(BOLE, 20));
+    await h.req("POST", `/api/trips/${tripId}/arrive`, d);
+    await h.req("POST", `/api/trips/${tripId}/start`, d);
+    await d.ping(near(PIASSA, 20));
+    expect((await h.req("POST", `/api/trips/${tripId}/complete`, d)).json()).toMatchObject({ status: "completed" });
+
+    const after = await view(token);
+    expect(after.json()).toMatchObject({ status: "completed", position: null });
+    h.clock.now += 31 * 60_000;
+    expect((await view(token)).statusCode).toBe(404);
+    expect((await h.req("POST", `/api/trips/${tripId}/share`, r)).json()).toMatchObject({ error: "trip_ended" });
+
+    const other = await h.matchedTrip();
+    const t2 = (await h.req("POST", `/api/trips/${other.tripId}/share`, other.r)).json<{ token: string }>().token;
+    expect((await h.req("DELETE", `/api/trips/${other.tripId}/share`, other.r)).statusCode).toBe(204);
+    expect((await view(t2)).statusCode).toBe(404);
+    // a fresh link after stopping is a new token
+    expect((await h.req("POST", `/api/trips/${other.tripId}/share`, other.r)).json<{ token: string }>().token).not.toBe(t2);
+  });
+
+  it("unknown and malformed tokens", async () => {
+    expect((await view("A".repeat(22))).statusCode).toBe(404);
+    expect((await view("not a token!")).statusCode).toBe(400);
+  });
+});
+
 describe("reading trips", () => {
   it("parties: the rider sees the driver's name and car, the driver the rider's name, never a phone number", async () => {
     const { r, d, tripId } = await h.matchedTrip();
     h.partiesState.names.set(d.id, "Dawit Bekele");
+    h.partiesState.photos.set(d.id, "data:image/jpeg;base64,/9j/4AAQ");
     h.partiesState.names.set(r.id, "+251900000501");
 
     const asRider = await h.req("GET", `/api/trips/${tripId}/parties`, r);
     expect(asRider.statusCode).toBe(200);
     expect(asRider.json()).toEqual({
-      tripId, driver: { name: "Dawit Bekele", rating: null }, rider: null,
+      tripId, driver: { name: "Dawit Bekele", photo: "data:image/jpeg;base64,/9j/4AAQ", rating: null, ratingCount: 0 }, rider: null,
       vehicle: { plateNumber: "3-A40402", vehicleType: "economy", make: "Toyota", model: "Vitz", color: "White" },
     });
 
     // the rider's name is still the sign-up placeholder (their phone number): not shown
     const asDriver = await h.req("GET", `/api/trips/${tripId}/parties`, d);
-    expect(asDriver.json()).toMatchObject({ driver: null, vehicle: null, rider: { name: null } });
+    expect(asDriver.json()).toMatchObject({ driver: null, vehicle: null, rider: { name: null, photo: null } });
 
     expect((await h.req("GET", `/api/trips/${tripId}/parties`, await h.rider())).statusCode).toBe(404);
   });

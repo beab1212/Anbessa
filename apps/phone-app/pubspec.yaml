@@ -32,6 +32,14 @@ dependencies:
   image_picker: ^1.2.4         # driver documents
   crypto: ^3.0.7               # sha256 of uploads
   uuid: ^4.6.0                 # idempotency keys
+  flutter_map_animations: ^0.11.0   # animated camera moves
+  smooth_page_indicator: ^3.0.0     # intro carousel
+  cached_network_image: ^3.4.1      # document thumbnails (4.x needs Dart 3.13)
+  vibration: ^3.2.0                 # offer arrival pattern
+  share_plus: ^13.3.0               # share a trip or receipt
+  sensors_plus: ^7.1.0              # compass heading when the car is still
+  confetti: ^0.8.0
+  wakelock_plus: '>=1.7.0 <1.8.1'   # keep the screen on while navigating (1.8.1+ wants a dbus geolocator_linux can't use)
 
 dev_dependencies:
   flutter_test:
@@ -43,7 +51,19 @@ flutter:
   generate: true
   assets:
     - assets/fonts/OFL.txt
+    - assets/fonts/OFL-Inter.txt
   fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-Regular.ttf
+        - asset: assets/fonts/Inter-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Inter-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Inter-Bold.ttf
+          weight: 700
+        - asset: assets/fonts/Inter-ExtraBold.ttf
+          weight: 800
     - family: NotoSansEthiopic
       fonts:
         - asset: assets/fonts/NotoSansEthiopic-Regular.ttf

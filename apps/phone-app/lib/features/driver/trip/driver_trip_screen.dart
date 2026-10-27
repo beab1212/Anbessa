@@ -1,25 +1,31 @@
-// The driver's trip (workflow 06, 07, 08 B): to the pickup ("On my way", navigate, "I've
-// arrived" within 150 m) → waiting (free time, then per minute; no-show after 5 min) → start
-// (PIN when the city requires it) → on the way → complete ("Collect X ETB cash" or paid digitally)
-// → rate the rider.
+// The driver's trip (workflow 06, 07, 08 B): the road to the pickup with the next turn on top,
+// the map turning the way the car goes, slide to confirm each step: on my way → arrived (within
+// 150 m) → waiting (free time, then per minute; no-show after 5 min) → start (PIN when the city
+// requires it) → complete ("Collect X ETB cash" or paid digitally) → rate the rider.
 
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:ride_app_core/ride_app_core.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 import '../../../core/config/env.dart';
 import '../../../core/l10n/l10n.dart';
 import '../../../core/location/location_source.dart';
 import '../../../core/network/providers.dart';
 import '../../../core/router/routes.dart';
+import '../../../core/ux/haptics.dart' show hapticsSettingsProvider;
 import '../../config/client_config_provider.dart';
+import '../../flagged/flagged_modules.dart';
 import '../../maps/anbessa_map.dart';
+import '../../maps/nav/external_nav.dart';
+import '../../maps/nav/navigation_controller.dart';
+import '../../maps/nav/turn_banner.dart';
+import '../../profile/settings_controllers.dart';
 import '../../rider/trip/active_trip_controller.dart';
+import '../../rider/trip/cancel_sheet.dart';
 import '../shift/driver_home_screen.dart';
 
 class DriverTripScreen extends ConsumerStatefulWidget {
@@ -36,16 +42,23 @@ class _DriverTripScreenState extends ConsumerState<DriverTripScreen> {
   Object? _error;
   String? _completeKey;
   String? _cancelKey;
+  double _sheetHeight = 0;
+  bool _overview = false;
+  bool _devOpen = false;
+  NavTarget? _navTarget;
+  DriverStage? _lastStage;
 
   @override
   void initState() {
     super.initState();
     _tick = Timer.periodic(const Duration(seconds: 1), (_) => setState(() => _now = DateTime.now().toUtc()));
+    if (ref.read(navPrefsProvider).keepAwake) WakelockPlus.enable().catchError((_) {});
   }
 
   @override
   void dispose() {
     _tick?.cancel();
+    WakelockPlus.disable().catchError((_) {});
     super.dispose();
   }
 
@@ -57,7 +70,9 @@ class _DriverTripScreenState extends ConsumerState<DriverTripScreen> {
     try {
       final t = await action();
       ref.read(activeTripProvider.notifier).replace(t);
+      Haptics.success();
     } catch (e) {
+      Haptics.error();
       setState(() => _error = e);
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -67,40 +82,54 @@ class _DriverTripScreenState extends ConsumerState<DriverTripScreen> {
   Future<void> _start(Trip t, bool pinOn) async {
     String? pin;
     if (pinOn) {
-      pin = await showDialog<String>(context: context, builder: (ctx) => const _PinDialog());
+      pin = await showModalBottomSheet<String>(context: context, isScrollControlled: true, builder: (ctx) => const _PinSheet());
       if (pin == null) return;
     }
     await _do(() => ref.read(apisProvider).trips.start(t.id, pin: pin));
   }
 
   Future<void> _cancel(Trip t, {bool noShow = false}) async {
-    final l = context.l10n;
-    CancelReason? reason = noShow ? CancelReason.noShow : null;
-    if (!noShow) {
-      reason = await showModalBottomSheet<CancelReason>(
-        context: context,
-        builder: (ctx) => SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Padding(padding: const EdgeInsets.all(16), child: Text(l.cancelReasonTitle, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700))),
-              for (final r in [CancelReason.wrongPickup, CancelReason.safety, CancelReason.other]) ListTile(title: Text(cancelReasonLabel(l, r)), onTap: () => Navigator.pop(ctx, r)),
-            ],
-          ),
-        ),
-      );
-    }
+    var reason = noShow ? CancelReason.noShow : null;
+    reason ??= await showCancelSheet(context, free: true, feeMinor: 0, driverSide: true);
     if (reason == null) return;
     _cancelKey ??= newIdempotencyKey();
     await _do(() => ref.read(apisProvider).trips.cancel(t.id, reason!, idempotencyKey: _cancelKey!));
   }
 
-  Future<void> _navigate(TripPlace p) async {
-    final geo = Uri.parse('geo:${p.lat},${p.lng}?q=${p.lat},${p.lng}');
-    if (await canLaunchUrl(geo)) {
-      await launchUrl(geo);
-    } else {
-      await launchUrl(Uri.parse('https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}'), mode: LaunchMode.externalApplication);
+  Future<void> _directions(TripPlace p) async {
+    final prefs = ref.read(navPrefsProvider);
+    var app = prefs.app;
+    if (prefs.ask) {
+      final l = context.l10n;
+      final picked = await showModalBottomSheet<NavApp>(
+        context: context,
+        builder: (ctx) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(padding: const EdgeInsets.fromLTRB(20, 4, 20, 8), child: Align(alignment: Alignment.centerLeft, child: Text(l.navOpenIn, style: AnbessaType.h2))),
+              ListTile(leading: const Icon(Icons.map_outlined), title: Text(l.navGoogleMaps), onTap: () => Navigator.pop(ctx, NavApp.google)),
+              ListTile(leading: const Icon(Icons.alt_route), title: Text(l.navWaze), onTap: () => Navigator.pop(ctx, NavApp.waze)),
+              ListTile(leading: const Icon(Icons.navigation_outlined), title: Text(l.navSystemMaps), onTap: () => Navigator.pop(ctx, NavApp.system)),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      );
+      if (picked == null) return;
+      app = picked;
+    }
+    await openExternalNavigation(p.lat, p.lng, app: app, label: p.address);
+  }
+
+  void _onStage(DriverStage stage) {
+    if (_lastStage == stage) return;
+    final first = _lastStage == null;
+    _lastStage = stage;
+    if (first) return;
+    if (stage == DriverStage.cancelled) {
+      Haptics.error();
+      showToast(context, context.l10n.tripCancelled, tone: NoticeTone.warning);
     }
   }
 
@@ -111,169 +140,247 @@ class _DriverTripScreenState extends ConsumerState<DriverTripScreen> {
     final tripAsync = ref.watch(tripProvider(widget.tripId));
     final t = tripAsync.value;
     if (t == null) {
-      return Scaffold(appBar: AppBar(), body: tripAsync.hasError ? Padding(padding: const EdgeInsets.all(16), child: Problem(tripAsync.error, describe: (e) => describeError(l, e))) : const Center(child: CircularProgressIndicator()));
+      return Scaffold(appBar: AppBar(), body: tripAsync.hasError ? Padding(padding: const EdgeInsets.all(16), child: Problem(tripAsync.error, describe: (e) => describeError(l, e))) : const Padding(padding: EdgeInsets.all(16), child: SkeletonList(rows: 3)));
     }
     final stage = driverStageOf(t);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _onStage(stage));
     final parties = ref.watch(tripPartiesProvider(t.id)).value;
     final me = ref.watch(lastPositionProvider);
     final pinOn = ref.watch(featureProvider(Feature.tripPin));
     final sosOn = ref.watch(featureProvider(Feature.sos));
+    final navPrefs = ref.watch(navPrefsProvider);
+    ref.watch(hapticsSettingsProvider);
     final pickup = LatLng(t.pickup.lat, t.pickup.lng);
     final dropoff = LatLng(t.dropoff.lat, t.dropoff.lng);
-    final mePt = me == null ? null : LatLng(me.lat, me.lng);
     final toPickup = stage == DriverStage.accepted || stage == DriverStage.toPickup;
     final target = stage == DriverStage.inTrip ? t.dropoff : t.pickup;
+    final navigating = t.isActive && stage != DriverStage.waitingAtPickup;
     if (Env.fakeLocationOn) {
       WidgetsBinding.instance.addPostFrameCallback((_) => ref.read(devDriveTargetProvider.notifier).set((target.lat, target.lng)));
     }
+    // in-app guidance to the target
+    final navTarget = NavTarget(lat: target.lat, lng: target.lng, label: target.address);
+    NavState? nav;
+    if (navigating && me != null) {
+      if (_navTarget != navTarget) {
+        _navTarget = navTarget;
+        WidgetsBinding.instance.addPostFrameCallback((_) => ref.read(navigationProvider(navTarget).notifier).start((lat: me.lat, lng: me.lng)));
+      } else {
+        WidgetsBinding.instance.addPostFrameCallback((_) => ref.read(navigationProvider(navTarget).notifier).update((lat: me.lat, lng: me.lng), speed: me.speed));
+      }
+      nav = ref.watch(navigationProvider(navTarget));
+    }
+    final mePose = me == null ? null : AnimatedPose(lat: me.lat, lng: me.lng, heading: me.heading ?? (nav != null && nav.hasRoute ? bearingAt(nav.route, 0) : 0), stale: false);
     final metersToPickup = me == null ? null : metersBetween(me, t.pickup.lat, t.pickup.lng);
     final waiting = waitingAtPickup(t, _now);
-    final noShowAfter = const Duration(minutes: 5);
+    const noShowAfter = Duration(minutes: 5);
+    const freeWaiting = Duration(minutes: 3);
+    final top = MediaQuery.paddingOf(context).top;
+    final follow = navigating && !_overview && me != null ? (navPrefs.bearing ? FollowMode.driverBearing : FollowMode.driver) : FollowMode.none;
+    final routes = <RouteLine>[
+      if (nav != null && nav.hasRoute) ...[
+        RouteLine(nav.traversed.map((p) => LatLng(p.lat, p.lng)).toList(), kind: RouteKind.traversed),
+        RouteLine(nav.remaining.map((p) => LatLng(p.lat, p.lng)).toList()),
+      ] else if (me != null && t.isActive)
+        RouteLine.straight(LatLng(me.lat, me.lng), toPickup ? pickup : dropoff),
+      if (toPickup || !t.isActive) RouteLine.fromPolyline6(t.route.polyline, kind: RouteKind.secondary),
+    ];
 
     return Scaffold(
       body: Stack(
         children: [
           AnbessaMap(
-            fit: [?mePt, toPickup ? pickup : dropoff],
+            fit: follow == FollowMode.none ? [if (me != null) LatLng(me.lat, me.lng), toPickup ? pickup : dropoff, if (!t.isActive) pickup] : const [],
             pickup: pickup,
             dropoff: dropoff,
-            driver: mePt == null ? null : DriverMarkerData(position: mePt, heading: me!.heading, stale: false),
-            line: mePt == null ? [pickup, dropoff] : [mePt, toPickup ? pickup : dropoff],
-            padding: const EdgeInsets.fromLTRB(48, 100, 48, 320),
+            driverPose: mePose,
+            routes: routes,
+            follow: follow,
+            followZoom: 17,
+            onUserGesture: () => setState(() => _overview = true),
+            topInset: top + (navigating ? 120 : 64),
+            bottomInset: _sheetHeight,
+            callouts: [
+              if (nav != null && nav.remainingSeconds != null && navigating) MapCallout(point: toPickup ? pickup : dropoff, label: l.etaMinutes((nav.remainingSeconds! / 60).ceil().clamp(1, 999)), tone: Tone.amber, icon: Icons.schedule, offsetY: -56),
+            ],
           ),
-          SafeArea(
+          Positioned(
+            top: top + 8,
+            left: 12,
+            right: 12,
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Row(
-                    children: [
-                      if (!t.isActive) IconButton.filledTonal(onPressed: () => context.go(Routes.driverHome), icon: const Icon(Icons.arrow_back)),
-                      if (sosOn && t.isActive)
-                        FilledButton.icon(
-                          style: FilledButton.styleFrom(backgroundColor: c.danger),
-                          onPressed: () => context.push('${Routes.sos}?trip=${t.id}'),
-                          icon: const Icon(Icons.sos),
-                          label: Text(l.sos),
-                        ),
-                      const Spacer(),
-                      if (t.isActive) FilledButton.tonalIcon(onPressed: () => _navigate(target), icon: const Icon(Icons.navigation_outlined), label: Text(l.navigate)),
-                    ],
+                if (navigating && nav != null)
+                  TurnBanner(
+                    nav: nav,
+                    targetLabel: toPickup ? (t.pickup.address ?? l.pickupLabel) : (t.dropoff.address ?? l.dropoffLabel),
+                    onTap: nav.steps.isEmpty ? null : () => showModalBottomSheet(context: context, builder: (_) => TurnListSheet(nav: nav!, targetLabel: toPickup ? (t.pickup.address ?? l.pickupLabel) : (t.dropoff.address ?? l.dropoffLabel))),
                   ),
+                const SizedBox(height: 8),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (!t.isActive) MapControlButton(icon: Icons.arrow_back, tooltip: l.back, onTap: () => context.go(Routes.driverHome)),
+                    if (sosOn && t.isActive) MapControlButton(icon: Icons.sos, tooltip: l.sos, active: true, onTap: () => context.push('${Routes.sos}?trip=${t.id}')),
+                    if (Env.fakeLocationOn) ...[const SizedBox(width: 8), MapChip(icon: Icons.bug_report_outlined, label: l.devTools, onTap: () => setState(() => _devOpen = !_devOpen))],
+                    const SizedBox(width: 8),
+                    // the chips wrap onto a second line at large text sizes
+                    Expanded(
+                      child: Wrap(
+                        alignment: WrapAlignment.end,
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          if (navigating) ...[
+                            MapChip(icon: _overview ? Icons.navigation : Icons.map_outlined, label: _overview ? l.navFollowMode : l.navOverviewMode, onTap: () => setState(() => _overview = !_overview)),
+                            MapChip(icon: Icons.directions, label: l.openDirections, tone: c.accentStrong, onTap: () => _directions(target)),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-                if (Env.fakeLocationOn) const Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: DevLocationPanel()),
+                if (_devOpen && Env.fakeLocationOn) const Padding(padding: EdgeInsets.only(top: 8), child: DevLocationPanel()),
               ],
             ),
           ),
-          Align(
-            alignment: Alignment.bottomCenter,
-            child: Container(
-              width: double.infinity,
-              decoration: BoxDecoration(color: c.surface, borderRadius: const BorderRadius.vertical(top: Radius.circular(18)), boxShadow: const [BoxShadow(color: Color(0x22000000), blurRadius: 16, offset: Offset(0, -2))]),
-              child: SafeArea(
-                top: false,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Row(
-                        children: [
-                          StatusPill(tripStatusLabel(l, t.status), tone: t.status == TripStatus.inProgress ? Tone.green : t.status == TripStatus.cancelled ? Tone.red : t.status == TripStatus.completed ? Tone.grey : Tone.blue),
-                          const Spacer(),
-                          MoneyText(t.fare.chargedMinor, locale: context.localeTag, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+          AppSheet(
+            snaps: const [0.34, 0.74],
+            onHeightChanged: (h) {
+              if ((h - _sheetHeight).abs() > 2) setState(() => _sheetHeight = h);
+            },
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
+            builder: (context, _) => AnimatedSwitcherX(
+              child: KeyedSubtree(
+                key: ValueKey(stage),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // the rider and the target
+                    Row(
+                      children: [
+                        AvatarImage(src: parties?.riderPhoto, name: parties?.riderName ?? l.riderLabel, size: 48),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(parties?.riderName ?? l.riderLabel, style: AnbessaType.title.copyWith(color: c.text), maxLines: 1, overflow: TextOverflow.ellipsis),
+                              Text(toPickup ? (t.pickup.address ?? l.pickupLabel) : (t.dropoff.address ?? l.dropoffLabel), maxLines: 1, overflow: TextOverflow.ellipsis, style: AnbessaType.caption.copyWith(color: c.text2)),
+                            ],
+                          ),
+                        ),
+                        if (kMaskedCallsEnabled) IconButton.filledTonal(onPressed: () {}, icon: const Icon(Icons.call_outlined), tooltip: l.contact),
+                        const SizedBox(width: 4),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            MoneyText(t.fare.chargedMinor, locale: context.localeTag, style: AnbessaType.h2.copyWith(color: c.text)),
+                            StatusPill(paymentMethodLabel(l, t.paymentMethod), tone: t.paymentMethod == PaymentMethod.cash ? Tone.amber : Tone.blue),
+                          ],
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    Problem(_error, describe: (e) => describeError(l, e)),
+                    if (_error != null) const SizedBox(height: 8),
+                    ...switch (stage) {
+                      DriverStage.accepted => [
+                          SwipeToConfirm(label: l.slideOnMyWay, icon: Icons.near_me, busy: _busy, onConfirmed: () => _do(() => ref.read(apisProvider).trips.enRoute(t.id))),
+                          TextButton(onPressed: _busy ? null : () => _cancel(t), child: Text(l.cancelTripDriver)),
                         ],
-                      ),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          CircleAvatar(backgroundColor: c.accentSoft, foregroundColor: c.accentStrong, child: const Icon(Icons.person)),
-                          const SizedBox(width: 10),
-                          Expanded(
+                      DriverStage.toPickup => [
+                          if (metersToPickup != null)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 10),
+                              child: Row(
+                                children: [
+                                  Icon(Icons.place_outlined, size: 18, color: metersToPickup <= 150 ? c.success : c.muted),
+                                  const SizedBox(width: 6),
+                                  Expanded(child: Text(l.toPickupDistance(km(metersToPickup.round())), style: AnbessaType.body2.copyWith(color: metersToPickup <= 150 ? c.success : c.text2, fontWeight: FontWeight.w600))),
+                                ],
+                              ),
+                            ),
+                          SwipeToConfirm(label: l.slideArrived, icon: Icons.place, tone: metersToPickup != null && metersToPickup <= 300 ? Tone.green : Tone.amber, busy: _busy, onConfirmed: () => _do(() => ref.read(apisProvider).trips.arrive(t.id))),
+                          TextButton(onPressed: _busy ? null : () => _cancel(t), child: Text(l.cancelTripDriver)),
+                        ],
+                      DriverStage.waitingAtPickup => [
+                          Row(
+                            children: [
+                              CountdownRing(remaining: waiting > freeWaiting ? Duration.zero : freeWaiting - waiting, total: freeWaiting, size: 56, strokeWidth: 4, child: Icon(Icons.timer_outlined, color: waiting > freeWaiting ? c.warning : c.accentStrong)),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(l.waitingFor(mmss(waiting)), style: AnbessaType.title.copyWith(color: c.text, fontFeatures: AnbessaType.tabular)),
+                                    Text(waiting > freeWaiting ? l.riderIsWaiting : l.freeUntil('3:00'), style: AnbessaType.caption.copyWith(color: c.muted)),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 14),
+                          SwipeToConfirm(label: l.slideStart, icon: Icons.play_arrow_rounded, busy: _busy, onConfirmed: () => _start(t, pinOn)),
+                          TextButton(
+                            onPressed: _busy || waiting < noShowAfter ? null : () => _cancel(t, noShow: true),
+                            child: Text(waiting < noShowAfter ? l.noShowIn(mmss(noShowAfter - waiting)) : l.noShow),
+                          ),
+                        ],
+                      DriverStage.inTrip => [
+                          SwipeToConfirm(
+                            label: l.slideComplete,
+                            icon: Icons.flag_rounded,
+                            tone: Tone.green,
+                            busy: _busy,
+                            onConfirmed: () {
+                              _completeKey ??= newIdempotencyKey();
+                              return _do(() => ref.read(apisProvider).trips.complete(t.id, idempotencyKey: _completeKey!));
+                            },
+                          ),
+                        ],
+                      DriverStage.completed => [
+                          Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(color: t.paymentMethod == PaymentMethod.cash ? c.warningSoft : c.successSoft, borderRadius: BorderRadius.circular(AnbessaRadius.lg)),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(parties?.riderName ?? l.riderLabel, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
-                                Text(toPickup ? (t.pickup.address ?? l.pickupLabel) : (t.dropoff.address ?? l.dropoffLabel), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: c.text2)),
+                                Text(t.paymentMethod == PaymentMethod.cash ? l.collectCashTitle : t.paymentMethod == PaymentMethod.corporate ? l.companyPays : l.riderPaysDigital, style: AnbessaType.label.copyWith(color: t.paymentMethod == PaymentMethod.cash ? c.warning : c.success)),
+                                const SizedBox(height: 4),
+                                AnimatedMoney(t.fare.chargedMinor, locale: context.localeTag, style: AnbessaType.display.copyWith(color: c.text)),
+                                if (t.paymentMethod == PaymentMethod.cash) Text(l.collectCash(birr(t.fare.chargedMinor, locale: context.localeTag)), style: AnbessaType.body2.copyWith(color: c.text2)),
                               ],
                             ),
                           ),
-                          StatusPill(paymentMethodLabel(l, t.paymentMethod), tone: t.paymentMethod == PaymentMethod.cash ? Tone.amber : Tone.blue),
+                          const SizedBox(height: 12),
+                          PrimaryButton(label: l.rateRider, icon: Icons.star_outline, onPressed: () => context.go('${Routes.driverTrip(t.id)}/rate')),
+                          TextButton(
+                            onPressed: () {
+                              ref.read(activeTripProvider.notifier).clearIfEnded();
+                              context.go(Routes.driverHome);
+                            },
+                            child: Text(l.backToDriving),
+                          ),
                         ],
-                      ),
-                      const SizedBox(height: 12),
-                      Problem(_error, describe: (e) => describeError(l, e)),
-                      if (_error != null) const SizedBox(height: 8),
-                      ...switch (stage) {
-                        DriverStage.accepted => [
-                            PrimaryButton(label: l.onMyWay, icon: Icons.near_me, busy: _busy, onPressed: () => _do(() => ref.read(apisProvider).trips.enRoute(t.id))),
-                            TextButton(onPressed: _busy ? null : () => _cancel(t), child: Text(l.cancelTrip)),
-                          ],
-                        DriverStage.toPickup => [
-                            if (metersToPickup != null) Padding(padding: const EdgeInsets.only(bottom: 8), child: Text('${metersToPickup.round()} m · ${l.toPickup}', style: TextStyle(color: c.muted))),
-                            PrimaryButton(label: l.arrived, icon: Icons.place, busy: _busy, onPressed: () => _do(() => ref.read(apisProvider).trips.arrive(t.id))),
-                            TextButton(onPressed: _busy ? null : () => _cancel(t), child: Text(l.cancelTrip)),
-                          ],
-                        DriverStage.waitingAtPickup => [
-                            Row(
-                              children: [
-                                Icon(Icons.timer_outlined, color: waiting > const Duration(minutes: 3) ? c.warning : c.muted),
-                                const SizedBox(width: 6),
-                                Text(l.waitingFor(mmss(waiting)), style: const TextStyle(fontWeight: FontWeight.w600)),
-                                const Spacer(),
-                                Text(l.freeWaiting('3:00'), style: TextStyle(color: c.muted, fontSize: 12)),
-                              ],
-                            ),
-                            const SizedBox(height: 10),
-                            PrimaryButton(label: l.startTrip, icon: Icons.play_arrow, busy: _busy, onPressed: () => _start(t, pinOn)),
-                            TextButton(
-                              onPressed: _busy || waiting < noShowAfter ? null : () => _cancel(t, noShow: true),
-                              child: Text(waiting < noShowAfter ? l.noShowAfter(5) : l.noShow),
-                            ),
-                          ],
-                        DriverStage.inTrip => [
-                            PrimaryButton(
-                              label: l.completeTrip,
-                              icon: Icons.flag,
-                              busy: _busy,
-                              onPressed: () {
-                                _completeKey ??= newIdempotencyKey();
-                                _do(() => ref.read(apisProvider).trips.complete(t.id, idempotencyKey: _completeKey!));
-                              },
-                            ),
-                          ],
-                        DriverStage.completed => [
-                            Notice(
-                              t.paymentMethod == PaymentMethod.cash ? l.collectCash(birr(t.fare.chargedMinor, locale: context.localeTag)) : t.paymentMethod == PaymentMethod.corporate ? l.paidByCompany : l.paidDigitally,
-                              tone: t.paymentMethod == PaymentMethod.cash ? NoticeTone.warning : NoticeTone.ok,
-                            ),
-                            const SizedBox(height: 10),
-                            PrimaryButton(label: l.rateRider, icon: Icons.star_outline, onPressed: () => context.go('${Routes.driverTrip(t.id)}/rate')),
-                            TextButton(
-                              onPressed: () {
-                                ref.read(activeTripProvider.notifier).clearIfEnded();
-                                context.go(Routes.driverHome);
-                              },
-                              child: Text(l.backToDriving),
-                            ),
-                          ],
-                        DriverStage.cancelled => [
-                            Text(l.cancelledBy(t.cancellation?.by.name ?? ''), style: TextStyle(color: c.text2)),
-                            if ((t.cancellation?.driverCompensationMinor ?? 0) > 0) Text('+ ${birr(t.cancellation!.driverCompensationMinor, locale: context.localeTag)}', style: TextStyle(color: c.success, fontWeight: FontWeight.w600)),
-                            const SizedBox(height: 10),
-                            PrimaryButton(
-                              label: l.backToDriving,
-                              onPressed: () {
-                                ref.read(activeTripProvider.notifier).clearIfEnded();
-                                context.go(Routes.driverHome);
-                              },
-                            ),
-                          ],
-                        DriverStage.unknown => [Text(tripStatusLabel(l, t.status))],
-                      },
-                    ],
-                  ),
+                      DriverStage.cancelled => [
+                          Notice(l.cancelledBy(t.cancellation?.by.name ?? ''), tone: NoticeTone.warning),
+                          if ((t.cancellation?.driverCompensationMinor ?? 0) > 0)
+                            Padding(padding: const EdgeInsets.only(top: 8), child: Text('${l.youEarn} +${birr(t.cancellation!.driverCompensationMinor, locale: context.localeTag)}', style: AnbessaType.body.copyWith(color: c.success, fontWeight: FontWeight.w600))),
+                          const SizedBox(height: 12),
+                          PrimaryButton(
+                            label: l.backToDriving,
+                            onPressed: () {
+                              ref.read(activeTripProvider.notifier).clearIfEnded();
+                              context.go(Routes.driverHome);
+                            },
+                          ),
+                        ],
+                      DriverStage.unknown => [Text(tripStatusLabel(l, t.status))],
+                    },
+                  ],
                 ),
               ),
             ),
@@ -284,33 +391,37 @@ class _DriverTripScreenState extends ConsumerState<DriverTripScreen> {
   }
 }
 
-class _PinDialog extends StatefulWidget {
-  const _PinDialog();
+class _PinSheet extends StatefulWidget {
+  const _PinSheet();
   @override
-  State<_PinDialog> createState() => _PinDialogState();
+  State<_PinSheet> createState() => _PinSheetState();
 }
 
-class _PinDialogState extends State<_PinDialog> {
-  final _c = TextEditingController();
+class _PinSheetState extends State<_PinSheet> {
   @override
   Widget build(BuildContext context) {
     final l = context.l10n;
-    return AlertDialog(
-      title: Text(l.enterPin),
-      content: TextField(
-        controller: _c,
-        autofocus: true,
-        keyboardType: TextInputType.number,
-        inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(4)],
-        style: const TextStyle(fontSize: 28, letterSpacing: 10, fontFamilyFallback: monoFamilyFallback),
-        textAlign: TextAlign.center,
-        decoration: InputDecoration(hintText: l.pinHint),
-        onSubmitted: (v) => v.length == 4 ? Navigator.pop(context, v) : null,
+    final c = context.colors;
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(l.pinSheetTitle, style: AnbessaType.h2.copyWith(color: c.text)),
+              const SizedBox(height: 4),
+              Text(l.pinSheetLede, style: AnbessaType.body2.copyWith(color: c.text2)),
+              const SizedBox(height: 20),
+              Center(child: PinBoxes(length: 4, size: 60, onCompleted: (v) => Navigator.pop(context, v))),
+              const SizedBox(height: 16),
+              TextButton(onPressed: () => Navigator.pop(context), child: Text(l.cancel)),
+            ],
+          ),
+        ),
       ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: Text(l.cancel)),
-        FilledButton(onPressed: () => _c.text.length == 4 ? Navigator.pop(context, _c.text) : null, child: Text(l.startTrip)),
-      ],
     );
   }
 }

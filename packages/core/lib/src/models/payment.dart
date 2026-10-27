@@ -131,3 +131,39 @@ class PaymentMethodsConfig {
       );
   static const fallback = PaymentMethodsConfig(methods: [PaymentMethod.cash], providers: []);
 }
+
+/// GET /api/payments/earnings/me: what a driver made over a period.
+@immutable
+class EarningsDay {
+  const EarningsDay({required this.day, required this.trips, required this.grossMinor, required this.netMinor});
+  /// YYYY-MM-DD, Addis time
+  final String day;
+  final int trips;
+  final int grossMinor;
+  final int netMinor;
+  factory EarningsDay.fromJson(Json j) => EarningsDay(day: str(j, 'day'), trips: readInt(j, 'trips'), grossMinor: readInt(j, 'grossMinor'), netMinor: readInt(j, 'netMinor'));
+}
+
+@immutable
+class EarningsSummary {
+  const EarningsSummary({required this.from, required this.to, required this.trips, required this.cancellations, required this.grossMinor, required this.commissionMinor, required this.vatMinor, required this.netMinor, this.balanceChangeMinor = 0, required this.cashCollectedMinor, required this.byDay});
+  final DateTime from;
+  final DateTime to;
+  final int trips;
+  final int cancellations;
+  final int grossMinor;
+  final int commissionMinor;
+  final int vatMinor;
+  /// what the driver made (fare − commission − VAT), whatever the payment method
+  final int netMinor;
+  /// how the balance moved; on cash trips it goes down by what's owed
+  final int balanceChangeMinor;
+  final int cashCollectedMinor;
+  final List<EarningsDay> byDay;
+  factory EarningsSummary.fromJson(Json j) => EarningsSummary(
+        from: readDate(j, 'from'), to: readDate(j, 'to'), trips: readInt(j, 'trips'), cancellations: readInt(j, 'cancellations', 0),
+        grossMinor: readInt(j, 'grossMinor'), commissionMinor: readInt(j, 'commissionMinor'), vatMinor: readInt(j, 'vatMinor'), netMinor: readInt(j, 'netMinor'),
+        balanceChangeMinor: readInt(j, 'balanceChangeMinor', 0), cashCollectedMinor: readInt(j, 'cashCollectedMinor'), byDay: asJsonList(j['byDay']).map(EarningsDay.fromJson).toList(growable: false),
+      );
+  static final empty = EarningsSummary(from: DateTime.fromMillisecondsSinceEpoch(0), to: DateTime.fromMillisecondsSinceEpoch(0), trips: 0, cancellations: 0, grossMinor: 0, commissionMinor: 0, vatMinor: 0, netMinor: 0, cashCollectedMinor: 0, byDay: const []);
+}

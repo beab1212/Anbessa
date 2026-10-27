@@ -2,7 +2,7 @@
 
 import type { Redis } from "ioredis";
 import {
-  cityDrivers, getDriverState, haversineMeters, isTripMember, keys, nearbyAvailable,
+  cityAt, cityDrivers, getDriverState, haversineMeters, isTripMember, keys, nearbyAvailable,
   type DriverState, type LatLng, type NearbyDriver,
 } from "@ride-app/shared-location";
 import { authorize, type Principal } from "@ride-app/shared-authz";
@@ -50,6 +50,38 @@ export function createLocations(deps: { redis: Redis; mapping: Mapping; logger: 
       }
       const known = durations.filter((d): d is number => d !== null);
       return { etaSeconds: known.length ? Math.round(Math.min(...known)) : null, driversNearby: drivers.length, approximate };
+    },
+
+    /**
+     * Rider home: the cars around you. Anonymous (no ids, no plates), positions on a ~30 m grid,
+     * at most 15 within 2 km, with the ETA of the nearest one. Every vehicle type of the city
+     * unless one is asked for. Outside the served cities: nothing.
+     */
+    async nearbyPublic(q: LatLng & { vehicleType?: string }) {
+      const cityId = cityAt(q);
+      if (!cityId) return { cars: [], etaSeconds: null, driversNearby: 0, approximate: false };
+      const types = q.vehicleType ? [q.vehicleType] : await redis.smembers(keys.vehicleTypes(cityId));
+      const seen = new Map<string, NearbyDriver>();
+      for (const vehicleType of types) {
+        for (const d of await nearbyAvailable(redis, { ...q, cityId, vehicleType, radiusMeters: 2000, limit: 15 }, now())) seen.set(d.driverId, d);
+      }
+      const drivers = [...seen.values()].sort((a, b) => a.distanceMeters - b.distanceMeters).slice(0, 15);
+      const grid = (v: number) => Math.round(v / 0.0003) * 0.0003;
+      const cars = drivers.map((d) => ({ lat: Number(grid(d.lat).toFixed(4)), lng: Number(grid(d.lng).toFixed(4)), ...(d.heading !== undefined ? { heading: Math.round(d.heading) } : {}) }));
+      const nearest = drivers[0];
+      let etaSeconds: number | null = null;
+      let approximate = false;
+      if (nearest) {
+        try {
+          const t = await mapping.table([{ lat: nearest.lat, lng: nearest.lng }], [{ lat: q.lat, lng: q.lng }]);
+          etaSeconds = t.durations[0]?.[0] ?? null;
+          approximate = t.approximate;
+        } catch {
+          etaSeconds = Math.round((nearest.distanceMeters * FALLBACK_DETOUR) / FALLBACK_SPEED_MPS);
+          approximate = true;
+        }
+      }
+      return { cars, etaSeconds, driversNearby: drivers.length, approximate };
     },
 
     driver: (driverId: string) => getDriverState(redis, driverId),

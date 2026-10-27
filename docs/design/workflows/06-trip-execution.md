@@ -8,7 +8,7 @@
 | **Outcome** | The trip is `completed` with the final fare, distance, duration and route polyline, ready for payment ([08](08-payment-receipt-rating.md)) |
 | **Related** | [← Workflows](README.md) · [Architecture §5.3 (live tracking)](../../architecture/overview.md#53-live-location-tracking) · [WebSocket learning note](../../../learned/Edge%20&%20Networking/WebSocket.md) |
 
-> **Implemented** in trip-service: en route, arrive (150 m geofence on the last ping), start (optional PIN), complete (quote + paid waiting, a far-from-drop-off flag), ratings. Not yet: GPS-trace distance (OSRM `/match`), ETA refresh, route-deviation alerts, destination change, share links, masked calls.
+> **Implemented** in trip-service: en route, arrive (150 m geofence on the last ping), start (optional PIN), complete (quote + paid waiting, a far-from-drop-off flag), ratings with tags, the quote's road line on the trip (`route.polyline`), and share links (`POST`/`DELETE /api/trips/:id/share`, the public `GET /api/trips/shared/:token` and the web page `/t/:token`: driver's first name, car, live position, until 30 min after the end). The phone app refreshes the ETA every 30 s from `GET /api/maps/route` and gives the driver a route line, the next turn and a hand-off to Google Maps / Waze. Not yet: GPS-trace distance (OSRM `/match`), server-side route-deviation alerts, destination change, masked calls.
 
 ## 1. Summary
 

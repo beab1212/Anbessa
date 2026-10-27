@@ -88,6 +88,26 @@ describe("settling trips (workflow 08)", () => {
   });
 });
 
+describe("the driver's earnings summary", () => {
+  it("adds up today's settlements by day; only the driver themself may read it", async () => {
+    const d = uuid();
+    const me = await h.person([{ r: "DRIVER" }, { r: "RIDER" }], d);
+    await h.c.payments.onTripCompleted(h.completed({ driverId: d, fareMinor: 40_000 }));
+    await h.c.payments.onTripCompleted(h.completed({ driverId: d, fareMinor: 40_000 }));
+    await h.c.payments.onTripCompleted(h.completed({ driverId: d, fareMinor: 40_000, paymentMethod: "CORPORATE", billingOrgId: uuid() }));
+    const s = await h.ok<{ trips: number; grossMinor: number; commissionMinor: number; vatMinor: number; netMinor: number; cashCollectedMinor: number; byDay: { trips: number; netMinor: number }[] }>(h.req("GET", "/api/payments/earnings/me?period=today", me));
+    // two cash trips (−69 ETB each) and one billed to a company (+331 ETB)
+    expect(s).toMatchObject({ trips: 3, grossMinor: 120_000, commissionMinor: 18_000, vatMinor: 2700, netMinor: 99_300, balanceChangeMinor: 19_300, cashCollectedMinor: 80_000 });
+    expect(s.byDay).toHaveLength(1);
+    expect(s.byDay[0]).toMatchObject({ trips: 3, netMinor: 99_300 });
+    expect((await h.req("GET", "/api/payments/earnings/me?period=week", me)).json()).toMatchObject({ trips: 3 });
+    expect((await h.req("GET", "/api/payments/earnings/me?period=custom&from=2020-01-01&to=2020-01-02", me)).json()).toMatchObject({ trips: 0 });
+    expect((await h.req("GET", "/api/payments/earnings/me?period=custom&from=2020-01-01&to=2020-12-31", me)).statusCode).toBe(400);
+    // a rider has no earnings to read
+    expect((await h.req("GET", "/api/payments/earnings/me", await h.person())).statusCode).toBe(403);
+  });
+});
+
 describe("balance limits (Payment.md §8)", () => {
   it("cash trips pause cash requests; a card trip repays the debt and lifts it", async () => {
     const d = uuid();

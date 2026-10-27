@@ -560,3 +560,117 @@
   gap: 0.5rem;
   margin-bottom: 1rem;
 }
+
+/* ── /t/:token, the public shared-trip page (phone-first) ── */
+.shared-page {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--canvas);
+}
+.shared-map {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+.shared-map .map {
+  position: absolute;
+  inset: 0;
+}
+.shared-card {
+  background: var(--surface);
+  border-radius: 20px 20px 0 0;
+  box-shadow: var(--shadow-lg);
+  padding: 1rem 1rem calc(1rem + env(safe-area-inset-bottom));
+  margin-top: -20px;
+  position: relative;
+  z-index: 5;
+  max-width: 560px;
+  width: 100%;
+  align-self: center;
+}
+.shared-card h1 {
+  font-size: 1.25rem;
+  margin: 0.25rem 0 0.75rem;
+}
+.shared-brand {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent-strong);
+}
+.shared-driver {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+}
+.shared-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex: none;
+}
+.shared-avatar.initials {
+  display: grid;
+  place-items: center;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+.shared-name {
+  font-weight: 600;
+}
+.shared-car {
+  color: var(--text-2);
+  font-size: 0.875rem;
+}
+.shared-plate {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-weight: 700;
+  padding: 0.25rem 0.5rem;
+  border: 2px solid var(--text);
+  border-radius: var(--r-sm);
+}
+.shared-route {
+  list-style: none;
+  padding: 0;
+  margin: 0.75rem 0 0;
+  display: grid;
+  gap: 0.5rem;
+}
+.shared-route li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.shared-route .dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: none;
+}
+.shared-route .dot.pickup {
+  background: var(--success);
+}
+.shared-route .dot.dropoff {
+  background: var(--text);
+  border-radius: 2px;
+}
+.shared-foot {
+  color: var(--muted);
+  font-size: 0.8125rem;
+  margin: 0.75rem 0 0;
+}
+.shared-message {
+  margin: auto;
+  max-width: 420px;
+  padding: 1.5rem;
+  text-align: center;
+}

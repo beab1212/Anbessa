@@ -113,3 +113,30 @@ export function TripLine({ id, from, to }: { id: string; from: LatLng; to: LatLn
   }, [map, id, from.lat, from.lng, to.lat, to.lng]);
   return null;
 }
+
+/** A road line (casing + fill) through decoded route points. */
+export function RouteLine({ id, points, color = "#d97706" }: { id: string; points: LatLng[]; color?: string }) {
+  const map = useMap();
+  const key = points.length ? `${points.length}:${points[0]!.lat},${points[0]!.lng}:${points.at(-1)!.lat},${points.at(-1)!.lng}` : "";
+  useEffect(() => {
+    if (!map || points.length < 2) return;
+    const src = `route-${id}`;
+    const data: Parameters<maplibregl.GeoJSONSource["setData"]>[0] = { type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: points.map((p) => [p.lng, p.lat]) } };
+    const add = () => {
+      if (map.getSource(src)) (map.getSource(src) as maplibregl.GeoJSONSource).setData(data);
+      else {
+        map.addSource(src, { type: "geojson", data });
+        map.addLayer({ id: `${src}-casing`, type: "line", source: src, layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": "#ffffff", "line-width": 8 } });
+        map.addLayer({ id: src, type: "line", source: src, layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": color, "line-width": 5 } });
+      }
+    };
+    if (map.isStyleLoaded()) add();
+    else map.once("load", add);
+    return () => {
+      for (const l of [src, `${src}-casing`]) if (map.getLayer(l)) map.removeLayer(l);
+      if (map.getSource(src)) map.removeSource(src);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map, id, key, color]);
+  return null;
+}

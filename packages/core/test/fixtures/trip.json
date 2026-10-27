@@ -5,13 +5,38 @@
   "channel": "APP",
   "vehicleType": "economy",
   "paymentMethod": "MOBILE_MONEY",
-  "billing": { "type": "PERSONAL", "orgId": null },
+  "billing": {
+    "type": "PERSONAL",
+    "orgId": null
+  },
   "riderUserId": "01a17851-c0de-7000-8000-000000000501",
-  "pickup": { "lat": 8.9806, "lng": 38.7578, "address": "Bole" },
-  "dropoff": { "lat": 9.0349, "lng": 38.7469, "address": "Piassa" },
-  "driver": { "userId": "01a17851-bb2a-77fc-836d-caa38f1dcb41", "vehicleId": "01a17851-cd5d-7ee6-a96b-baa5d206fe95" },
-  "fare": { "estimateMinor": 22000, "finalMinor": null, "waitingFeeMinor": null, "currency": "ETB" },
-  "route": { "estDistanceMeters": 6000, "estDurationSeconds": 900, "distanceMeters": null, "durationSeconds": null },
+  "pickup": {
+    "lat": 8.9806,
+    "lng": 38.7578,
+    "address": "Bole"
+  },
+  "dropoff": {
+    "lat": 9.0349,
+    "lng": 38.7469,
+    "address": "Piassa"
+  },
+  "driver": {
+    "userId": "01a17851-bb2a-77fc-836d-caa38f1dcb41",
+    "vehicleId": "01a17851-cd5d-7ee6-a96b-baa5d206fe95"
+  },
+  "fare": {
+    "estimateMinor": 22000,
+    "finalMinor": null,
+    "waitingFeeMinor": null,
+    "currency": "ETB"
+  },
+  "route": {
+    "estDistanceMeters": 6000,
+    "estDurationSeconds": 900,
+    "distanceMeters": null,
+    "durationSeconds": null,
+    "polyline": "_p~iF~ps|U_ulLnnqC"
+  },
   "times": {
     "requestedAt": "2026-10-26T13:07:10.000Z",
     "matchedAt": "2026-10-26T13:07:14.000Z",

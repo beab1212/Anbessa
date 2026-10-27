@@ -13,14 +13,16 @@ const TTL_SECONDS = 60;
 
 interface Parties {
   driverName: string | null;
+  driverPhoto: string | null;
   riderName: string | null;
+  riderPhoto: string | null;
   vehicle: Omit<PublicVehicle, "id"> | null;
 }
 
 /** Sign-up stores the phone number as the name until the person sets one. */
 const shownName = (name: string | null) => (name && !/^\+?[\d\s-]{7,}$/.test(name.trim()) ? name.trim() : null);
 
-export function createParties(deps: { redis: Redis; client: PartiesClient; logger: Logger }) {
+export function createParties(deps: { redis: Redis; client: PartiesClient; logger: Logger; ratingOf?: (userId: string) => Promise<{ average: number | null; count: number }> }) {
   const { redis, client, logger } = deps;
 
   async function load(t: Trip): Promise<Parties> {
@@ -35,14 +37,16 @@ export function createParties(deps: { redis: Redis; client: PartiesClient; logge
         return null;
       }
     };
-    const [riderName, driverName, vehicle] = await Promise.all([
-      safe("rider name", client.userName(t.riderUserId)),
-      t.driverUserId ? safe("driver name", client.userName(t.driverUserId)) : null,
+    const [rider, driver, vehicle] = await Promise.all([
+      safe("rider", client.user(t.riderUserId)),
+      t.driverUserId ? safe("driver", client.user(t.driverUserId)) : null,
       t.vehicleId ? safe("vehicle", client.vehicle(t.vehicleId)) : null,
     ]);
     const parties: Parties = {
-      riderName: shownName(riderName),
-      driverName: shownName(driverName),
+      riderName: shownName(rider?.name ?? null),
+      riderPhoto: rider?.image ?? null,
+      driverName: shownName(driver?.name ?? null),
+      driverPhoto: driver?.image ?? null,
       vehicle: vehicle ? { plateNumber: vehicle.plateNumber, vehicleType: vehicle.vehicleType, make: vehicle.make, model: vehicle.model, color: vehicle.color } : null,
     };
     await redis.set(key, JSON.stringify(parties), "EX", TTL_SECONDS);
@@ -50,17 +54,26 @@ export function createParties(deps: { redis: Redis; client: PartiesClient; logge
   }
 
   return {
+    /** For a share link's viewer: the driver's first name and photo and the car, nothing more. */
+    async forShare(t: Trip) {
+      if (!t.driverUserId) return { driver: null, vehicle: null };
+      const parties = await load(t);
+      return { driver: { firstName: parties.driverName?.split(/\s+/)[0] ?? null, photo: parties.driverPhoto }, vehicle: parties.vehicle };
+    },
+
     /** The view for this reader (the trip must already be readable by them). */
     async forTrip(t: Trip, p: Principal) {
       const parties = await load(t);
       const staff = p.audience === "ride-admin";
       const rider = p.userId === t.riderUserId || p.userId === t.bookedByUserId;
       const driver = !!t.driverUserId && p.userId === t.driverUserId;
+      // the driver's average shows once it means something (three ratings)
+      const r = (rider || staff) && t.driverUserId && deps.ratingOf ? await deps.ratingOf(t.driverUserId).catch(() => null) : null;
       return {
         tripId: t.id,
-        driver: (rider || staff) && t.driverUserId ? { name: parties.driverName, rating: null } : null,
+        driver: (rider || staff) && t.driverUserId ? { name: parties.driverName, photo: parties.driverPhoto, rating: r && r.count >= 3 ? r.average : null, ratingCount: r?.count ?? 0 } : null,
         vehicle: (rider || staff) ? parties.vehicle : null,
-        rider: driver || staff ? { name: parties.riderName } : null,
+        rider: driver || staff ? { name: parties.riderName, photo: parties.riderPhoto } : null,
       };
     },
   };

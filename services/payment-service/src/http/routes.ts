@@ -18,7 +18,7 @@ const money = z.number().int().positive().max(100_000_000);
 const reason = z.string().trim().min(5).max(500);
 
 export type RouteDeps = Pick<Container,
-  "db" | "gateways" | "payments" | "topUps" | "payouts" | "ruleChanges" | "balances" | "webhooks" | "settings" | "config" | "internalToken"
+  "db" | "gateways" | "payments" | "topUps" | "payouts" | "ruleChanges" | "balances" | "earnings" | "webhooks" | "settings" | "config" | "internalToken"
 > & { verifyAccessToken: VerifyAccessToken };
 
 export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
@@ -49,6 +49,13 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
       methods: deps.settings.get<string[]>("payments.methods", q.cityId),
       providers: gateways.list().map((g) => ({ provider: g.provider, label: g.label, methods: g.methods, mode: g.mode })),
     });
+  });
+
+  // ── drivers: what they made ─────────────────────────────────────────────────
+  app.get("/api/payments/earnings/me", async (req) => {
+    const p = await principal(req);
+    const q = z.object({ period: z.enum(["today", "week", "month", "custom"]).default("today"), from: z.string().optional(), to: z.string().optional() }).parse(req.query);
+    return deps.earnings.mine(p, q.period, { from: q.from, to: q.to });
   });
 
   // ── drivers and fleet owners: the balance ───────────────────────────────────

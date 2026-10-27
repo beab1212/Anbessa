@@ -3,6 +3,7 @@
 
 abstract final class Routes {
   static const splash = '/splash';
+  static const intro = '/intro';
   static const updateRequired = '/update-required';
   static const welcome = '/welcome';
   static const signIn = '/sign-in';
@@ -13,6 +14,7 @@ abstract final class Routes {
   static const riderHome = '/rider/home';
   static const riderPickup = '/rider/book/pickup';
   static const riderDropoff = '/rider/book/dropoff';
+  static const riderRoute = '/rider/book/route';
   static const riderQuote = '/rider/book/quote';
   static String riderTrip(String id) => '/rider/trip/$id';
   static String riderPay(String id) => '/rider/trip/$id/pay';
@@ -37,11 +39,18 @@ abstract final class Routes {
   static const driverActivity = '/driver/activity';
   static String driverReceipt(String id) => '/driver/activity/$id';
   static const driverAccount = '/driver/account';
+  static const driverVehicles = '/driver/vehicles';
 
   static const profile = '/account/profile';
   static const language = '/account/language';
   static const sessions = '/account/sessions';
   static const paymentPrefs = '/account/payments';
+  static const savedPlaces = '/account/places';
+  static const appearance = '/account/appearance';
+  static const notifications = '/account/notifications';
+  static const safety = '/account/safety';
+  static const organizations = '/account/organizations';
+  static const navigationPrefs = '/account/navigation';
   static const deleteAccount = '/account/delete';
 
   static const scheduled = '/scheduled';

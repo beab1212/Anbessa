@@ -53,6 +53,7 @@ class OfferController extends Notifier<OfferState> {
   void _show(TripOffer o) {
     _expiry?.cancel();
     state = OfferState(offer: o);
+    Haptics.offer();
     final left = o.remaining(DateTime.now().toUtc());
     _expiry = Timer(left + const Duration(seconds: 1), () => _gone('expired'));
     ref.read(localNotificationsProvider).offer(o);
