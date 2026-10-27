@@ -157,7 +157,7 @@ Connected while signed in, with `auth: {token: <JWT>}`. Details in [architecture
 
 | Target | Used by |
 |---|---|
-| Tile servers: `TILE_URL` / `TILE_URL_DARK`, or `https://tile.openstreetmap.org/{z}/{x}/{y}.png` and `https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png` | AnbessaMap |
+| Tile servers: `TILE_URL` / `TILE_URL_DARK`, or `https://tile.openstreetmap.org/{z}/{x}/{y}.png` (also used, darkened, for dark mode) | AnbessaMap |
 | FCM | PushService |
 | Payment provider pages (`checkoutUrl`) | PayScreen, TopUpScreen (in-app browser view) |
 | `google.navigation:`, `comgooglemaps://`, `waze://`, `geo:`, `maps://`, Google Maps web | DriverTripScreen directions |

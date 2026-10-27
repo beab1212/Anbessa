@@ -53,7 +53,7 @@ flowchart LR
   RT[realtime-gateway :3000<br/>Socket.io v4]
   HUB -- "WS_URL, never through Kong<br/>trip:* payment:* balance:* driver:location<br/>location:update trip:subscribe" --> RT
 
-  TILES[(raster tiles<br/>TILE_URL / TILE_URL_DARK<br/>or OSM / CARTO in dev)]
+  TILES[(raster tiles<br/>TILE_URL / TILE_URL_DARK<br/>or OSM in dev, darkened for dark mode)]
   MAP --> TILES
 
   FCM[(Firebase Cloud Messaging)]

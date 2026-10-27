@@ -33,7 +33,7 @@ Checks, from the root: `dart run melos run analyze` and `dart run melos run test
 | `API_BASE_URL`, `HOST_BASE` | Kong's URL, or the host for the per-service ports |
 | `WS_URL` | realtime-gateway (Socket.io) |
 | `TILE_URL`, `TILE_ATTRIBUTION` | raster tiles `{z}/{x}/{y}`; empty = OpenStreetMap's (development only) |
-| `TILE_URL_DARK`, `TILE_ATTRIBUTION_DARK` | the dark-theme tiles; empty = CARTO's dark tiles (development only) |
+| `TILE_URL_DARK`, `TILE_ATTRIBUTION_DARK` | the dark-theme tiles; empty = the light tiles through a dark filter (CARTO's public dark tiles now need an API key) |
 | `DEV_LOGIN` | `on`: the dev sign-in panel (debug builds only; the backend refuses it in production) |
 | `FAKE_LOCATION` | `on`: simulated location (always on for Linux desktop) |
 | `APP_LINK_HOST` | host of the `https://` app links (`app.anbessa.et`) |

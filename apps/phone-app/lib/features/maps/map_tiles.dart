@@ -1,24 +1,28 @@
 // Which raster tiles to show: the configured light or dark style, following the theme.
-// Development falls back to public OSM (light) and CARTO (dark) tiles; production sets TILE_URL
-// and TILE_URL_DARK to the self-hosted tile server.
+// Light: TILE_URL, or public OSM tiles in development. Dark: TILE_URL_DARK when set; otherwise the
+// light tiles drawn through a dark filter (no second provider, no API key; CARTO's public dark
+// tiles now answer "API key required").
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/config/env.dart';
 import '../profile/appearance_controller.dart';
 
 const _osmTiles = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-const _cartoDark = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
 
-typedef TileStyle = ({String url, List<String> subdomains, String attribution, bool retina});
+/// `darken`: draw the tiles through flutter_map's dark-mode filter.
+typedef TileStyle = ({String url, List<String> subdomains, String attribution, bool retina, bool darken});
 
 final tileStyleProvider = Provider<TileStyle>((ref) {
   final dark = ref.watch(isDarkProvider);
-  if (dark) {
-    return Env.tileUrlDark.isEmpty
-        ? (url: _cartoDark, subdomains: const ['a', 'b', 'c', 'd'], attribution: Env.tileAttributionDark, retina: true)
-        : (url: Env.tileUrlDark, subdomains: const [], attribution: Env.tileAttributionDark, retina: Env.tileUrlDark.contains('{r}'));
-  }
-  return Env.tileUrl.isEmpty
-      ? (url: _osmTiles, subdomains: const [], attribution: Env.tileAttribution, retina: false)
-      : (url: Env.tileUrl, subdomains: const [], attribution: Env.tileAttribution, retina: Env.tileUrl.contains('{r}'));
+  final lightUrl = Env.tileUrl.isEmpty ? _osmTiles : Env.tileUrl;
+  final light = (url: lightUrl, subdomains: const <String>[], attribution: Env.tileAttribution, retina: lightUrl.contains('{r}'), darken: false);
+  if (!dark) return light;
+  if (Env.tileUrlDark.isEmpty) return (url: light.url, subdomains: light.subdomains, attribution: light.attribution, retina: light.retina, darken: true);
+  return (
+    url: Env.tileUrlDark,
+    subdomains: const <String>[],
+    attribution: Env.tileAttributionDark.isEmpty ? Env.tileAttribution : Env.tileAttributionDark,
+    retina: Env.tileUrlDark.contains('{r}'),
+    darken: false,
+  );
 });

@@ -478,7 +478,7 @@ Behaviour:
 - A drag, pinch, double tap or scroll-wheel event while following breaks the follow and calls `onUserGesture` once. The recenter button (my_location while following, center_focus_strong when fitting) restores it.
 - A compass button appears when the map is rotated more than 0.5° outside `driverBearing`; it animates back to north.
 - Every fit is animated (`AnbessaMotion.camera`, 500 ms) unless reduced motion is on. `fitWithInsets` (`fit.dart`) adds 48 px above, 32 px below and the side padding; a single point is shown at zoom 15.
-- Tiles come from `tileStyleProvider` (`map_tiles.dart`), which follows `isDarkProvider`: `TILE_URL` / `TILE_URL_DARK`, or OpenStreetMap (light) and CARTO `dark_all` (dark) when empty. Retina tiles when the URL contains `{r}` (always for the CARTO fallback) and the pixel ratio is above 1.5. The attribution is drawn by the app, one line, unscaled, 9 px.
+- Tiles come from `tileStyleProvider` (`map_tiles.dart`), which follows `isDarkProvider`: `TILE_URL` (or OpenStreetMap when empty) for light; `TILE_URL_DARK` for dark, or, when it's empty, the light tiles drawn through flutter_map's `darkModeTilesContainerBuilder` (one colour filter over all tiles). CARTO's public dark tiles were dropped: they now answer "API key required". Retina tiles when the URL contains `{r}` and the pixel ratio is above 1.5. The attribution is drawn by the app, one line, unscaled, 9 px.
 - A tile load error sets `mapTilesDownProvider` to true; nothing reads that provider.
 - Markers counter-rotate against the map rotation so headings stay true. The car is amber on a trip, green off a trip, faint when stale.
 

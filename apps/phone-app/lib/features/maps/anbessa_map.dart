@@ -112,6 +112,20 @@ class AnbessaMap extends ConsumerStatefulWidget {
 }
 
 class AnbessaMapState extends ConsumerState<AnbessaMap> with TickerProviderStateMixin {
+  /// One tile layer; dark mode without its own tiles puts one colour filter over all of them.
+  Widget _tileLayer(BuildContext context, TileStyle tiles) {
+    final layer = TileLayer(
+      key: ValueKey('${tiles.url}|${tiles.darken}'),
+      urlTemplate: tiles.url,
+      subdomains: tiles.subdomains,
+      retinaMode: tiles.retina && MediaQuery.devicePixelRatioOf(context) > 1.5,
+      userAgentPackageName: 'com.anbessa.phone_app',
+      maxNativeZoom: 19,
+      errorTileCallback: (_, _, _) => ref.read(mapTilesDownProvider.notifier).set(true),
+    );
+    return tiles.darken ? darkModeTilesContainerBuilder(context, layer) : layer;
+  }
+
   late final AnimatedMapController _anim = widget.controller ?? AnimatedMapController(vsync: this, mapController: widget.mapController, duration: AnbessaMotion.camera, curve: AnbessaMotion.emphasized);
   MapController get _ctrl => _anim.mapController;
   List<LatLng> _lastFit = const [];
@@ -247,15 +261,7 @@ class AnbessaMapState extends ConsumerState<AnbessaMap> with TickerProviderState
             backgroundColor: c.canvas,
           ),
           children: [
-            TileLayer(
-              key: ValueKey(tiles.url),
-              urlTemplate: tiles.url,
-              subdomains: tiles.subdomains,
-              retinaMode: tiles.retina && MediaQuery.devicePixelRatioOf(context) > 1.5,
-              userAgentPackageName: 'com.anbessa.phone_app',
-              maxNativeZoom: 19,
-              errorTileCallback: (_, _, _) => ref.read(mapTilesDownProvider.notifier).set(true),
-            ),
+            _tileLayer(context, tiles),
             if (me != null) meAccuracyLayer(c, me),
             if (routes.isNotEmpty) PolylineLayer(polylines: routePolylines(c, routes)),
             MarkerLayer(
