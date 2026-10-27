@@ -61,3 +61,7 @@ Payloads are validated against the contracts in `libs/shared-types/src/events.ts
 | `pnpm lint` / `pnpm typecheck` / `pnpm build` | |
 
 See `.env.example` for every variable.
+
+## Documentation
+
+Reference documentation (architecture, API, events, data model, integrations, configuration, operations): [docs/README.md](docs/README.md).

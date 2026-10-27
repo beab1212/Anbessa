@@ -80,3 +80,9 @@ Never commit secrets. The pattern used here:
 - Staging/production: Kubernetes Secrets, populated from a secrets manager
   (AWS Secrets Manager / GCP Secret Manager depending on cloud)
 - GitHub Actions: `secrets.*` context in workflow files
+
+## Documentation
+
+Detailed reference for everything in this folder (compose files, Makefile targets, Kong routes,
+Kubernetes, Terraform, mapping stack, CI/CD, data stores, production checklist):
+[docs/README.md](docs/README.md).

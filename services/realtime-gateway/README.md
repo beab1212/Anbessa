@@ -106,3 +106,7 @@ Sockets authenticate once, at the handshake (`auth.token` = the app's access JWT
 
 See `.env.example` — every variable is documented there.
 Never commit a `.env` file with real secrets.
+
+## Documentation
+
+Reference documentation (architecture, API, events, data model, integrations, configuration, operations): [docs/README.md](docs/README.md).

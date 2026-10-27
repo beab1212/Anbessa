@@ -126,3 +126,9 @@ The image is `node:24-alpine`. The build stage uses pnpm (`pnpm deploy --prod`),
 
 See `.env.example`: every variable is documented there. Production rules (https base URL, Redis, Kafka, service token, real OTP delivery, rate limits on) are enforced at start-up. See [docs/production/README.md](../../docs/production/README.md#5-configuration-reference).
 Never commit a `.env` file with real secrets.
+
+---
+
+## Documentation
+
+Reference docs for this service (architecture, every route, events, data model, integrations, configuration, operations): [docs/README.md](docs/README.md).

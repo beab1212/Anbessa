@@ -88,3 +88,7 @@ Events out: `trip.settled`, `payment.action_required`, `payment.captured`, `paym
 pnpm test                    # unit: money rules, every provider's callback format and signature
 pnpm test:integration        # real Postgres (payment_service_test), the simulator, Kafka replaced by direct calls
 ```
+
+## Documentation
+
+Reference documentation (architecture, API, events, data model, integrations, configuration, operations) is in [docs/README.md](docs/README.md).

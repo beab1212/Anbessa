@@ -64,3 +64,7 @@ src/
 | `pnpm lint` / `pnpm typecheck` / `pnpm build` | |
 
 See `.env.example` for every variable.
+
+## Documentation
+
+Reference documentation for engineers (architecture, API, events, data model, integrations, configuration, operations): [docs/README.md](docs/README.md).

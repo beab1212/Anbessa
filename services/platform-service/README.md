@@ -63,3 +63,7 @@ Everything is under `/api/platform` and needs a staff (`ride-admin`) token, exce
 | `pnpm dev` | Watch mode |
 | `pnpm test:integration` | Throwaway `platform_service_test` database: settings applied vs approved, validation, permissions, city sync, vehicle types, announcements, system page |
 | `pnpm lint` / `pnpm typecheck` | |
+
+## Documentation
+
+Reference documentation for engineers (architecture, API, events, data model, integrations, configuration, operations): [docs/README.md](docs/README.md).

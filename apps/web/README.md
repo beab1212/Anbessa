@@ -110,3 +110,7 @@ src/
 | `pnpm build` | Type-check, then build to `dist/` |
 | `pnpm test` | Logic tests: phone parsing, money, placeholder emails, role → navigation, the API client (token, retry, errors) |
 | `pnpm lint` / `pnpm typecheck` | |
+
+## Documentation
+
+Reference docs for engineers working on this app are in [docs/](docs/README.md): architecture and routes, every page and its API calls, the endpoint list, integrations, configuration and operations.

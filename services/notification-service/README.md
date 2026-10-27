@@ -139,3 +139,7 @@ docker build -f services/notification-service/Dockerfile -t ride-app/notificatio
 
 See `.env.example`: every variable is documented there. Production refuses to start with console SMS or push, without Kafka, or with Telegram enabled but no token or no https callback URL. See [docs/production/README.md](../../docs/production/README.md#5-configuration-reference).
 Never commit a `.env` file with real secrets.
+
+## Documentation
+
+Detailed reference (architecture, API, events, data model, integrations, configuration, operations): [docs/README.md](docs/README.md).

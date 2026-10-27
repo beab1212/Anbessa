@@ -87,3 +87,7 @@ Errors are `{ error, message }`: `409 invalid_state` (another change won the rac
 | `pnpm lint` / `pnpm typecheck` / `pnpm build` | |
 
 See `.env.example` for every variable.
+
+## Documentation
+
+Reference documentation for working on or integrating with this service, written from the code: [docs/README.md](docs/README.md) (architecture, API, events, data model, integrations, configuration, operations).

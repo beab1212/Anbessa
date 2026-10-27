@@ -23,6 +23,7 @@ Four teams. Four entry points. Zero friction.
 
 | Guide | For |
 |-------|-----|
+| [Documentation index](docs/README.md) | Start here: links to the system-wide docs and to every service's, app's, library's and infra's reference docs |
 | [Architecture](docs/architecture/overview.md) | System diagrams, services, flows, data, events, security, deployment, known gaps |
 | [Design docs](docs/design/README.md) | Index of design documents, e.g. [roles & vehicle ownership](docs/design/Role.md): 18 roles, permissions, owner-drivers vs fleet companies, approvals, audit |
 | [Development](docs/development/README.md) | Setup, JWT keys, ports, daily loop per team, troubleshooting |

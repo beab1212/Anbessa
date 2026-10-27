@@ -37,3 +37,7 @@ pnpm dev                                          # http://localhost:3010
 ```
 
 Without `KAFKA_BROKERS` nothing arrives. `pnpm test:integration` runs against a throwaway `audit_service_test` database. It covers idempotent inserts, skipping invalid events, refusing updates and deletes, filters, paging and CSV export.
+
+## Documentation
+
+Detailed reference (architecture, API, events, data model, integrations, configuration, operations): [docs/README.md](docs/README.md).

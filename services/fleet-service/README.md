@@ -69,3 +69,7 @@ Everything is under `/api/fleet` (one Kong route). App (`aud=ride-app`) and staf
 | `pnpm test:integration` | Against a throwaway `fleet_service_test` database (`make infra-up` first): application, upload, review, approval, fleet cars, sessions, expiry, suspension |
 | `pnpm seed:dev` | Development data for the dev sign-in accounts: an applicant and their car waiting for review, an approved owner-driver, the dev fleet's cars and driver, company papers. Runs once (skips what exists); `NODE_ENV=development` only |
 | `pnpm lint` / `pnpm typecheck` | |
+
+## Documentation
+
+Detailed reference (architecture, every route, events, data model, integrations, configuration, operations): [docs/README.md](docs/README.md).

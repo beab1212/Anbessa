@@ -32,3 +32,7 @@ Not built yet (workflow 15):
 ```bash
 pnpm test   # pricing and the HTTP API, with an in-memory quote store
 ```
+
+## Documentation
+
+Reference documentation for engineers (architecture, API, events, data model, integrations, configuration, operations): [docs/README.md](docs/README.md).

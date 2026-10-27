@@ -110,3 +110,7 @@ The Dart models mirror `libs/shared-types` and the services' views by hand. A ch
 - **Android**: location, foreground-service, notification and camera permissions; debug-only cleartext HTTP for the dev stack; `anbessa://` and `https://app.anbessa.et` links (the latter needs `assetlinks.json` served there); core library desugaring for local notifications.
 - **iOS**: location (when in use and always), camera and photo descriptions, background modes `location` and `remote-notification`, the `anbessa` URL scheme. Not built yet (needs a Mac).
 - **Linux desktop**: development only, with simulated location.
+
+## Documentation
+
+Reference documentation for engineers working on the app (architecture, every route and screen, the endpoints and socket events used, settings, configuration, tests, platforms) is in [docs/README.md](docs/README.md). The shared Dart package is documented in [packages/core/docs](../../packages/core/docs/README.md).
