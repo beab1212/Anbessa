@@ -8,6 +8,7 @@
 | web, partner page | `POST /api/pricing/estimates` (`vehicleTypes: ["economy"]`) | partner (`ride-app`) token | — | `apps/web/src/pages/partner/Partner.tsx` |
 | web, call-center phone booking | `POST /api/pricing/estimates` | staff (`ride-admin`) token | — | `apps/web/src/pages/staff/PhoneBooking.tsx` |
 | trip-service | `GET /internal/quotes/:id` | service token | 2.5 s; 404 → no quote; other errors thrown | `services/trip-service/src/quotes.ts` `pricingQuotes` (used when `PRICING=service`, the default) |
+| trip-service | `POST /internal/quotes` (re-price a scheduled ride at dispatch) | service token | 5 s; 404/405 or any error → the scheduler keeps the booked quote; the fare is the lower of the two | `services/trip-service/src/quotes.ts` `reprice`, called from `src/trips/scheduled.ts` `dispatchOne` |
 
 ## Whom pricing-service calls
 
@@ -104,3 +105,21 @@ sequenceDiagram
 ## A fare change
 
 Fares are live settings. A super admin proposes `PUT /api/platform/settings/fares.economy.perKmMinor` (sensitive → `202`), a second super admin approves, platform-service publishes `settings:changed`, and pricing-service reloads the snapshot. The next estimate uses the new card; quotes already in Redis keep their fare. See [platform-service integrations](../../platform-service/docs/integrations.md#a-setting-change-reaching-trip-service).
+
+## Workflow 15 (added)
+
+| Direction | Peer | What | Source |
+|---|---|---|---|
+| in | web staff pages `/staff/ops/zones`, `/staff/ops/pricing`, `/staff/marketing/promos` | zones, fare changes, promos (`ride-admin`) | `apps/web/src/lib/marketing.ts` |
+| in | phone app (not wired yet) | `promoCode` on `POST /api/pricing/estimates`, `POST /api/pricing/promos/check` | — |
+| in | trip-service | `GET /internal/quotes/:id` now books the promo discount; quotes carry `discountMinor`, `payableMinor`, `promo`, `fareRuleId`, `zoneIds` | `src/quotes.ts` `forBooking` |
+| in | Kafka `trip.completed`, `trip.cancelled` | promo redemption / release | `src/events/consumer.ts` |
+| out | Kafka | `pricing.rule_scheduled`, `pricing.rule_activated`, `pricing.zone_changed`, `promo.activated`, `promo.redeemed`, `promo.exhausted`, `audit.recorded` | `src/outbox/` |
+| out | Postgres | `pricing_service` | `src/db.ts` |
+| out | Redis | `PUBLISH pricing:catalog_changed`, subscribed by every replica | `src/container.ts`, `src/server.ts` |
+
+How a promo reaches the rider's bill (built):
+
+- **trip-service** copies the booked quote's `discountMinor` and `promo.code` onto the trip at request time (`trip.promo_discount_minor`, clamped to 0 … fare) and sends `quoteId` + `promoDiscountMinor` (the discount actually applied, ≤ the final fare) on `trip.completed`, and `quoteId` on `trip.cancelled`, so redemption and release find the reservation by quote id.
+- **payment-service** settles with the rider paying `fare − discount` (nothing charged when it covers the whole fare), the driver's earning computed on the full fare, and the discount debited to `PROMO_EXPENSE:{cityId}` in the same journal entry (Payment.md §6.4), from `trip.completed`'s `promoDiscountMinor`. It does not consume `promo.redeemed`.
+- Not covered: scheduled rides (dispatch re-prices without a promo, and a BOOKED reservation expires after 24 h); partner-funded promos are expensed like platform ones.

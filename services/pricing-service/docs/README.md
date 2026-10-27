@@ -38,7 +38,7 @@ flowchart LR
   PR -->|"GET /internal/settings/snapshot"| PS[platform-service]
   PR -->|"GET /internal/authz/snapshot"| AS[auth-service]
   PR <-->|"quote:*, deny:*, pv:*,<br/>settings:changed, authz:changed"| R[(Redis)]
-  TS[trip-service] -->|"GET /internal/quotes/:id"| PR
+  TS[trip-service] -->|"GET /internal/quotes/:id, POST /internal/quotes"| PR
 ```
 
 ## Index

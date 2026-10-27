@@ -1,0 +1,228 @@
+// Pricing database (workflow 15): zones, versioned fare rules with maker–checker change requests,
+// promotions with per-quote reservations and redemptions. Quotes themselves stay in Redis.
+// Snake_case via @map; CHECKs and partial indexes are in the migration.
+
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+enum ZoneKind {
+  SERVICE_AREA
+  NO_PICKUP
+  AIRPORT
+  SURGE
+}
+
+enum FareChangeStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+  EXPIRED
+}
+
+enum PromoType {
+  PERCENT_OFF
+  AMOUNT_OFF
+}
+
+enum PromoStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  EXHAUSTED
+  EXPIRED
+  ARCHIVED
+}
+
+enum ReservationStatus {
+  HELD
+  BOOKED
+  REDEEMED
+  RELEASED
+  EXPIRED
+}
+
+/// A polygon in a city: where the service runs, where pickups are forbidden, an airport fee,
+/// or a surge multiplier. `polygon` is one closed ring of [lng, lat] pairs (GeoJSON order).
+model Zone {
+  id              String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  cityId          String    @map("city_id")
+  name            String
+  kind            ZoneKind
+  polygon         Json
+  /// AIRPORT: added once to a fare whose pickup or drop-off is inside
+  feeMinor        Int       @default(0) @map("fee_minor")
+  /// SURGE: multiplies the fare of pickups inside (1.0–3.0)
+  surgeMultiplier Float     @default(1) @map("surge_multiplier")
+  version         Int       @default(1)
+  createdBy       String    @map("created_by") @db.Uuid
+  updatedBy       String    @map("updated_by") @db.Uuid
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  archivedAt      DateTime? @map("archived_at") @db.Timestamptz
+
+  @@index([cityId])
+  @@map("zone")
+}
+
+/// A proposed fare card for a city and vehicle type, decided by a second person (Role.md §11).
+model FareChangeRequest {
+  id                 String           @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  cityId             String           @map("city_id")
+  vehicleType        String           @map("vehicle_type")
+  baseMinor          Int              @map("base_minor")
+  perKmMinor         Int              @map("per_km_minor")
+  perMinMinor        Int              @map("per_min_minor")
+  minFareMinor       Int              @map("min_fare_minor")
+  waitingPerMinMinor Int              @map("waiting_per_min_minor")
+  /// null on an emergency change: it takes effect when approved
+  validFrom          DateTime?        @map("valid_from") @db.Timestamptz
+  emergency          Boolean          @default(false)
+  reason             String
+  /// the card in force when proposed and sample fares before/after
+  impact             Json
+  status             FareChangeStatus @default(PENDING)
+  makerId            String           @map("maker_id") @db.Uuid
+  checkerId          String?          @map("checker_id") @db.Uuid
+  decisionReason     String?          @map("decision_reason")
+  createdAt          DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  decidedAt          DateTime?        @map("decided_at") @db.Timestamptz
+  expiresAt          DateTime         @map("expires_at") @db.Timestamptz
+  rule               FareRule?
+
+  @@index([cityId, createdAt(sort: Desc)])
+  @@index([status, expiresAt])
+  @@map("fare_change_request")
+}
+
+/// An approved fare card version. The one in force is the latest valid_from <= now; quotes
+/// record its id. Never updated or deleted: a correction is a newer version.
+model FareRule {
+  id                 String            @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  cityId             String            @map("city_id")
+  vehicleType        String            @map("vehicle_type")
+  baseMinor          Int               @map("base_minor")
+  perKmMinor         Int               @map("per_km_minor")
+  perMinMinor        Int               @map("per_min_minor")
+  minFareMinor       Int               @map("min_fare_minor")
+  waitingPerMinMinor Int               @map("waiting_per_min_minor")
+  validFrom          DateTime          @map("valid_from") @db.Timestamptz
+  changeRequestId    String            @unique @map("change_request_id") @db.Uuid
+  changeRequest      FareChangeRequest @relation(fields: [changeRequestId], references: [id])
+  proposedBy         String            @map("proposed_by") @db.Uuid
+  approvedBy         String            @map("approved_by") @db.Uuid
+  createdAt          DateTime          @default(now()) @map("created_at") @db.Timestamptz
+  /// set by the sweep when valid_from passed and pricing.rule_activated was written
+  activatedAt        DateTime?         @map("activated_at") @db.Timestamptz
+
+  @@unique([cityId, vehicleType, validFrom], map: "ux_fare_rule_version")
+  @@map("fare_rule")
+}
+
+/// A promotion code. Counters (spent, redemptions) move only with redemptions.
+model Promo {
+  id               String        @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  code             String        @unique
+  name             String
+  description      String?
+  type             PromoType
+  percentOff       Int?          @map("percent_off")
+  amountOffMinor   Int?          @map("amount_off_minor")
+  /// cap per trip (PERCENT_OFF)
+  maxDiscountMinor Int?          @map("max_discount_minor")
+  /// empty = every city (needs a global promo:manage)
+  cityIds          String[]      @map("city_ids")
+  /// empty = every vehicle type
+  vehicleTypes     String[]      @map("vehicle_types")
+  startsAt         DateTime      @map("starts_at") @db.Timestamptz
+  endsAt           DateTime      @map("ends_at") @db.Timestamptz
+  perUserLimit     Int           @default(1) @map("per_user_limit")
+  maxRedemptions   Int?          @map("max_redemptions")
+  budgetMinor      Int           @map("budget_minor")
+  spentMinor       Int           @default(0) @map("spent_minor")
+  redemptionCount  Int           @default(0) @map("redemption_count")
+  fundedBy         String        @default("PLATFORM") @map("funded_by")
+  status           PromoStatus   @default(DRAFT)
+  createdBy        String        @map("created_by") @db.Uuid
+  activatedBy      String?       @map("activated_by") @db.Uuid
+  activatedAt      DateTime?     @map("activated_at") @db.Timestamptz
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  reservations     PromoReservation[]
+  redemptions      PromoRedemption[]
+
+  @@index([status])
+  @@map("promo")
+}
+
+/// The discount promised on one quote. HELD at estimate time, BOOKED when trip-service reads the
+/// quote to book, REDEEMED at trip completion, RELEASED on cancellation, EXPIRED by the sweep.
+model PromoReservation {
+  id            String            @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  promoId       String            @map("promo_id") @db.Uuid
+  promo         Promo             @relation(fields: [promoId], references: [id])
+  quoteId       String            @unique @map("quote_id")
+  userId        String            @map("user_id") @db.Uuid
+  cityId        String            @map("city_id")
+  vehicleType   String            @map("vehicle_type")
+  fareMinor     Int               @map("fare_minor")
+  discountMinor Int               @map("discount_minor")
+  status        ReservationStatus @default(HELD)
+  tripId        String?           @map("trip_id") @db.Uuid
+  createdAt     DateTime          @default(now()) @map("created_at") @db.Timestamptz
+  bookedAt      DateTime?         @map("booked_at") @db.Timestamptz
+  expiresAt     DateTime          @map("expires_at") @db.Timestamptz
+
+  @@index([promoId, status])
+  @@index([userId, status, createdAt(sort: Desc)])
+  @@map("promo_reservation")
+}
+
+/// One redeemed discount (one per trip).
+model PromoRedemption {
+  id            String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  promoId       String   @map("promo_id") @db.Uuid
+  promo         Promo    @relation(fields: [promoId], references: [id])
+  reservationId String?  @unique @map("reservation_id") @db.Uuid
+  tripId        String   @unique @map("trip_id") @db.Uuid
+  userId        String   @map("user_id") @db.Uuid
+  cityId        String   @map("city_id")
+  fareMinor     Int      @map("fare_minor")
+  discountMinor Int      @map("discount_minor")
+  redeemedAt    DateTime @default(now()) @map("redeemed_at") @db.Timestamptz
+
+  @@index([promoId, redeemedAt(sort: Desc)])
+  @@map("promo_redemption")
+}
+
+/// HTTP Idempotency-Key results (POST creates), purged after 24 h.
+model IdempotencyKey {
+  userId      String   @map("user_id") @db.Uuid
+  key         String
+  requestHash Bytes    @map("request_hash")
+  status      String   @default("IN_PROGRESS")
+  statusCode  Int?     @map("status_code")
+  response    Json?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@id([userId, key])
+  @@map("idempotency_key")
+}
+
+/// Transactional outbox (Database.md §8). Published to Kafka by the relay.
+model Outbox {
+  id          String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  topic       String
+  key         String
+  payload     Json
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  publishedAt DateTime? @map("published_at") @db.Timestamptz
+
+  @@map("outbox")
+}

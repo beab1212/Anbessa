@@ -10,9 +10,9 @@ services:
     environment:
       POSTGRES_USER: ride
       POSTGRES_PASSWORD: ride
+      POSTGRES_DB: pricing_service
     ports: ["5432:5432"]
     volumes: ["./.dev-data/postgres:/var/lib/postgresql"]
-    profiles: [db]   # skip postgres if service doesn't use it
 
   redis:
     image: redis:8-alpine

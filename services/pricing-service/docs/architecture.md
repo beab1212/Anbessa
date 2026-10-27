@@ -145,7 +145,7 @@ Not found in code. There is no surge multiplier, no zone, no promo, and no rule 
 
 ## Idempotency
 
-None. Each estimate creates new quote ids. Repeating `GET /internal/quotes/:id` is a plain read.
+None. Each estimate (and each `POST /internal/quotes`) creates new quote ids. Repeating `GET /internal/quotes/:id` is a plain read.
 
 ## Security model
 
@@ -153,6 +153,82 @@ None. Each estimate creates new quote ids. Repeating `GET /internal/quotes/:id` 
 |---|---|
 | `POST /api/pricing/estimates` | Access token, audience `ride-app` or `ride-admin`; issuer `AUTH_ISSUER`; JWKS `AUTH_JWKS_URL`; refused if `deny:<userId>` exists or the token's permission version is older than `pv:<userId>` |
 | `GET /api/pricing/fares` | Public |
-| `GET /internal/quotes/:id` | `Bearer INTERNAL_SERVICE_TOKEN`, `timingSafeEqual`; route has `rateLimit: false` |
+| `GET /internal/quotes/:id`, `POST /internal/quotes` | `Bearer INTERNAL_SERVICE_TOKEN`, `timingSafeEqual`; routes have `rateLimit: false` |
 
 No permission (`authorize`) is checked on any route. The permission matrix is synced (`createAuthzSync`) but not used by a route. Kong does not route `/internal/*`.
+
+## Workflow 15: rules, zones and promotions (added)
+
+This supersedes "Surge, zones, promotions, rules administration: not found in code" above.
+
+### New layout
+
+```
+src/
+├── catalog.ts          in-memory catalog of approved fare rules and live zones; zoneEffect()
+├── db.ts               Prisma client (Postgres)
+├── events/consumer.ts  Kafka in: trip.completed (redeem), trip.cancelled (release)
+├── http/admin-routes.ts zones, fare changes, promos, rider promo check
+├── lib/idempotency.ts  Idempotency-Key store (as in support-service)
+├── lib/staff.ts        city scopes for lists, 404-not-403 for single resources
+├── outbox/             writeOutbox() + relay (FOR UPDATE SKIP LOCKED → Kafka)
+├── promos/             discount.ts (pure), service.ts (CRUD, activation, offer/hold/book/redeem/release, sweep)
+├── rules/service.ts    fare change requests (maker–checker), impact preview, sweep (expire, activate)
+└── zones/              geometry.ts (ring validation, point in polygon), service.ts (CRUD)
+```
+
+### Fare card resolution
+
+For a city and vehicle type at time *t*: the approved `fare_rule` with the latest `valid_from ≤ t`; if there is none, the live `fares.<type>.*` settings exactly as before. So existing behaviour is unchanged until the first approval for that city and type; after it, Settings → Fares no longer affects that city and type (the "Fares" page shows `source: SETTINGS | RULE`). Fare changes are not routed through platform-service's settings change requests: the design (workflow 15) wants versioned rules with a future `valid_from`, an impact preview and `pricing:approve` per city, which platform's sensitive-settings flow (`settings:approve`, global, immediate) can't express.
+
+The catalog holds **every** rule (past, current, scheduled), so a scheduled rule takes effect at `valid_from` without a reload. It reloads when older than 60 s, right after a change on this replica, and when another replica publishes Redis `pricing:catalog_changed`. If Postgres fails on reload, the last catalog keeps serving (warning log, retry in 10 s); if it was never loaded, estimates answer `503 dependency_unavailable`.
+
+### Fare change lifecycle
+
+`PENDING → APPROVED (phase SCHEDULED until valid_from) | REJECTED | CANCELLED | EXPIRED`. Rules:
+
+- one `PENDING` change per city and vehicle type (partial unique index);
+- `validFrom` ≥ now + 24 h when proposed **and** when approved; an `emergency` change takes effect on approval (`validFrom` = approval time unless later);
+- maker ≠ checker for approve and reject; only the maker withdraws;
+- not decided within 7 days → `EXPIRED` (sweep);
+- approval inserts the `fare_rule` (unique `(city_id, vehicle_type, valid_from)`), writes `pricing.rule_scheduled`, and when already due also `pricing.rule_activated`; the 30 s sweep writes `pricing.rule_activated` for rules whose time came.
+
+Impact preview (`impactOf`): the current and the proposed card priced on four typical trips (3 km/10 min, 8 km/20 min, 15 km/35 min, 25 km/50 min). Replaying last week's real trips (design step 2) is not done: pricing-service has no trip history.
+
+### Zones
+
+`zoneEffect(zones, pickup, dropoff)`, applied to every estimate:
+
+| Kind | Effect |
+|---|---|
+| `SERVICE_AREA` | when the city has any, a pickup outside all of them → `400 outside_service_area` |
+| `NO_PICKUP` | pickup inside → `400 pickup_not_allowed` |
+| `AIRPORT` | pickup **or** drop-off inside → `feeMinor` added once (highest if several), after the minimum fare |
+| `SURGE` | pickup inside → metered fare × multiplier (highest if several; 1–3) before rounding |
+
+Fare: `max(min, round((base + km + min) × surge, birr)) + airportFee`. Geometry is checked in plain arithmetic (`zones/geometry.ts`): closed ring of 3–500 distinct points, inside the city box from `libs/shared-location`, no crossing edges, non-zero area; the boundary counts as inside. Zones change at once (no maker–checker) and are versioned (`version`, optimistic concurrency on edit), audited and announced (`pricing.zone_changed`).
+
+### Promotions
+
+- `DRAFT → ACTIVE → PAUSED ⇄ ACTIVE`, `→ EXHAUSTED` (budget or total redemptions reached), `→ EXPIRED` (sweep at `endsAt`), `→ ARCHIVED`.
+- Activation of a budget above `PROMO_APPROVAL_THRESHOLD_MINOR` needs `incentive:approve` (finance manager) and a person other than the creator.
+- **At estimate** (`offer`): the code must be ACTIVE, inside its window, for the pickup city; the rider's BOOKED + REDEEMED uses < `perUserLimit`; `redemptionCount` + BOOKED < `maxRedemptions`; budget left = `budget − spent − BOOKED discounts` > 0. Each eligible quote gets `discountFor()` (percent rounded down to whole birr, capped by `maxDiscountMinor`, never above the fare), capped by the budget left, and a `promo_reservation` (HELD, expires with the quote). One promo per quote, so per trip.
+- **At booking** (`GET /internal/quotes/:id`): HELD → BOOKED under a row lock on the promo (re-checks the per-user limit), expiry +24 h.
+- **At `trip.completed`**: the reservation is found by `quoteId` when the event has it, else the rider's latest BOOKED reservation in that city and vehicle type booked before `completedAt`. Discount = `promoDiscountMinor` from the event if present, else the reserved discount, at most the final fare. Inserts `promo_redemption` (unique per trip: replays are no-ops), adds to `spent`/`redemptionCount`, writes `promo.redeemed`, and `promo.exhausted` + status EXHAUSTED when the budget or the total is reached. A booked discount is honoured even if it overshoots the budget slightly.
+- **At `trip.cancelled`**: BOOKED → RELEASED (the rider can use the code again).
+
+Not built: FIRST_RIDE / REFERRAL promo types and new-rider eligibility (pricing has no trip history), payment-method eligibility, device/phone fingerprint abuse limits, auto-applied promos, the 80 % budget alert, driver incentives (quests).
+
+### Background work
+
+| Job | Interval | What |
+|---|---|---|
+| Sweep | 30 s | expire undecided fare changes; activate due rules; expire ended promos and HELD/BOOKED reservations past their time |
+| Outbox relay | 500 ms | when `KAFKA_BROKERS` is set |
+| Kafka consumer | continuous | `trip.completed`, `trip.cancelled` (group `pricing-service`) |
+| Idempotency purge | 1 h | keys older than 24 h |
+| Catalog subscription | — | Redis `pricing:catalog_changed` |
+
+### Security (new routes)
+
+Every staff route verifies the token (deny list, permission version) and checks the live matrix per city with `can()`. Lists filter to the caller's cities (`citiesWith`); a `cityId` outside them is `403`; a single resource outside them is `404`.

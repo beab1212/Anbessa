@@ -26,9 +26,9 @@ The tests create a real `ioredis` client pointed at `redis://localhost:1` with `
 
 - `pnpm build` → `dist/`; `pnpm start`.
 - `docker build -f services/pricing-service/Dockerfile -t ride-app/pricing-service .` from the repo root (node:24-alpine, non-root `app`, port 3004, `HEALTHCHECK` on `/health`).
-- `make stack-up`: `infra/docker/docker-compose.yml` service `pricing-service` (depends on redis).
-- No Kubernetes manifest for this service was found (`infra/k8s/base` is a template).
-- Stateless apart from Redis: replicas can be added freely.
+- `make stack-up`: `infra/docker/docker-compose.yml` service `pricing-service` (depends on postgres, redis, redpanda; in-network `DATABASE_URL` → `pricing_service`, `KAFKA_BROKERS=redpanda:29092`, `REDIS_URL`, `LOCATION_INTERNAL_URL`, `MAPPING_INTERNAL_URL`, `AUTH_*`, `PLATFORM_INTERNAL_URL`; run `make db-migrate` first).
+- Kubernetes: `infra/k8s/base/pricing-service.{deployment,service,hpa}.yaml` (port 3004, 2–6 replicas, `envFrom` ConfigMap `pricing-service-config` + Secret `pricing-service-secrets`; `DATABASE_URL` and `INTERNAL_SERVICE_TOKEN` go in the Secret, `KAFKA_BROKERS` — required in production — and the `*_INTERNAL_URL`s in the ConfigMap). Run `prisma migrate deploy` before a rollout. See `infra/docs/kubernetes.md`.
+- State is in Postgres (rules, zones, promos, outbox) and Redis (quotes): replicas can be added freely.
 
 ## Health endpoints
 
@@ -63,3 +63,23 @@ pino (`createLogger("pricing-service", …)`), `LOG_LEVEL` override.
 | trip-service says the quote is gone | quote expired (`quote.ttlSeconds`) or Redis was flushed | `TTL quote:<id>` |
 | `/health/ready` 503 | Redis down | |
 | Every authenticated call → `503 auth_unavailable` (`retry-after: 5`) | Redis down: the deny-list / `pv` lookup fails, so the token is refused as temporarily unchecked | warn `token check unavailable (Redis)`; `/health/ready` |
+
+## Workflow 15 (added)
+
+Run locally now needs Postgres too: `docker compose -f docker-compose.dev.yml up -d postgres redis` (the `db` profile is gone; database `pricing_service`), `make secrets` (adds `DATABASE_URL`, `KAFKA_BROKERS`, … to an existing `.env`), then `pnpm exec prisma migrate deploy` (or `make db-migrate`, which includes pricing-service).
+
+| Command | What |
+|---|---|
+| `pnpm test` | unit: `tests/unit/pricing.test.ts` (unchanged behaviour with the empty catalog) and `tests/unit/workflow15.test.ts` (geometry, zone effects, surge + airport fee, promo discounts, impact preview) |
+| `pnpm test:integration` | `tests/integration/pricing.test.ts` on a recreated `pricing_service_test` database and its own Redis container `anbessa-test-redis-pricing` on port **6398** (started and stopped by the suite; `TEST_REDIS_URL` / `TEST_DATABASE_URL` override). Zones (validation, scoping, idempotency, versioning, effect on quotes), fare changes (maker–checker, 24 h notice, scheduled activation, quotes keep their price, emergency, reject/withdraw/expire), promos (activation threshold, discounted quotes, booking, redemption and exhaustion via the trip event handler, cancellation release, pause, expiry) |
+
+Failure modes:
+
+| Situation | Effect |
+|---|---|
+| Postgres down at start | estimates `503 dependency_unavailable` until the catalog loads; readiness 503 |
+| Postgres down later | estimates keep using the last catalog (warning `pricing catalog reload failed`); promo codes fail (500) |
+| Kafka down | events wait in `outbox`; trip events wait in Kafka; promo reservations stay BOOKED (expire after 24 h if never redeemed) |
+| Redis `pricing:catalog_changed` lost | other replicas pick the change up within 60 s |
+
+Useful queries: pending fare changes `SELECT * FROM fare_change_request WHERE status='PENDING'`; promo burn `SELECT code, spent_minor, budget_minor, redemption_count FROM promo WHERE status='ACTIVE'`; unpublished events `SELECT count(*) FROM outbox WHERE published_at IS NULL`.

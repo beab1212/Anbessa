@@ -6,6 +6,7 @@ import { staticSettings } from "@ride-app/shared-settings";
 import { buildApp } from "../../src/app.js";
 import { loadConfig } from "../../src/config/index.js";
 import { createContainer } from "../../src/container.js";
+import { emptyCatalog } from "../../src/catalog.js";
 import { price } from "../../src/fares.js";
 import type { Quote, QuoteStore } from "../../src/quotes.js";
 
@@ -33,11 +34,11 @@ async function setup(opts: { etaDown?: boolean } = {}) {
   const kept = new Map<string, Quote>();
   const store: QuoteStore = { put: async (q) => void kept.set(q.id, q), get: async (id) => kept.get(id) ?? null };
   const settings = staticSettings({}, { "addis-ababa": { "fares.economy.perKmMinor": 2000 } });
-  const config = loadConfig({ NODE_ENV: "test", REDIS_URL: "redis://localhost:1", INTERNAL_SERVICE_TOKEN: TOKEN });
+  const config = loadConfig({ NODE_ENV: "test", REDIS_URL: "redis://localhost:1", DATABASE_URL: "postgresql://unused.invalid:5432/none", INTERNAL_SERVICE_TOKEN: TOKEN });
   const { publicKey, privateKey } = await generateKeyPair("ES256");
   const jwk = { ...(await exportJWK(publicKey)), kid: "k", alg: "ES256" };
   const c = createContainer(config, pino({ level: "silent" }), {
-    store, settings,
+    store, settings, catalog: emptyCatalog,
     mapping: { route: async (_points, geometry = false) => ({ distanceMeters: 6000, durationSeconds: 900, approximate: false, ...(geometry ? { geometry: "_p~iF~ps|U_ulLnnqC" } : {}) }) },
     location: {
       etaToPickup: async (q) => {
@@ -100,6 +101,31 @@ describe("estimates and the quote trip-service reads", () => {
     expect((await s.app.inject({ method: "POST", url: "/api/pricing/estimates", payload: { pickup: BOLE, dropoff: PIASSA } })).statusCode).toBe(401);
     const fares = await s.app.inject({ method: "GET", url: "/api/pricing/fares?cityId=addis-ababa" });
     expect(fares.json<{ fares: { vehicleType: string; perKmMinor: number }[] }>().fares[0]).toMatchObject({ vehicleType: "economy", perKmMinor: 2000 });
+    await s.close();
+  });
+
+  it("POST /internal/quotes: trip-service re-prices a scheduled ride for a user (service token only)", async () => {
+    const s = await setup();
+    const rider = crypto.randomUUID();
+    const internal = { authorization: `Bearer ${TOKEN}` };
+    const body = { requestedBy: rider, cityId: "addis-ababa", vehicleType: "economy", vehicleTypes: ["economy"], pickup: BOLE, dropoff: PIASSA, pickupAddress: "Bole" };
+    const r = await s.app.inject({ method: "POST", url: "/internal/quotes", headers: internal, payload: body });
+    expect(r.statusCode, r.body).toBe(200);
+    const [q] = r.json<{ quotes: Quote[] }>().quotes;
+    expect(q).toMatchObject({ requestedBy: rider, cityId: "addis-ababa", vehicleType: "economy", fareMinor: 20_000, discountMinor: 0, payableMinor: 20_000, pickupAddress: "Bole", routePolyline6: "_p~iF~ps|U_ulLnnqC" });
+    // stored like any quote: readable back by id
+    expect((await s.app.inject({ method: "GET", url: `/internal/quotes/${q!.id}`, headers: internal })).json()).toMatchObject({ id: q!.id, fareMinor: 20_000 });
+    // vehicleType alone is enough
+    const single = await s.app.inject({ method: "POST", url: "/internal/quotes", headers: internal, payload: { requestedBy: rider, vehicleType: "comfort", pickup: BOLE, dropoff: PIASSA } });
+    expect(single.json<{ quotes: Quote[] }>().quotes.map((x) => x.vehicleType)).toEqual(["comfort"]);
+
+    expect((await s.app.inject({ method: "POST", url: "/internal/quotes", payload: body })).statusCode).toBe(401);
+    expect((await s.app.inject({ method: "POST", url: "/internal/quotes", headers: { authorization: `Bearer ${await s.token(rider)}` }, payload: body })).statusCode).toBe(401);
+    expect((await s.app.inject({ method: "POST", url: "/internal/quotes", headers: internal, payload: { ...body, cityId: "hawassa" } })).json()).toMatchObject({ error: "city_mismatch" });
+    expect((await s.app.inject({ method: "POST", url: "/internal/quotes", headers: internal, payload: { ...body, vehicleTypes: ["helicopter"] } })).json()).toMatchObject({ error: "vehicle_type_unavailable" });
+    expect((await s.app.inject({ method: "POST", url: "/internal/quotes", headers: internal, payload: { ...body, pickup: { lat: 0, lng: 0 } } })).json()).toMatchObject({ error: "outside_service_area" });
+    const { vehicleType: _v, vehicleTypes: _vs, ...noType } = body;
+    expect((await s.app.inject({ method: "POST", url: "/internal/quotes", headers: internal, payload: noType })).statusCode).toBe(400);
     await s.close();
   });
 });
