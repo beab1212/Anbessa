@@ -1,63 +1,42 @@
-// The rider's trip (workflows 05 D–E, 06, 07): finding a driver → driver assigned (name, photo,
-// car, live position gliding along the road) → arrived (PIN) → on the way → done (payment,
-// rating). One map; the sheet at the bottom changes with the stage.
+// The trip stage in the rider map shell (workflows 05 D–E, 06, 07): finding a driver (a pulse at
+// the pickup and the time spent searching) → driver assigned (their photo, rating, car and plate;
+// the car gliding along its road with "N min" over it) → arrived (the PIN) → riding ("Arrive
+// HH:MM"; the road behind turns grey) → done (the total, confetti, Pay). Share and SOS float over
+// the map. The map is the shell's (map_intent.dart: tripMapIntentProvider); this file is the
+// sheet and the top bar. Clocks (time searching, the free-cancel window, a stale position) tick in
+// their own small widgets: nothing here rebuilds every second.
 
-import 'dart:async';
-
-import 'package:confetti/confetti.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:latlong2/latlong.dart';
 import 'package:ride_app_core/ride_app_core.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../../core/l10n/l10n.dart';
 import '../../../core/network/providers.dart';
 import '../../../core/router/routes.dart';
 import '../../config/client_config_provider.dart';
-import '../../maps/anbessa_map.dart';
-import '../../maps/route_layer.dart' show toGeoPoints;
+import '../shell/map_intent.dart';
+import '../shell/rider_map_shell.dart';
 import 'active_trip_controller.dart';
 import 'cancel_sheet.dart';
 import 'trip_eta_controller.dart';
 
 const _cancelFeeMinor = 3000;
 
-class RiderTripScreen extends ConsumerStatefulWidget {
-  const RiderTripScreen({super.key, required this.tripId});
+class TripSheet extends ConsumerStatefulWidget {
+  const TripSheet({super.key, required this.tripId});
   final String tripId;
   @override
-  ConsumerState<RiderTripScreen> createState() => _RiderTripScreenState();
+  ConsumerState<TripSheet> createState() => _TripSheetState();
 }
 
-class _RiderTripScreenState extends ConsumerState<RiderTripScreen> with SingleTickerProviderStateMixin {
-  late final MarkerAnimator _car = MarkerAnimator(vsync: this);
-  late final ConfettiController _confetti = ConfettiController(duration: const Duration(seconds: 2));
-  Timer? _tick;
-  DateTime _now = DateTime.now().toUtc();
+class _TripSheetState extends ConsumerState<TripSheet> {
   bool _busy = false;
   Object? _error;
-  // the sheet height goes straight to the map (no rebuild of this screen while it's dragged)
-  final _sheetHeight = ValueNotifier<double>(0);
   RiderStage? _lastStage;
 
-  @override
-  void initState() {
-    super.initState();
-    _tick = Timer.periodic(const Duration(seconds: 1), (_) => setState(() => _now = DateTime.now().toUtc()));
-  }
-
-  @override
-  void dispose() {
-    _tick?.cancel();
-    _car.dispose();
-    _sheetHeight.dispose();
-    _confetti.dispose();
-    super.dispose();
-  }
-
   Future<void> _cancel(Trip t) async {
-    final free = riderCancelIsFree(t, _now);
+    final free = riderCancelIsFree(t, DateTime.now().toUtc());
     final reason = await showCancelSheet(context, free: free, feeMinor: _cancelFeeMinor);
     if (reason == null) return;
     setState(() {
@@ -75,20 +54,23 @@ class _RiderTripScreenState extends ConsumerState<RiderTripScreen> with SingleTi
     }
   }
 
+  /// A new stage: haptics, a word, confetti at the end; the sheet settles at its resting size.
   void _onStage(RiderStage stage) {
     if (_lastStage == stage) return;
     final first = _lastStage == null;
     _lastStage = stage;
     if (first) return;
+    final shell = RiderMapScope.maybeOf(context);
+    shell?.sheet.animateTo(0, duration: AnbessaMotion.of(context, AnbessaMotion.sheet));
     switch (stage) {
       case RiderStage.driverAssigned || RiderStage.inTrip:
         Haptics.success();
       case RiderStage.driverArrived:
         Haptics.offer();
-        showToast(context, context.l10n.driverArrivedLede, tone: NoticeTone.ok, icon: Icons.directions_car);
+        showToast(context, context.l10n.driverArrivedLede, tone: NoticeTone.ok, icon: Icons.directions_car_rounded);
       case RiderStage.completed:
         Haptics.success();
-        _confetti.play();
+        shell?.confetti.play();
       case RiderStage.cancelled:
         Haptics.error();
       default:
@@ -96,10 +78,21 @@ class _RiderTripScreenState extends ConsumerState<RiderTripScreen> with SingleTi
     }
   }
 
+  /// Each position of the car: to its animator on the map, and to the ETA (which decides itself
+  /// whether a new road is worth asking for).
+  void _onLive(DriverLive live) {
+    final v = ref.read(tripViewProvider(widget.tripId));
+    if (v == null || !v.tracking) return;
+    RiderMapScope.maybeOf(context)?.carFor(widget.tripId).push((lat: live.lat, lng: live.lng), heading: live.heading, speed: live.speed, at: live.at);
+    if (v.driving) {
+      final target = v.stage == RiderStage.inTrip ? v.trip.dropoff : v.trip.pickup;
+      ref.read(tripEtaProvider(widget.tripId).notifier).track((lat: live.lat, lng: live.lng), (lat: target.lat, lng: target.lng));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final l = context.l10n;
-    final c = context.colors;
     // dispatch gave the trip to another driver
     ref.listen(activeTripProvider, (prev, next) {
       final before = prev?.value;
@@ -112,130 +105,67 @@ class _RiderTripScreenState extends ConsumerState<RiderTripScreen> with SingleTi
         showToast(context, l.driverChanged, tone: NoticeTone.info);
       }
     });
-    final tripAsync = ref.watch(tripProvider(widget.tripId));
-    final t = tripAsync.value;
-    if (t == null) {
-      return Scaffold(appBar: AppBar(), body: tripAsync.hasError ? Padding(padding: const EdgeInsets.all(16), child: Problem(tripAsync.error, describe: (e) => describeError(l, e))) : const Padding(padding: EdgeInsets.all(16), child: SkeletonList(rows: 3)));
+    final view = ref.watch(tripViewProvider(widget.tripId));
+    if (view == null) {
+      final async = ref.watch(tripProvider(widget.tripId));
+      return async.hasError ? Problem(async.error, describe: (e) => describeError(l, e), onRetry: () => ref.invalidate(tripProvider(widget.tripId)), retryLabel: l.retry) : const SkeletonList(rows: 3);
     }
-    final stage = riderStageOf(t);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _onStage(stage));
-    final parties = t.driver == null ? null : ref.watch(tripPartiesProvider(t.id)).value;
-    final tracking = t.driver != null && t.isActive;
-    // the animator glides the car on the map; this screen only rebuilds per sample (for the ETA)
-    ref.listen(driverLiveProvider(t.id), (_, next) {
-      final live = next.value;
-      if (live != null && tracking) _car.push((lat: live.lat, lng: live.lng), heading: live.heading, speed: live.speed, at: live.at);
+    final t = view.trip;
+    final stage = view.stage;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _onStage(stage);
     });
-    final live = tracking ? ref.watch(driverLiveProvider(t.id)).value : null;
-    if (live != null && _car.pose == null) {
-      // the first sample arrived before the listener: start the animator from it
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _car.pose == null) _car.push((lat: live.lat, lng: live.lng), heading: live.heading, speed: live.speed, at: live.at);
+    if (view.tracking) {
+      ref.listen(driverLiveProvider(t.id), (_, next) {
+        final live = next.value;
+        if (live != null) _onLive(live);
       });
+      // the first sample may have landed before the listener: start the car from it
+      final live = view.live;
+      final car = RiderMapScope.maybeOf(context)?.carFor(t.id);
+      if (live != null && car != null && car.pose == null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && car.pose == null) _onLive(live);
+        });
+      }
     }
+    final parties = t.driver == null ? null : ref.watch(tripPartiesProvider(t.id)).value;
     final pinOn = ref.watch(featureProvider(Feature.tripPin));
-    final sosOn = ref.watch(featureProvider(Feature.sos));
-    final pickup = LatLng(t.pickup.lat, t.pickup.lng);
-    final dropoff = LatLng(t.dropoff.lat, t.dropoff.lng);
-    final carPt = live == null ? null : LatLng(live.lat, live.lng);
-    final carStale = live != null && _car.isStale;
-
-    // the car's road to its target, refreshed by the ETA controller
-    final target = stage == RiderStage.inTrip ? (lat: t.dropoff.lat, lng: t.dropoff.lng) : (lat: t.pickup.lat, lng: t.pickup.lng);
-    if (live != null && (stage == RiderStage.driverAssigned || stage == RiderStage.inTrip)) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => ref.read(tripEtaProvider(t.id).notifier).track((lat: live.lat, lng: live.lng), target));
-    }
-    final eta = ref.watch(tripEtaProvider(t.id));
-    final tripLine = RouteLine.fromPolyline6(t.route.polyline, kind: stage == RiderStage.driverAssigned ? RouteKind.secondary : RouteKind.primary);
-    final carLine = eta != null && eta.polyline6.isNotEmpty && carPt != null && (stage == RiderStage.driverAssigned || stage == RiderStage.inTrip)
-        ? RouteLine.fromPolyline6(eta.polyline6)
-        : (carPt != null && stage == RiderStage.driverAssigned ? RouteLine.straight(carPt, pickup) : null);
-    final routes = [
-      if (!tripLine.isEmpty) tripLine else if (stage != RiderStage.driverAssigned) RouteLine.straight(pickup, dropoff),
-      ?carLine,
-    ];
-    // the car glides along the road it is on (its road to the target, or the trip's road)
-    final carRoad = carLine != null && carLine.kind == RouteKind.primary ? carLine : (stage == RiderStage.inTrip && !tripLine.isEmpty ? tripLine : null);
-    _car.route = carRoad == null ? null : toGeoPoints(carRoad.points);
-    // fitted when the stage changes or the car's road first arrives; not as the car moves
-    final fit = switch (stage) {
-      RiderStage.driverAssigned => [pickup, ?carPt],
-      RiderStage.driverArrived => [pickup, ?carPt],
-      RiderStage.inTrip => [?carPt, dropoff],
-      _ => [pickup, dropoff],
-    };
-    final etaSeconds = eta?.seconds ?? (carPt == null ? null : (haversineMeters(carPt.latitude, carPt.longitude, target.lat, target.lng) * 1.35 / 6.1).round());
-    final carLabel = carPt != null && etaSeconds != null && (stage == RiderStage.driverAssigned || stage == RiderStage.inTrip) ? l.etaMinutes((etaSeconds / 60).ceil().clamp(1, 99)) : null;
-    final top = MediaQuery.paddingOf(context).top;
-
-    return Scaffold(
-      body: Stack(
-        children: [
-          AnbessaMap(
-            fit: fit,
-            fitKey: (stage, carLine != null),
-            pickup: pickup,
-            dropoff: dropoff,
-            driverCar: tracking ? _car : null,
-            driverCarLabel: carLabel,
-            routes: routes,
-            topInset: top + 64,
-            sheetHeight: _sheetHeight,
-            overlays: [
-              if (stage == RiderStage.finding) MapOverlay(point: pickup, size: const Size(160, 160), child: RadarPulse(color: c.accent, size: 160)),
-            ],
-          ),
-          Positioned(
-            top: top + 8,
-            left: 12,
-            right: 12,
-            child: Row(
-              children: [
-                if (!t.isActive) MapControlButton(icon: Icons.arrow_back, tooltip: l.back, onTap: () => context.go(Routes.riderHome)),
-                // share and SOS sit on the right; at large text SOS wraps under share
-                Expanded(
-                  child: Wrap(
-                    alignment: WrapAlignment.end,
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      if (t.isActive && t.status != TripStatus.requested) _ShareButton(tripId: t.id),
-                      // SOS on a trip with a driver, and for 30 min after drop-off (support-service's window)
-                      if (sosOn && sosAvailable(t, DateTime.now()))
-                        // the word is the signal (Material's sos icon is the same letters again)
-                        FilledButton(
-                          style: FilledButton.styleFrom(backgroundColor: c.danger, foregroundColor: Colors.white, minimumSize: const Size(64, 48), padding: const EdgeInsets.symmetric(horizontal: 18)),
-                          onPressed: () => context.push('${Routes.sos}?trip=${t.id}'),
-                          child: Text(l.sos),
-                        ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Align(alignment: Alignment.topCenter, child: ConfettiWidget(confettiController: _confetti, blastDirectionality: BlastDirectionality.explosive, numberOfParticles: 24, colors: [c.accent, c.success, c.info])),
-          AppSheet(
-            snaps: const [0.42, 0.8],
-            onHeightChanged: (h) => _sheetHeight.value = h,
-            padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
-            builder: (context, _) => AnimatedSwitcherX(
-              child: KeyedSubtree(
-                key: ValueKey(stage),
-                child: switch (stage) {
-                  RiderStage.finding => _Finding(trip: t, now: _now, busy: _busy, error: _error, onCancel: () => _cancel(t)),
-                  RiderStage.driverAssigned || RiderStage.driverArrived => _DriverCard(
-                      trip: t, parties: parties, arrived: stage == RiderStage.driverArrived, stale: carStale, hasPosition: live != null, etaSeconds: etaSeconds, now: _now, pinOn: pinOn, busy: _busy, error: _error, onCancel: () => _cancel(t)),
-                  RiderStage.inTrip => _InTrip(trip: t, parties: parties, etaSeconds: etaSeconds),
-                  RiderStage.completed => _Ended(trip: t, completed: true),
-                  RiderStage.cancelled => _Ended(trip: t, completed: false),
-                  RiderStage.unknown => Text(tripStatusLabel(l, t.status)),
-                },
-              ),
-            ),
-          ),
-        ],
+    return SharedAxisSwitcher(
+      child: KeyedSubtree(
+        key: ValueKey(stage),
+        child: switch (stage) {
+          RiderStage.finding => _Finding(trip: t, busy: _busy, error: _error, onCancel: () => _cancel(t)),
+          RiderStage.driverAssigned || RiderStage.driverArrived => _DriverCard(
+              trip: t, parties: parties, arrived: stage == RiderStage.driverArrived, live: view.live, etaSeconds: view.etaSeconds, pinOn: pinOn, busy: _busy, error: _error, onCancel: () => _cancel(t)),
+          RiderStage.inTrip => _InTrip(trip: t, parties: parties, etaSeconds: view.etaSeconds),
+          RiderStage.completed => _Ended(trip: t, parties: parties, completed: true),
+          RiderStage.cancelled => _Ended(trip: t, parties: parties, completed: false),
+          RiderStage.unknown => Text(tripStatusLabel(l, t.status)),
+        },
       ),
+    );
+  }
+}
+
+/// Share and SOS over the map (back once the trip is over).
+class TripTopBar extends ConsumerWidget {
+  const TripTopBar({super.key, required this.tripId});
+  final String tripId;
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final l = context.l10n;
+    final t = ref.watch(tripProvider(tripId)).value;
+    final sosOn = ref.watch(featureProvider(Feature.sos));
+    if (t == null) return const SizedBox.shrink();
+    return Row(
+      children: [
+        if (!t.isActive) RoundIconButton(icon: Icons.arrow_back_rounded, tooltip: l.back, onTap: () => context.go(Routes.riderHome)),
+        const Spacer(),
+        if (t.isActive && t.status != TripStatus.requested) ...[_ShareButton(tripId: t.id), const SizedBox(width: 10)],
+        // SOS on a trip with a driver, and for 30 min after drop-off (support-service's window)
+        if (sosOn && sosAvailable(t, DateTime.now())) RoundIconButton(icon: Icons.sos_rounded, tooltip: l.sos, danger: true, onTap: () => context.push('${Routes.sos}?trip=${t.id}')),
+      ],
     );
   }
 }
@@ -278,9 +208,8 @@ class _Progress extends StatelessWidget {
 }
 
 class _Finding extends StatelessWidget {
-  const _Finding({required this.trip, required this.now, required this.busy, required this.error, required this.onCancel});
+  const _Finding({required this.trip, required this.busy, required this.error, required this.onCancel});
   final Trip trip;
-  final DateTime now;
   final bool busy;
   final Object? error;
   final VoidCallback onCancel;
@@ -288,12 +217,17 @@ class _Finding extends StatelessWidget {
   Widget build(BuildContext context) {
     final l = context.l10n;
     final c = context.colors;
-    final waited = now.difference(trip.times.requestedAt);
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(children: [Flexible(child: StatusPill(l.statusRequested, tone: Tone.amber, pulse: true)), const SizedBox(width: 8), MonoText(mmss(waited), style: TextStyle(color: c.muted))]),
+        Row(
+          children: [
+            Flexible(child: StatusPill(l.statusRequested, tone: Tone.amber, pulse: true)),
+            const SizedBox(width: 8),
+            ElapsedText(key: const ValueKey('searching-for'), since: trip.times.requestedAt, format: mmss, style: AnbessaType.label.copyWith(color: c.muted, fontFeatures: AnbessaType.tabular)),
+          ],
+        ),
         const SizedBox(height: 12),
         Text(l.findingDriver, style: AnbessaType.h2.copyWith(color: c.text)),
         const SizedBox(height: 4),
@@ -301,6 +235,8 @@ class _Finding extends StatelessWidget {
         const SizedBox(height: 14),
         Row(
           children: [
+            Container(width: 10, height: 10, decoration: BoxDecoration(color: c.text, borderRadius: BorderRadius.circular(2))),
+            const SizedBox(width: 10),
             Expanded(child: Text(trip.dropoff.address ?? l.dropoffLabel, maxLines: 1, overflow: TextOverflow.ellipsis, style: AnbessaType.body.copyWith(fontWeight: FontWeight.w500))),
             MoneyText(trip.fare.estimateMinor, locale: context.localeTag, style: AnbessaType.title),
           ],
@@ -313,15 +249,24 @@ class _Finding extends StatelessWidget {
   }
 }
 
+/// The driver's photo, flying to the pay and rating pages.
+class _DriverAvatar extends StatelessWidget {
+  const _DriverAvatar({required this.tripId, required this.photo, required this.name, this.size = 56});
+  final String tripId;
+  final String? photo;
+  final String name;
+  final double size;
+  @override
+  Widget build(BuildContext context) => Hero(tag: driverAvatarHeroTag(tripId), child: AvatarImage(src: photo, name: name, size: size, ring: true));
+}
+
 class _DriverCard extends StatelessWidget {
-  const _DriverCard({required this.trip, required this.parties, required this.arrived, required this.stale, required this.hasPosition, required this.etaSeconds, required this.now, required this.pinOn, required this.busy, required this.error, required this.onCancel});
+  const _DriverCard({required this.trip, required this.parties, required this.arrived, required this.live, required this.etaSeconds, required this.pinOn, required this.busy, required this.error, required this.onCancel});
   final Trip trip;
   final TripParties? parties;
   final bool arrived;
-  final bool stale;
-  final bool hasPosition;
+  final DriverLive? live;
   final int? etaSeconds;
-  final DateTime now;
   final bool pinOn;
   final bool busy;
   final Object? error;
@@ -332,8 +277,9 @@ class _DriverCard extends StatelessWidget {
     final l = context.l10n;
     final c = context.colors;
     final name = parties?.driverName ?? l.driverLabel;
-    final free = riderCancelIsFree(trip, now);
+    final vehicle = parties?.vehicle;
     final step = arrived ? 2 : (trip.status == TripStatus.enRoute ? 1 : 0);
+    final sample = live;
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -342,16 +288,27 @@ class _DriverCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(child: Text(arrived ? l.driverArrived(name) : l.driverOnTheWay(name), style: AnbessaType.h2.copyWith(color: c.text), maxLines: 3, overflow: TextOverflow.ellipsis)),
-            if (!arrived && etaSeconds != null) EtaBadge(seconds: etaSeconds, minuteLabel: (m) => l.etaMinutes(m), large: true, icon: Icons.schedule),
+            if (!arrived && etaSeconds != null) EtaBadge(seconds: etaSeconds, minuteLabel: (m) => l.rideMinutes(m), large: true, icon: Icons.schedule_rounded),
           ],
         ),
-        if (hasPosition) Padding(padding: const EdgeInsets.only(top: 4), child: Text(stale ? l.positionStale(since(trip.times.matchedAt ?? trip.times.requestedAt, now)) : l.liveTracking, style: AnbessaType.caption.copyWith(color: stale ? c.warning : c.success, fontWeight: FontWeight.w600))),
+        if (sample != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            // stale after 20 s without a position; checked every few seconds, not every frame
+            child: TickingBuilder(
+              interval: const Duration(seconds: 5),
+              builder: (context, now) {
+                final stale = now.toUtc().difference(sample.at) > const Duration(seconds: 20);
+                return Text(stale ? l.positionStale(since(sample.at, now.toUtc())) : l.liveTracking, style: AnbessaType.caption.copyWith(color: stale ? c.warning : c.success, fontWeight: FontWeight.w600));
+              },
+            ),
+          ),
         const SizedBox(height: 14),
         _Progress(step: step),
         const SizedBox(height: 16),
         Row(
           children: [
-            AvatarImage(src: parties?.driverPhoto, name: name, size: 56, ring: true),
+            _DriverAvatar(tripId: trip.id, photo: parties?.driverPhoto, name: name),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -360,17 +317,14 @@ class _DriverCard extends StatelessWidget {
                   Text(name, style: AnbessaType.title.copyWith(color: c.text), maxLines: 1, overflow: TextOverflow.ellipsis),
                   const SizedBox(height: 2),
                   RatingSummary(average: parties?.driverRating, count: parties?.driverRatingCount ?? 0, newLabel: l.newDriver),
-                  const SizedBox(height: 2),
-                  Text(parties?.vehicle?.label ?? l.vehicleLabel, style: AnbessaType.caption.copyWith(color: c.text2), maxLines: 1, overflow: TextOverflow.ellipsis),
+                  if (vehicle != null && vehicle.label.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(vehicle.label, style: AnbessaType.caption.copyWith(color: c.text2), maxLines: 1, overflow: TextOverflow.ellipsis),
+                  ],
                 ],
               ),
             ),
-            if (parties?.vehicle != null)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                decoration: BoxDecoration(color: c.surface2, borderRadius: BorderRadius.circular(AnbessaRadius.sm), border: Border.all(color: c.borderStrong, width: 1.5)),
-                child: MonoText(parties!.vehicle!.plateNumber, style: AnbessaType.title.copyWith(color: c.text, letterSpacing: 1)),
-              ),
+            if (vehicle != null) ...[const SizedBox(width: 8), PlateBadge(vehicle.plateNumber)],
           ],
         ),
         if (pinOn && trip.pin != null) ...[
@@ -397,7 +351,13 @@ class _DriverCard extends StatelessWidget {
         const SizedBox(height: 12),
         Problem(error, describe: (e) => describeError(l, e)),
         OutlinedButton(onPressed: busy ? null : onCancel, child: Text(l.cancelTrip)),
-        if (!free) Padding(padding: const EdgeInsets.only(top: 6), child: Text(l.cancelFeeWarning(birr(_cancelFeeMinor, locale: context.localeTag)), style: AnbessaType.caption.copyWith(color: c.muted))),
+        // the free window closes on its own: checked every few seconds
+        TickingBuilder(
+          interval: const Duration(seconds: 5),
+          builder: (context, now) => riderCancelIsFree(trip, now.toUtc())
+              ? const SizedBox.shrink()
+              : Padding(padding: const EdgeInsets.only(top: 6), child: Text(l.cancelFeeWarning(birr(_cancelFeeMinor, locale: context.localeTag)), style: AnbessaType.caption.copyWith(color: c.muted))),
+        ),
       ],
     );
   }
@@ -427,16 +387,19 @@ class _InTrip extends StatelessWidget {
     final l = context.l10n;
     final c = context.colors;
     final name = parties?.driverName ?? l.driverLabel;
+    final eta = etaSeconds;
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            Expanded(child: Text(l.inTrip(trip.dropoff.address ?? l.dropoffLabel), style: AnbessaType.h2.copyWith(color: c.text), maxLines: 2, overflow: TextOverflow.ellipsis)),
-            if (etaSeconds != null) EtaBadge(seconds: etaSeconds, minuteLabel: (m) => l.etaMinutes(m), large: true, icon: Icons.flag_outlined),
-          ],
-        ),
+        Text(l.inTrip(trip.dropoff.address ?? l.dropoffLabel), style: AnbessaType.h2.copyWith(color: c.text), maxLines: 2, overflow: TextOverflow.ellipsis),
+        if (eta != null) ...[
+          const SizedBox(height: 8),
+          Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: StatusPill(key: const ValueKey('arrive-at'), l.rideArriveAt(clockHHmm(DateTime.now().add(Duration(seconds: eta)))), tone: Tone.amber, icon: Icons.flag_rounded),
+          ),
+        ],
         const SizedBox(height: 14),
         const _Progress(step: 3),
         const SizedBox(height: 16),
@@ -444,7 +407,8 @@ class _InTrip extends StatelessWidget {
           children: [
             AvatarImage(src: parties?.driverPhoto, name: name, size: 40),
             const SizedBox(width: 10),
-            Expanded(child: Text('$name · ${parties?.vehicle?.plateNumber ?? ''}', style: AnbessaType.body.copyWith(color: c.text2), maxLines: 1, overflow: TextOverflow.ellipsis)),
+            Expanded(child: Text(name, style: AnbessaType.body.copyWith(color: c.text2), maxLines: 1, overflow: TextOverflow.ellipsis)),
+            if (parties?.vehicle != null) PlateBadge(parties!.vehicle!.plateNumber),
           ],
         ),
         const SizedBox(height: 14),
@@ -460,20 +424,23 @@ class _InTrip extends StatelessWidget {
 }
 
 class _Ended extends ConsumerWidget {
-  const _Ended({required this.trip, required this.completed});
+  const _Ended({required this.trip, required this.parties, required this.completed});
   final Trip trip;
+  final TripParties? parties;
   final bool completed;
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l = context.l10n;
     final c = context.colors;
     final cancelledBy = trip.cancellation?.by.name ?? '';
+    final name = parties?.driverName ?? l.driverLabel;
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Row(
           children: [
+            if (completed && trip.driver != null) ...[_DriverAvatar(tripId: trip.id, photo: parties?.driverPhoto, name: name, size: 44), const SizedBox(width: 12)],
             Expanded(child: Text(completed ? l.tripCompleted : l.tripCancelled, style: AnbessaType.h2.copyWith(color: c.text))),
           ],
         ),
@@ -503,7 +470,7 @@ class _Ended extends ConsumerWidget {
           Text(l.paidBy(paymentMethodLabel(l, trip.paymentMethod)), style: AnbessaType.caption.copyWith(color: c.muted)),
         ],
         const SizedBox(height: 16),
-        if (completed) PrimaryButton(label: trip.isDigital ? l.payTitle : l.receiptTitle, icon: trip.isDigital ? Icons.payments_outlined : Icons.receipt_long_outlined, onPressed: () => context.go(Routes.riderPay(trip.id))),
+        if (completed) PrimaryButton(label: trip.isDigital ? l.payTitle : l.receiptTitle, icon: trip.isDigital ? Icons.payments_rounded : Icons.receipt_long_rounded, onPressed: () => context.go(Routes.riderPay(trip.id))),
         if (!completed)
           PrimaryButton(
             label: l.done,
@@ -556,8 +523,8 @@ class _ShareButtonState extends ConsumerState<_ShareButton> {
           child: SectionGroup(
             margin: EdgeInsets.zero,
             children: [
-              SettingsTile(icon: Icons.ios_share, title: l.shareTrip, onTap: () => Navigator.pop(ctx, 'again')),
-              SettingsTile(icon: Icons.link_off, title: l.stopSharing, destructive: true, onTap: () => Navigator.pop(ctx, 'stop')),
+              SettingsTile(icon: Icons.ios_share_rounded, title: l.shareTrip, onTap: () => Navigator.pop(ctx, 'again')),
+              SettingsTile(icon: Icons.link_off_rounded, title: l.stopSharing, destructive: true, onTap: () => Navigator.pop(ctx, 'stop')),
             ],
           ),
         ),
@@ -583,30 +550,12 @@ class _ShareButtonState extends ConsumerState<_ShareButton> {
     final l = context.l10n;
     final c = context.colors;
     final on = _share != null;
-    return Semantics(
-      button: true,
-      label: on ? l.sharingOn : l.shareTrip,
-      child: DecoratedBox(
-        decoration: ShapeDecoration(shape: const StadiumBorder(), shadows: AnbessaElevation.floating(c.brightness)),
-        child: Material(
-          color: on ? c.primaryFill : c.surface,
-          shape: StadiumBorder(side: BorderSide(color: on ? c.primaryFill : c.border)),
-          child: InkWell(
-            customBorder: const StadiumBorder(),
-            onTap: _busy ? null : (on ? _menu : _start),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (_busy) ...[SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: on ? c.onAccent : c.text)), const SizedBox(width: 6)],
-                  Text(on ? l.sharingOn : l.shareTrip, style: AnbessaType.label.copyWith(color: on ? c.onAccent : c.text)),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        RoundIconButton(icon: on ? Icons.share_location_rounded : Icons.ios_share_rounded, tooltip: on ? l.sharingOn : l.shareTrip, onTap: _busy ? null : (on ? _menu : _start)),
+        if (_busy) IgnorePointer(child: SizedBox(width: 40, height: 40, child: CircularProgressIndicator(strokeWidth: 2, color: c.accent))),
+      ],
     );
   }
 }

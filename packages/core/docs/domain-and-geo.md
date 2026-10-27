@@ -79,6 +79,7 @@ Addis Ababa is UTC+3 with no daylight saving. `addisOffset` is that constant and
 | `mmss(duration)` | `3:45` |
 | `minutesOf(seconds)` | `< 1 min`, `12 min`, `1 h 05` |
 | `km(meters)` | `5.2 km` (one decimal under 10 km), `12 km` |
+| `formatDistance(meters)` | a distance to a place: `< 50 m`, `850 m` (10 m steps under a kilometre), `2.4 km` (one decimal under 10 km), `14 km` |
 | `shortId(id)` | last 6 characters, dashes removed, upper case |
 
 Month names are Gregorian in both languages; with an `am` locale they are the Amharic transliterations (`ጃንዩ`, `ፌብሩ`, …). The Ethiopian calendar is out of scope (comment in `domain.dart`). Null inputs return `—`.

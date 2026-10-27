@@ -15,16 +15,29 @@ import '../rider/payments/payment_due_controller.dart';
 /// Height of the floating banners, in pixels (0 when none).
 final bannerHeightProvider = valueProvider<double>(0);
 
+/// The rider's booking and trip stages use the whole screen: no tab bar there.
+bool riderTabsHiddenAt(Uri? location) {
+  final p = location?.path ?? '';
+  return p.startsWith('/rider/book') || p.startsWith('/rider/trip');
+}
+
 class RiderShell extends ConsumerWidget {
-  const RiderShell({super.key, required this.shell});
+  const RiderShell({super.key, required this.shell, this.location});
   final StatefulNavigationShell shell;
+  /// where the app is (the tab bar hides on the booking and trip stages)
+  final Uri? location;
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l = context.l10n;
     final due = ref.watch(paymentDueProvider).value ?? false;
+    final hidden = riderTabsHiddenAt(location);
     return Scaffold(
+      // the map never resizes for the keyboard; the sheets and screens make room themselves
+      resizeToAvoidBottomInset: false,
       body: _Body(audience: 'rider', shell: shell),
-      bottomNavigationBar: NavigationBar(
+      bottomNavigationBar: hidden
+          ? null
+          : NavigationBar(
         selectedIndex: shell.currentIndex,
         onDestinationSelected: (i) {
           Haptics.selection();

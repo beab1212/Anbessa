@@ -15,6 +15,7 @@ import '../../../core/l10n/l10n.dart';
 import '../../../core/network/providers.dart';
 import '../../../core/realtime/realtime_hub.dart';
 import '../../../core/router/routes.dart';
+import '../shell/rider_map_shell.dart' show driverAvatarHeroTag;
 import '../trip/active_trip_controller.dart';
 import 'payment_due_controller.dart';
 
@@ -209,6 +210,7 @@ class _PayScreenState extends ConsumerState<PayScreen> {
           ListView(
             padding: const EdgeInsets.all(20),
             children: [
+              if (trip.driver != null) ...[_DriverLine(tripId: trip.id), const SizedBox(height: 12)],
               FloatingCard(padding: const EdgeInsets.all(20), child: hero),
               const SizedBox(height: 12),
               Problem(_error, describe: (e) => describeError(l, e)),
@@ -229,6 +231,27 @@ class _PayScreenState extends ConsumerState<PayScreen> {
           Align(alignment: Alignment.topCenter, child: ConfettiWidget(confettiController: _confetti, blastDirectionality: BlastDirectionality.explosive, numberOfParticles: 24, colors: [c.accent, c.success, c.info])),
         ],
       ),
+    );
+  }
+}
+
+/// Who drove: the photo (flown in from the trip sheet) and the name.
+class _DriverLine extends ConsumerWidget {
+  const _DriverLine({required this.tripId});
+  final String tripId;
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final l = context.l10n;
+    final c = context.colors;
+    final parties = ref.watch(tripPartiesProvider(tripId)).value;
+    final name = parties?.driverName ?? l.driverLabel;
+    return Row(
+      children: [
+        Hero(tag: driverAvatarHeroTag(tripId), child: AvatarImage(src: parties?.driverPhoto, name: name, size: 44, ring: true)),
+        const SizedBox(width: 12),
+        Expanded(child: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: AnbessaType.title.copyWith(color: c.text))),
+        if (parties?.vehicle != null) PlateBadge(parties!.vehicle!.plateNumber),
+      ],
     );
   }
 }

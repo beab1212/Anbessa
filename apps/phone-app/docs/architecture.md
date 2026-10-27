@@ -28,7 +28,7 @@ apps/phone-app/
       intro/                      the first-launch carousel
       shell/shells.dart           rider and driver bottom-navigation shells
       maps/                       AnbessaMap, markers, routes, tiles, MarkerAnimator, nearby cars, compass; scene/ (MapScene native layers, CameraDirector, MapBinding, RouteTrack); nav/ (NavigationController, turn banner, external navigation)
-      rider/                      home, booking (route editor, quote), trip, payments, rating, history, places
+      rider/                      shell (the one-map ShellRoute and its map intents), home, booking (search, pin picker, choose ride, the account's place picker), trip, payments, rating, history, places
       driver/                     onboarding, shift (home), offers, trip, earnings, vehicles
       profile/                    account hub, profile, settings screens and their controllers
       support/                    SOS, help (tickets), lost items: repositories over SupportApi, screens
@@ -267,20 +267,22 @@ The comment in `transitions.dart` says the slide-up is also for pay and rating; 
 | `/trip/:id` | redirect | | → `/driver/trip/:id` in driver mode, else `/rider/trip/:id` (deep links) |
 | `/pay/:id` | redirect | | → `/rider/trip/:id/pay` |
 | `/top-up/:id` | redirect | | → `/driver/earnings` (the id is ignored) |
-| **Rider shell** (`RiderShell`, `StatefulShellRoute.indexedStack`) | | | |
-| `/rider/home` | `RiderHomeScreen` | default | branch 0 (Home) |
+| **Rider shell** (`RiderShell`, `StatefulShellRoute.indexedStack`; the tab bar hides on `/rider/book…` and `/rider/trip…`) | | | |
+| **Rider map shell** (`riderMapShellRoute`, a `ShellRoute` in branch 0; `RiderMapShell` draws one map and one sheet, the stage pages are empty `NoTransitionPage`s) | | | |
+| `/rider/home` | home stage (`HomeSheet`) | none (the shell animates) | branch 0 (Home) |
 | `/rider/home/book/pickup` | redirect | | → `/rider/book/pickup` |
+| `/rider/book/route` | search stage (`SearchHeader`, `SearchSuggestions`, `PinCard`) | none | query: `focus=pickup|dropoff` (default dropoff); `mode=savedPlace&label=…` redirects to `/account/places/pick?label=…` |
+| `/rider/book/quote` | choose-ride stage (`QuoteHeader`, `QuoteSheet`, `QuoteFooter`) | none | |
+| `/rider/trip/:id` | trip stage (`TripSheet`, `TripTopBar`) | none | |
+| `/rider/trip/:id/pay` | `PayScreen` | slide-up | on the root navigator, over the shell |
+| `/rider/trip/:id/rate` | `RatingScreen(asDriver: false, doneRoute: /rider/home)` | slide-up | on the root navigator, over the shell |
 | `/rider/activity` | `HistoryScreen(as: 'rider')` | default | branch 1 (Activity) |
 | `/rider/activity/:id` | `ReceiptScreen(asDriver: false)` | default | |
 | `/rider/account` | `AccountScreen(mode: rider)` | default | branch 2 (Account) |
 | **Rider, outside the shell** | | | |
 | `/rider/book/pickup` | redirect | | → `/rider/book/route?focus=pickup` |
 | `/rider/book/dropoff` | redirect | | → `/rider/book/route?focus=dropoff` |
-| `/rider/book/route` | `RouteEditorScreen(focus, mode, savedLabel)` | slide-up | query: `focus=pickup|dropoff` (default dropoff), `mode=savedPlace`, `label=home|work|other` |
-| `/rider/book/quote` | `QuoteScreen` | slide-up | |
-| `/rider/trip/:id` | `RiderTripScreen` | default | |
-| `/rider/trip/:id/pay` | `PayScreen` | default | |
-| `/rider/trip/:id/rate` | `RatingScreen(asDriver: false, doneRoute: /rider/home)` | default | |
+| `/account/places/pick` | `RouteEditorScreen(mode: savedPlace, savedLabel: ?label)` | slide-up | the account's place picker (returns the place) |
 | **Driver shell** (`DriverShell`) | | | |
 | `/driver/home` | `DriverHomeScreen` | default | branch 0 (Home) |
 | `/driver/earnings` | `EarningsScreen` | default | branch 1 (Earnings) |
@@ -330,7 +332,7 @@ Every route is registered whatever the feature flags say; the flags only hide th
 3. **Signed out** (session value is null). If the intro was never seen: `/intro`. Otherwise `/welcome`, except that `/welcome`, `/sign-in` and `/sign-in/verify` are allowed. A signed-in person on `/intro` goes to `/splash`.
 4. **Mode.** If `effectiveModeProvider` is null: `/mode`. From `/splash`, `/mode` or a sign-in path: the mode's home (`/rider/home` or `/driver/home`).
    - Paths starting with `/account`, `/sos`, `/support`, `/scheduled` are allowed in either mode and **skip the remaining guards** (so the active-trip guard does not apply to them).
-   - Paths starting with `/rider/book` are allowed in driver mode and skip the remaining guards (the route editor picks saved places from the account).
+   - Paths starting with `/rider/book` are allowed in driver mode and skip the remaining guards (older saved-place links, `/rider/book/route?mode=savedPlace`, which the route sends to `/account/places/pick`).
    - A rider on a `/driver…` path goes to `/rider/home`; a driver on a `/rider…` path goes to `/driver/home`.
 5. **Driver not approved.** In driver mode, once `driverHomeProvider` has a value (it is only read here, and `RouterNotifier` only listens to it, in driver mode: it follows `effectiveModeProvider` and opens the `driverHomeProvider` subscription when the mode becomes driver, closing it when it leaves, so a rider's start never calls `GET /api/fleet/drivers/me`): approved = `session.canDrive && (driver?.isActive ?? true)`. If not approved, every path goes to `/driver/onboarding` except paths under `/driver/onboarding`, `/driver/account`, `/driver/vehicles` and paths under `/driver/earnings`.
 6. **Active trip.** If `activeTripProvider` holds a trip with `isActive`, any path that does not start with `/rider/trip/<id>` (rider) or `/driver/trip/<id>` (driver) goes there.
@@ -347,8 +349,19 @@ The comment in `routes.dart` says `anbessa://` and `https://app.anbessa.et` link
 
 | Shell | Tabs | Badges |
 |---|---|---|
-| `RiderShell` | Home, Activity, Account | a dot on Activity when `paymentDueProvider` is true |
+| `RiderShell` | Home, Activity, Account (hidden on `/rider/book…` and `/rider/trip…`: `riderTabsHiddenAt`) | a dot on Activity when `paymentDueProvider` is true |
 | `DriverShell` | Home, Earnings, Activity, Account | a dot on Earnings when the balance state is not `ok`; a dot on Activity when `paymentDueProvider` is true (drivers ride too) |
+
+### The rider map shell
+
+`features/rider/shell/` (screens: [screens.md](screens.md#the-rider-map-shell-ridershellrider_map_shelldart-ridershellmap_intentdart)).
+
+- `riderMapShellRoute(rootNavigatorKey)` is a `ShellRoute` in the rider's Home branch with the stage routes `/rider/home`, `/rider/book/route`, `/rider/book/quote`, `/rider/trip/:id` (empty `NoTransitionPage`s; the shell's child navigator is kept in the tree, invisible and ignoring pointers, for back navigation) and, on the root navigator, `pay` and `rate` under the trip. `routerProvider` gives the `GoRouter` the `rootNavigatorKey`.
+- `RiderMapShell` derives the stage from `GoRouterState.uri` (`RiderMapStage.fromUri`): no provider is written while building. It owns the frame-rate state: `CarsAnimator` (paused unless the home stage is on screen and the app in the foreground; nearby polling paused with it), a `MarkerAnimator` per trip (`carFor(tripId)`), the `AppSheetController`, the sheet height `ValueNotifier` (a height reported while the sheet rebuilds with new snap points is applied after the frame), the confetti. `RiderMapScope` (an `InheritedWidget`) hands them to the stage widgets.
+- `MapIntent` (`map_intent.dart`): what the map shows, as data with `==` (so a rebuild with the same state is the same intent): `fit` + `fitKey`, pins, routes, `revealKey` (a new value draws the first route progressively), `nearby`, `car` + `carMinutes` + `carRoad`, `follow`, `callouts` (`IntentCallout.minutes` / `.arriveAt`, worded by the shell), `radarAt`, `pin` (no insets: the camera centre is the place), `controls`. One provider per stage derives it: `homeMapIntentProvider`, `searchMapIntentProvider` (pins, or pin mode from `pinPickerProvider`), `quoteMapIntentProvider` (the estimate's road or, while re-quoting, `lastQuoteRouteProvider`'s dimmed; "N min" and "Arrive HH:MM"), `tripMapIntentProvider(id)` (from `tripViewProvider(id)`: the stage, the last car sample and the ETA; the road split at the car's projection while riding).
+- `_RiderMapView` watches the current stage's intent and builds the one `AnbessaMap`; the reveal is an `AnimationController` (600 ms, emphasized curve) around it, drawing `routePrefix(points, t)`.
+- `RiderSheet` maps the stage to header, body and footer widgets; `sheetStopsFor` gives the snap points; after a stage change the shell animates the sheet to the stage's resting snap (the first time in 1 ms, so the sheet counts as moved and later snap changes animate instead of jumping).
+- Helpers with tests: `arriveAt`, `clockHHmm`, `minutesCeil`, `routePrefix`, `sameRoutes` (`test/map_intent_test.dart`); `placeIcon` and `formatDistance` live in core (`packages/core/test/places_test.dart`).
 
 `paymentDueProvider` (`features/rider/payments/payment_due_controller.dart`): true when the person's latest rider trip completed less than 24 h ago, was paid by mobile money or card, and its fare payment is open or failed. It re-runs whenever `activeTripProvider` changes and swallows every error.
 
@@ -364,8 +377,8 @@ The comment in `routes.dart` says `anbessa://` and `https://app.anbessa.et` link
 | Flag | Default when missing from the response | Read by |
 |---|---|---|
 | `phoneBooking` | on | nothing in `lib/` |
-| `corporateBooking` | on | `QuoteScreen`: offers "Company account" when on **and** the JWT has an org id |
-| `tripPin` | off | `RiderTripScreen` (shows the PIN), `DriverTripScreen` (asks for it before start) |
+| `corporateBooking` | on | Choose ride (`QuoteSheet`): offers "Company account" when on **and** the JWT has an org id |
+| `tripPin` | off | `TripSheet` (shows the PIN), `DriverTripScreen` (asks for it before start) |
 | `scheduledRides` | off | rider home chip, account tile, "Pickup time" on the quote, "Upcoming" in Activity, `scheduledRidesProvider` (no request while off) |
 | `sos` | off | SOS button on both trip screens (while `sosAvailable`: an active trip with a driver, or ≤ 30 min after drop-off) |
 | `support` | off | Account → Help, driver Account → Lost items, the receipt's "Help with this trip" |
@@ -440,13 +453,11 @@ Who uses it:
 
 | Caller | Profile | When |
 |---|---|---|
-| `RiderHomeScreen` | `once` | once when the screen opens (sets `lastPositionProvider`) |
-| `RouteEditorScreen` "Use my location" | `once` | on tap |
+| `riderLocationProvider` (`rider/shell/map_intent.dart`) | permission with `once`, then a `rider` stream (10 m filter) | while the rider map shell is on screen (auto-dispose); every fix sets `lastPositionProvider`, so the blue dot moves |
+| Search "Use my location", the place picker | `once` | on tap |
 | `ShiftController` | `driverOnline` | permission check before going online; a position stream while online |
 
-Nothing uses the `rider` profile, so the rider's own dot is not updated continuously.
-
-`lastPositionProvider` holds the last position the app saw. It is set by the rider home, the route editor and every driver position while online.
+`lastPositionProvider` holds the last position the app saw. It is set by the rider's position stream, "Use my location" and every driver position while online.
 
 ### Driver pings (`ShiftController`)
 
@@ -543,7 +554,7 @@ Modes: `free`, `overview(points)`, `follow(subject)` (north up, `followZoom`), `
 | `topInset`, `sheetHeight`, `bottomInset` | pixels covered by banners and the sheet. `sheetHeight` is a `ValueListenable<double>` the sheet writes to directly (the screen doesn't rebuild while it's dragged); it replaces `bottomInset` |
 | `follow`, `followZoom = 16` | `FollowMode`: `none`, `me` (the person; falls back to the car when there is no position), `driver` (follow, north up), `driverBearing` (navigate) |
 | `showControls`, `showModeSwitch`, `interactive`, `padding` | |
-| `onUserGesture` | every pan, pinch or turn by the person (the route editor lifts its pin; screens may drop their follow flag) |
+| `onUserGesture` | every pan, pinch or turn by the person (the pin pickers lift their pin; screens may drop their follow flag) |
 | `onRecenter` | the recenter control or pill was pressed; with it the control always shows |
 | `onTap`, `onMove` | `onMove` gets the camera centre after a gesture ends (drag-to-pick) |
 
@@ -574,7 +585,7 @@ Glides a car between GPS samples; a `ValueListenable<AnimatedPose?>` (`lat`, `ln
 - Heading without a route: the sample's heading when given; below 1.5 m/s (measured from the samples when not given) the last heading is kept, so a parked car doesn't spin on GPS jitter; otherwise the bearing of the movement (when it moved more than 3 m).
 - The ticker runs only while gliding or rolling. More than 20 s without a sample marks the pose `stale` (a timer flips it).
 
-Fed by `RiderTripScreen` (the driver's car; route = the ETA polyline to the target, or the trip's road while riding), `DriverHomeScreen` and `DriverTripScreen` (the driver's own car from `lastPositionProvider`; on a trip the route is the guidance route), and per car by `CarsAnimator`.
+Fed by the rider map shell's trip stage (the driver's car, one animator per trip owned by `RiderMapShell`; route = the ETA polyline to the pickup, or the trip's road while riding: `MapIntent.carRoad`), `DriverHomeScreen` and `DriverTripScreen` (the driver's own car from `lastPositionProvider`; on a trip the route is the guidance route), and per car by `CarsAnimator`.
 
 ### Nearby cars (`nearby_cars_layer.dart`)
 
@@ -584,19 +595,25 @@ Fed by `RiderTripScreen` (the driver's car; route = the ETA polyline to the targ
 
 ### Navigation (`nav/`)
 
-`NavigationController` (`navigationProvider(NavTarget)`), used by `DriverTripScreen`:
+`NavigationController` (`navigationProvider(NavTarget)`, auto-disposed), used by `DriverTripScreen`:
 
-- `start(from)` fetches `GET /api/maps/route?steps=1` (through `routeFetcherProvider`, overridable in tests). With no polyline it uses a straight two-point line.
-- `update(position, speed)` projects the car onto the route and computes the travelled and remaining parts, metres left, the next step (the first step whose manoeuvre is at most 15 m behind the car, ignoring `depart`), the step after, and the metres to the next manoeuvre. Time left uses the average speed of the route, blended 50/50 with the measured speed when that is above 1.5 m/s.
-- Off route: more than 60 m from the line. After 8 s off route it fetches a new route, but at most once every 20 s (60 s when the route is `approximate`).
-- `TurnBanner` shows the next turn (icon from `maneuverIcon`, words from `maneuverLabel(l10n, maneuverKey(step), name)`), "in <distance>", and states for loading, rerouting and no route; a warning colour when off route. Tapping it opens `TurnListSheet` with every step.
+- Driven by positions, not widgets: its `build` listens to `lastPositionProvider` (the shift's location stream); the first fix calls `start`, later ones `update(position, speed, heading)`. Tests call `start` / `update` directly or set the provider.
+- `NavState` is immutable with `==` / `hashCode` (the route is compared by `routeVersion`, which goes up with each fetched route). It carries the `RouteTrack` (points + cumulative metres), the steps and each step's distance along the route (`stepAlong`, matched in order so a junction passed twice gets the right pass), `progressMeters`, `snapped` (the fix matched to the route, or the raw fix off it) and `bearing` (the road's bearing there), `fixSeq`, the next step and the one after, metres to the maneuver, remaining metres and seconds, `offRoute`, `wrongWay`, `rerouting`, `approximate`, `arrived`, `error`, `loading`. `traversedAt(m)` / `remainingAt(m)` split the route anywhere (the screen splits at the animated car).
+- Monotonic progress: a fix is matched inside a window from 25 m behind the last progress to max(150 m, speed × 10 + 80 m) ahead, only to segments whose bearing is within 60° of the heading (the phone's heading at ≥ 2 m/s, else the bearing between fixes ≥ 8 m apart), and never moves back. With nothing in the window it takes the nearest matching stretch further ahead within 25 m (a gap in the fixes); a fix on the road behind the progress is lagging (kept) or, when the heading is against every stretch there, the wrong way. So a route that drives the same street out and back, or a parallel or crossing road, doesn't make the car jump.
+- Next step: the first non-`depart` step whose maneuver is at most 8 m behind the progress. Time left: the route's own pace (`distance / duration` at fetch), blended 70/30 with the measured speed above 1.5 m/s.
+- Reroute: more than 50 m from the route for 6 s, or on it but driving against it for 5 s; at most every 15 s (60 s when the route is `approximate`); never after arriving, never while a fetch is in flight.
+- Heading: `/api/maps/route` takes no bearing. When a new route starts by turning back (a `uturn` step within 150 m, or a first 40 m more than 100° off the heading), it is asked for again from a point 80 m ahead along the heading, and the one whose start matches the heading better wins (the car's position is prepended to it).
+- Arrival: within 40 m of the target (or of the route's end while on it) `arrived` is set and stays for this target; the screen buzzes once and shows the stage hint.
+- `nav_format.dart`: `navDistance(l10n, m)` → "Now" (< 15 m), 10 m steps below 100 m, 50 m steps below 1 km ("200 m", "850 m"), then "1.2 km" (no decimal from 10 km); `navSpokenDistance` for the voice ("200 metres"); `navOrdinal`; `navInstruction` (the street when named, "Take the 2nd exit onto X" at roundabouts from `RouteStep.exit`) and `navShortInstruction` ("Turn left"). `km()` in core is unchanged for its other users.
+- `TurnBanner`: the maneuver icon on amber (`ManeuverGlyph` in `maneuver_icons.dart`, with the exit number badge at roundabouts), the distance large, the instruction under it, a "then" chip when the next turn follows within 400 m; steps change with a vertical `SharedAxisSwitcher`; loading, rerouting (spinner), no route, off the route and the wrong way have their own look (warning colours). Tapping opens `TurnListSheet`: the remaining steps with their distance and, at the bottom, `NavSummaryBar` (time left, distance left, "Arrive 14:32").
+- `voice_guide.dart`: `VoiceScheduler` (pure) picks the cue for each state: a maneuver at ~500 m (only after a stretch of at least 700 m), ~200 m and ~30 m (or ~4 s before the turn at speed), each once, never a farther prompt after a nearer one; a maneuver is identified by type, modifier, exit and position (~30 m), so a reroute that keeps the same next turn repeats nothing; "Rerouting" once per reroute; the arrival once (from the geofence, not the arrive step). `VoiceGuide` builds the sentence from ARB templates (`navVoiceIn` "In {distance}, {instruction}", `navVoiceNow`, arrival at the pickup / destination) and speaks through `TtsEngine` (`ttsEngineProvider`; `FlutterTtsEngine` uses flutter_tts with Android navigation audio attributes and audio focus, iOS playback with duck-others, so music ducks under prompts). Amharic uses an `am-ET` voice when the phone has one, otherwise the guide speaks English (few phones ship an Amharic TTS voice). Muted (prefs `nav_voice`, `navVoiceProvider`, the map's speaker button) still consumes cues so unmuting doesn't replay; muting and leaving the screen stop speech. Being on a phone call is not detected (the OS audio focus usually holds prompts back).
 - `openExternalNavigation(lat, lng, app, label)` (`nav/external_nav.dart`) tries, in order: Google Maps (`comgooglemaps://` on iOS, `google.navigation:` on Android) when chosen, Waze (`waze://`) when chosen, the system maps app (`maps://` on iOS, `geo:` on Android), then the Google Maps web URL.
 
 The rider's ETA (`features/rider/trip/trip_eta_controller.dart`): `tripEtaProvider(tripId).track(car, target)` asks `GET /api/maps/route` (no steps) when the target moved more than 20 m or the last answer is older than 30 s; after a failure it tries again about 10 s later. With no answer the screen estimates `straight-line distance × 1.35 / 6.1 m/s`.
 
 `heading_source.dart` defines `compassHeadingProvider` (accelerometer + magnetometer, tilt compensated, low-pass filtered, Android/iOS only). Nothing in `lib/` reads it.
 
-The driver trip screen keeps the screen on with `wakelock_plus` while it is open, when the "Keep screen on" preference is on.
+The driver trip screen keeps the screen on with `wakelock_plus` while it is open, when the "Keep screen on" preference is on. Android declares the `TTS_SERVICE` intent query (package visibility) for flutter_tts.
 
 ## Haptics
 
@@ -666,5 +683,6 @@ The notification preference toggles in Account → Notifications are stored but 
 - **Account trip count**: one light page instead of watching the whole history ([screens.md](screens.md#accountscreen-profileaccount_hub_screendart)).
 - **History**: grouping and filtering live in `historyDaysProvider`; the list is a keyed `ListView.builder`.
 - **Avatars** (`packages/core/lib/src/ui/widgets/avatar_image.dart`): a data-URL photo is base64-decoded once into a `MemoryImage` kept in a 32-entry LRU keyed by the string's hash (checked against the string on a hit). Rebuilds hand Flutter the same provider, so the `ImageCache` hits and the JPEG isn't decoded again either.
-- **Ticking texts**: `Countdown`, `ElapsedText` and `TickingBuilder` in core (`ticking.dart`) rebuild only themselves once a second and pause in a muted `TickerMode`. The quote, trip and offer screens still run screen-wide 1 s timers; they move to these widgets with the map rewrite.
+- **Ticking texts**: `Countdown`, `ElapsedText` and `TickingBuilder` in core (`ticking.dart`) rebuild only themselves once a second and pause in a muted `TickerMode`. The rider's choose-ride and trip stages have no screen-wide timer: the quote expiry is a `Countdown` (its end flips the button), the time searching an `ElapsedText`, the stale position and the free-cancel window `TickingBuilder`s every 5 s.
+- **Rider map shell** (see [The rider map shell](#the-rider-map-shell)): one map for the whole flow, so no map reloads between stages; the sheet height, the nearby cars and the trip's car reach the map as listenables, so dragging the sheet or a car moving never rebuilds a screen; only the map widget rebuilds when a stage's intent changes (and for 600 ms while a new road draws); decoded polylines are memoised per string (`decodedRouteProvider`); nearby cars are polled and animated only on the home stage on screen; search rows are keyed in a `ListView.builder`.
 

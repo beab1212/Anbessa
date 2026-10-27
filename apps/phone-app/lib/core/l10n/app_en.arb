@@ -1472,5 +1472,143 @@
       }
     }
   },
-  "incentivesLede": "Completed trips count once they are settled. Rewards go to your balance when the program ends."
+  "incentivesLede": "Completed trips count once they are settled. Rewards go to your balance when the program ends.",
+  "navNow": "Now",
+  "navMeters": "{meters} m",
+  "@navMeters": {
+    "placeholders": {
+      "meters": {
+        "type": "String"
+      }
+    }
+  },
+  "navKm": "{km} km",
+  "@navKm": {
+    "placeholders": {
+      "km": {
+        "type": "String"
+      }
+    }
+  },
+  "navRoundaboutExit": "Take the {exit} exit onto {name}",
+  "@navRoundaboutExit": {
+    "placeholders": {
+      "exit": {
+        "type": "String"
+      },
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "navRoundaboutExitShort": "Take the {exit} exit",
+  "@navRoundaboutExitShort": {
+    "placeholders": {
+      "exit": {
+        "type": "String"
+      }
+    }
+  },
+  "navShortLeft": "Turn left",
+  "navShortRight": "Turn right",
+  "navShortSlightLeft": "Keep left",
+  "navShortSlightRight": "Keep right",
+  "navShortSharpLeft": "Turn sharp left",
+  "navShortSharpRight": "Turn sharp right",
+  "navShortStraight": "Continue straight",
+  "navShortMerge": "Merge",
+  "navShortOnRamp": "Take the ramp",
+  "navShortOffRamp": "Take the exit",
+  "navShortExitRoundabout": "Exit the roundabout",
+  "navShortArrive": "Arrive at your destination",
+  "navVoiceIn": "In {distance}, {instruction}",
+  "@navVoiceIn": {
+    "placeholders": {
+      "distance": {
+        "type": "String"
+      },
+      "instruction": {
+        "type": "String"
+      }
+    }
+  },
+  "navVoiceNow": "{instruction} now",
+  "@navVoiceNow": {
+    "placeholders": {
+      "instruction": {
+        "type": "String"
+      }
+    }
+  },
+  "navVoiceMeters": "{meters} metres",
+  "@navVoiceMeters": {
+    "placeholders": {
+      "meters": {
+        "type": "String"
+      }
+    }
+  },
+  "navVoiceKm": "{km} kilometres",
+  "@navVoiceKm": {
+    "placeholders": {
+      "km": {
+        "type": "String"
+      }
+    }
+  },
+  "navVoiceRerouting": "Rerouting",
+  "navVoiceArrivedPickup": "You have arrived at the pickup",
+  "navVoiceArrivedDropoff": "You have arrived at the destination",
+  "navMute": "Mute voice guidance",
+  "navUnmute": "Turn on voice guidance",
+  "navOffRoute": "Off the route",
+  "navWrongWay": "Driving away from the route",
+  "navArriveAt": "Arrive {time}",
+  "@navArriveAt": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "navRemainingTime": "Time left",
+  "navRemainingDistance": "Distance",
+  "drvArrivedHintPickup": "You're at the pickup. Slide when you have stopped.",
+  "drvArrivedHintDropoff": "You're at the drop-off. Slide to complete the trip.",
+  "drvCallRider": "Call the rider",
+  "drvOfferExpiresIn": "Offer ends in {seconds} s",
+  "@drvOfferExpiresIn": {
+    "placeholders": {
+      "seconds": {
+        "type": "int"
+      }
+    }
+  },
+  "rideArriveAt": "Arrive {time}",
+  "@rideArriveAt": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "rideMinutes": "{min} min",
+  "@rideMinutes": {
+    "placeholders": {
+      "min": {
+        "type": "int"
+      }
+    }
+  },
+  "rideNearbyEta": "~{min} min",
+  "@rideNearbyEta": {
+    "placeholders": {
+      "min": {
+        "type": "int"
+      }
+    }
+  },
+  "rideServiceLater": "Later",
+  "rideNoAnnouncements": "No announcements right now",
+  "rideMovePin": "Move the map to place the pin"
 }

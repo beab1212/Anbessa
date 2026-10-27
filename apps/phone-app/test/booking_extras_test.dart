@@ -1,4 +1,4 @@
-// The quote screen's extras against a fake backend: a promo code (discount on the card and the
+// The choose-ride stage's extras (in the rider map shell) against a fake backend: a promo code (discount on the card and the
 // button, the code sent, refusals explained, malformed codes never sent), booking for later
 // (POST /api/trips/scheduled, then Activity), and a company ride's purpose and policy refusal.
 
@@ -15,23 +15,14 @@ import 'package:phone_app/core/session/secure_store.dart';
 import 'package:phone_app/core/session/session_controller.dart';
 import 'package:phone_app/features/config/client_config_provider.dart';
 import 'package:phone_app/features/rider/booking/booking_controller.dart';
-import 'package:phone_app/features/rider/booking/quote_screen.dart';
+import 'package:phone_app/core/router/routes.dart';
 import 'package:ride_app_core/ride_app_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'support/fakes.dart';
+import 'support/rider_shell.dart';
 
-/// client-config from the fixture with chosen flags on.
-class FlagConfig extends ClientConfigController {
-  FlagConfig(this.flags);
-  final Map<String, bool> flags;
-  @override
-  Future<ClientConfig> build() async {
-    final j = Map<String, dynamic>.from(fixture('client_config.json'));
-    j['features'] = {...asJson(j['features']), ...flags};
-    return ClientConfig.fromJson(j);
-  }
-}
+export 'support/rider_shell.dart' show FlagConfig, settle, tapText;
 
 const meskel = Place(name: 'Meskel Square', lat: 9.0107, lng: 38.7613);
 const bole = Place(name: 'Bole International Airport', lat: 8.9779, lng: 38.7993);
@@ -98,22 +89,6 @@ Future<ProviderContainer> pumpWithBackend(
   return container;
 }
 
-/// Fixed frames: the map and the price counters never quite settle.
-Future<void> settle(WidgetTester tester) async {
-  await tester.pump();
-  await tester.pump(const Duration(milliseconds: 600));
-  await tester.pump();
-  await tester.pump(const Duration(seconds: 1));
-}
-
-Future<void> tapText(WidgetTester tester, String text) async {
-  final f = find.text(text).last;
-  await tester.ensureVisible(f);
-  await tester.pump();
-  await tester.tap(f);
-  await settle(tester);
-}
-
 void routeEstimates(FakeBackend backend, {Json? promo}) {
   backend.on('POST', '/api/pricing/estimates', (o) {
     final code = asJson(o.data)['promoCode'];
@@ -122,6 +97,10 @@ void routeEstimates(FakeBackend backend, {Json? promo}) {
     return fixture('estimates_promo.json');
   });
 }
+
+/// The choose-ride stage in the map shell, with a pickup and a drop-off set by [before].
+Future<ShellHarness> pumpQuote(WidgetTester tester, FakeBackend backend, {Map<String, bool> flags = const {}, Brightness brightness = Brightness.light, Session? who, void Function(ProviderContainer c)? before}) =>
+    pumpRiderShell(tester, at: Routes.riderQuote, backend: backend, flags: flags, brightness: brightness, who: who, before: before);
 
 void ready(ProviderContainer c) {
   c.read(bookingProvider.notifier).setPickup(meskel, quote: false);
@@ -136,7 +115,7 @@ void main() {
       final backend = FakeBackend();
       routeEstimates(backend);
       backend.on('POST', '/api/trips', (_) => fixture('trip.json'));
-      await pumpWithBackend(tester, backend, const QuoteScreen(), flags: {'promos': true}, brightness: b, before: ready);
+      final h = await pumpQuote(tester, backend, flags: {'promos': true}, brightness: b, before: ready);
       expect(mainButton(tester).trailing, birr(26000));
 
       await tapText(tester, 'Promo code');
@@ -151,14 +130,15 @@ void main() {
 
       await tapText(tester, 'Request Economy');
       expect(backend.bodies('POST', '/api/trips').single['quoteId'], 'q_0b7c4a10-0000-4000-8000-000000000001');
-      expect(find.textContaining('trip page'), findsOneWidget);
+      expect(locationOf(h.router), Routes.riderTrip(Trip.fromJson(fixture('trip.json')).id));
+      await endShell(tester, h);
     });
   }
 
   testWidgets('a refused code says why; a malformed one is never sent', (tester) async {
     final backend = FakeBackend();
     routeEstimates(backend, promo: {'code': 'OLD10', 'applied': false, 'reason': 'expired', 'message': 'This code has expired.'});
-    await pumpWithBackend(tester, backend, const QuoteScreen(), flags: {'promos': true}, before: ready);
+    await pumpQuote(tester, backend, flags: {'promos': true}, before: ready);
 
     await tapText(tester, 'Promo code');
     await tester.enterText(find.byKey(const ValueKey('promo-code')), 'old10');
@@ -178,7 +158,7 @@ void main() {
   testWidgets('without the promos flag there is no promo row', (tester) async {
     final backend = FakeBackend();
     routeEstimates(backend);
-    await pumpWithBackend(tester, backend, const QuoteScreen(), before: ready);
+    await pumpQuote(tester, backend, before: ready);
     expect(find.text('Promo code'), findsNothing);
     expect(find.text('Pickup time'), findsNothing);
   });
@@ -189,7 +169,7 @@ void main() {
     backend.on('GET', '/api/trips/scheduled', (_) => {'scheduled': []});
     backend.on('POST', '/api/trips/scheduled', (o) => {...fixture('scheduled_trip.json'), 'scheduledFor': asJson(o.data)['scheduledFor']});
     final at = ScheduleWindow.tripService.suggested(DateTime.now());
-    await pumpWithBackend(tester, backend, const QuoteScreen(), flags: {'scheduledRides': true}, brightness: Brightness.dark, before: (c) {
+    await pumpQuote(tester, backend, flags: {'scheduledRides': true}, brightness: Brightness.dark, before: (c) {
       ready(c);
       c.read(bookingProvider.notifier).scheduleAt(at);
     });
@@ -213,7 +193,7 @@ void main() {
     backend.on('GET', '/api/trips/corporate/org-1/policy', (_) => {'orgId': 'org-1', 'requirePurpose': true, 'configured': true});
     backend.on('POST', '/api/trips', (_) => const FakeReply(422, {'error': 'policy_violation', 'message': 'Your company allows comfort rides only', 'rule': 'vehicle_type'}));
     final rider = session(roles: [{'r': 'RIDER'}, {'r': 'CORPORATE_RIDER', 'org': 'org-1'}]);
-    await pumpWithBackend(tester, backend, const QuoteScreen(), who: rider, before: (c) {
+    await pumpQuote(tester, backend, who: rider, before: (c) {
       ready(c);
       c.read(bookingProvider.notifier).pay(PaymentMethod.corporate, billingOrgId: 'org-1');
     });

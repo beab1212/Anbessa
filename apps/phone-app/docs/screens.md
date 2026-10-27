@@ -6,7 +6,7 @@ Common patterns:
 
 - Errors are shown with `Problem(error, describe: describeError)`; a retry button appears only for retryable errors.
 - Loading uses `Skeleton*` placeholders rather than spinners, except where noted.
-- Map screens stack `AnbessaMap` + an `AppSheet`; the sheet's height is fed to the map as `bottomInset`.
+- Map screens stack `AnbessaMap` + an `AppSheet`; the sheet's height is fed to the map as the `sheetHeight` listenable. The rider's home, search, choose ride and trip share one map in the rider map shell.
 
 ## Bootstrap and sign-in
 
@@ -64,71 +64,73 @@ The client does not filter announcements by `cities`, `startsAt` or `endsAt`.
 
 ## Rider
 
-### RiderHomeScreen (`rider/home/rider_home_screen.dart`)
+### The rider map shell (`rider/shell/rider_map_shell.dart`, `rider/shell/map_intent.dart`)
 
-- Map: the person's dot (from one location fix at open, `LocationProfile.once`), the nearby cars animated by `CarsAnimator`, follow mode `me` at zoom 15 until the person moves the map, a callout "N min away" over the nearest car when the nearby response has an ETA.
-- Top: a pill with the avatar and a greeting by time of day (morning < 12 h, afternoon < 18 h, evening), tapping it goes to Account; a "N cars nearby" chip when there are drivers (or "…" while the first poll loads).
-- Sheet (snaps 34 %, 62 %, 92 %):
-  - "Where to?" (with a "Now" pill) → `/rider/book/route?focus=dropoff`.
-  - Tiles: Home and Work (dashed "Set home/work" when empty, which opens the route editor in saved-place mode), other saved places, and "Add place" → `/account/places`. Tapping a set tile sets it as the drop-off and opens the route editor focused on the pickup. Long-press any tile → `/account/places`. Skeleton tiles while saved places load.
-  - Up to 5 recent places; swipe left to forget one; tap to book.
-  - A "Schedule a ride" chip (flag `scheduledRides`): `startScheduling` resets the booking, sets a suggested pickup time (`ScheduleWindow.suggested`: the next quarter hour at least 45 min away) and opens the route editor focused on the drop-off.
-- Providers: `lastPositionProvider`, `locationSourceProvider`, `nearbyCarsProvider`, `savedPlacesProvider`, `homePlaceProvider`, `workPlaceProvider`, `recentPlacesProvider`, `bookingProvider`, `featureProvider`, `bannerHeightProvider`, `currentSessionProvider`.
-- API: `GET /api/locations/nearby` every 10 s (stopped while the app is paused), `GET /api/trips/places`.
+Home, search, choose ride and the trip are **stages of one screen** with **one map**: a go_router `ShellRoute` (`riderMapShellRoute`) inside the rider's Home tab, whose child routes `/rider/home`, `/rider/book/route`, `/rider/book/quote` and `/rider/trip/:id` are empty pages. `RiderMapShell` reads the stage from the location (`RiderMapStage.fromUri`) and stacks:
 
-### RouteEditorScreen (`rider/booking/route_editor_screen.dart`)
+- the map: one `AnbessaMap` fed by the stage's `MapIntent` (pins, routes, the car, nearby cars, follow or fit, callouts, the radar pulse), each derived by its own provider from app state (`homeMapIntentProvider`, `searchMapIntentProvider`, `quoteMapIntentProvider`, `tripMapIntentProvider(id)`). The camera fits again only when an intent's `fitKey` changes; a gesture frees it and shows the Recenter pill.
+- the stage's floating bar (`_StageOverlays`): the home bar and the nearby chip, a back button (choose ride, pin mode), share and SOS (trip).
+- `RiderSheet`: one `AppSheet` driven by an `AppSheetController`. Each stage has its snap points (`sheetStopsFor`: home 40/62/92 %, search 50/94 % resting at 94 %, pin mode 30/50 %, choose ride 52/94 %, trip 42/86 %); on a stage change the sheet glides to the new resting size (380 ms) and the content switches with a shared-axis transition (`SharedAxisSwitcher`), header and footer with a fade. The sheet height goes to the map as a `ValueListenable` (`sheetHeight`), never through a screen rebuild.
+- the completion confetti.
 
-Two modes: **book** (pickup and drop-off fields, a swap button) and **savedPlace** (one search field; the chosen place is returned to the caller with `pop`).
+The tab bar is hidden on the booking and trip stages (`riderTabsHiddenAt`), as when these were separate pages. Pay and rate stay full-screen pages on the root navigator with a slide-up transition; the driver's photo is a `Hero` (`driverAvatarHeroTag(tripId)` = `driver-avatar-<tripId>`) from the trip sheet to Pay and Rate. Moving animations (nearby cars, the trip's car) are owned by the shell (`CarsAnimator`, one `MarkerAnimator` per trip) and reach the stages through `RiderMapScope`. The rider's position is a stream while the shell is on screen (`riderLocationProvider`, `LocationProfile.rider`), so the blue dot moves.
 
-- On open in book mode with no pickup: if the last position is inside a served city, the pickup becomes "Current location".
-- Typing ≥ 2 characters searches `GET /api/maps/search` (300 ms debounce, current city, UI language). Results are grouped: saved places (book mode only), recent places (4, or 8 when typing), well-known places for the city from `commonPlaces` (6, or 8), then remote results not already listed.
-- States: skeleton while searching; a warning when search fails ("search down", local lists still shown); an illustrated "no results".
-- "Use my location": permission check (`locationServiceOff` / `locationPermissionNeeded` errors), a fix, then resolve.
-- "Choose on map": a full-screen map with a centre pin that lifts while dragging; when the map stops, the centre is checked against the served cities (`outsideServiceArea`), snapped to the road with `GET /api/maps/snap` (pickups in book mode only), and named with `GET /api/maps/reverse` (falls back to "lat, lng"). A card shows the name and "Confirm pickup / drop-off / Save place".
-- Choosing a place for one field moves the focus to the other; when both are set it calls `BookingController.quote()` and replaces itself with `/rider/book/quote`. Choosing a drop-off adds it to recent places (max 8).
-- Swap calls `BookingController.swap()`, which re-quotes when both are set.
+Stage changes are logged with `Perf.mark('rider stage <name>')` in debug and profile builds.
 
-### QuoteScreen (`rider/booking/quote_screen.dart`)
+### Home (`rider/home/rider_home_screen.dart`: `HomeSheet`, `HomeTopBar`, `NearbyChip`)
 
-- Map: pickup and drop-off pins with name callouts, the road line from the estimate (`route.polyline6`), or a straight line.
-- Sheet (snaps 48 %, 92 %): a header with both places, "distance · time" and "Edit" (back to the route editor); one card per quote (name, max seats, pickup ETA badge (hidden when booking for later), distance and time, the price as a `PriceTag`: the payable amount, with the undiscounted fare struck through above it when a promo lowered it); the fare breakdown (base, distance, time, the promo discount, "minimum fare applied") for the selected quote, collapsible; then a group of rows:
-  - "Pickup time" (flag `scheduledRides`): "Now" or the chosen time. Tapping offers Now / "Pick a time"; the latter opens the date picker (from the earliest to the latest bookable day) and the time picker, reads the result as Addis time, and checks it against `ScheduleWindow.tripService` (30 min to 7 days ahead, mirroring trip-service's `DEFAULT_SCHEDULE`, since client-config doesn't publish the window). Out of the window: a toast with `errorTooSoon` / `errorTooFarAhead`.
-  - Payment method.
-  - "Promo code" (flag `promos`): "Add", or the code in use. Tapping opens a sheet with a code field, "Apply" and, when a code is in use, "Remove code". `BookingController.applyPromo` upper-cases and checks the format (`isValidPromoCode`: 3–32 letters, digits, `_`, `-`; a malformed code would make pricing-service refuse the whole estimate, so it is never sent and `promoInvalidFormat` is shown), then fetches a new estimate with `promoCode`. Under the row: "CODE applied · You save X" (green) when the selected quote is discounted, "CODE doesn't discount this vehicle type" when only others are, or the refusal (`promoRejectionText`: unknown, not active, not started, expired, used up, not in this city, not for these vehicle types, already used). A refused code is dropped from the following estimates; the refusal stays until the rider acts.
-- Company rides (method "Company account"): a "Trip purpose or cost centre" field (max 200), with "Your company asks for this" when `GET /api/trips/corporate/:orgId/policy` says `requirePurpose` (the request button is disabled while it's empty), else "Optional". The purpose is sent only for company rides and only when not empty. A policy that can't be read counts as no requirement (the server still checks).
-- When booking for later: "We check the price again shortly before pickup. You pay the lower one." Then "Quote expires in m:ss".
-- Footer: a maintenance notice when new trips are paused (the button is disabled); "Request <type>" or, with a pickup time, "Schedule <type>", with the payable price; "Get a new price" when the quote expired. A `policy_violation` (422) shows the server's sentence naming the rule (in English; `errorPolicyViolation` in Amharic) and "Pay personally instead", which switches to the first non-company method.
-- States: three skeleton cards while quoting; an error with Retry; an info notice when the estimate is `approximate`.
-- Payment methods offered: `GET /api/payments/methods` for the current city (fallback cash only), minus corporate, plus "Company account" when the flag `corporateBooking` is on and the JWT carries an org id. If the remembered method is not offered, the first offered one is selected. Choosing corporate sets `billingOrgId` to the **first org id in the JWT** (not the "default company" preference).
-- Request: `POST /api/trips` with the quote id, the method, the org id, the purpose and the booking's idempotency key (one key per quote; reused if the request fails), then `/rider/trip/<id>`. The quote's promo discount is booked by trip-service when it reads the quote. `active_trip_exists` refreshes the active trip and goes to it; `quote_expired` / `invalid_quote` / `quote_used` fetch a new quote.
-- Schedule: `POST /api/trips/scheduled` with the same fields plus `scheduledFor` (UTC ISO), same key rule; the booking is added to `scheduledRidesProvider`, a toast "Ride booked for <time>", then `/rider/activity`. `too_soon`, `too_far_ahead`, `too_many_scheduled`, `schedule_conflict` are shown in words.
-- Quoting: `POST /api/pricing/estimates` with the vehicle types offered in the city that contains the pickup, and the promo code when one is in use. The first estimate on opening runs after the first frame.
+- Map: the rider's live dot, followed at zoom 15 until they move the map; the nearby cars gliding (`CarsAnimator`), with "N min" over the nearest when the nearby response has an ETA. Nearby cars are polled (`GET /api/locations/nearby`, every 10 s and when the rider moves 150 m) and animated only on the home stage while it is on screen and the app is in the foreground.
+- Top bar: the avatar and a greeting by time of day (→ Account tab), and a bell (`RoundIconButton`, dot when riders have announcements) opening the announcements list (closed ones dimmed; an illustrated empty state).
+- Above the sheet: "3 cars nearby · ~4 min" (`MapChip`), "…" while the first poll loads, nothing when none.
+- Sheet: `SearchBarButton` "Where to?" → search (drop-off focused). Its "Now ▾" chip opens the pickup time picker (`chooseRideTime`: Now or a day and time in the booking window, Addis time) when the flag `scheduledRides` is on, and shows the chosen time; otherwise it opens the search. `ServiceTile`s: Ride (→ search), Later (flag `scheduledRides`: `startScheduling`), Places (→ `/account/places`). Then `SuggestionRow`s: Home and Work ("Set home/work" when empty → the account's place picker, then saved), other saved places (star), and up to 5 recent places (their category icon, or a clock; swipe left to forget), each with the distance from the rider. Tapping a place calls `bookTo`: it becomes the drop-off; with a pickup (the one chosen, or the rider's position inside a served city) straight to choose ride, else the search with the pickup focused. Long-press a saved place → `/account/places`.
+- Providers: `homePlaceProvider`, `workPlaceProvider`, `savedPlacesProvider`, `recentPlacesProvider`, `bookingProvider`, `nearbyCarsProvider`, `riderLocationProvider`, `featureProvider`, `configProvider`, `currentSessionProvider`.
 
-### RiderTripScreen (`rider/trip/rider_trip_screen.dart`)
+### Search (`rider/booking/search_sheet.dart`: `SearchHeader`, `SearchSuggestions`, `PinCard`; `pin_picker.dart`)
 
-One map and a sheet (snaps 42 %, 80 %) that changes with `riderStageOf(trip)`.
+- The sheet rises to 94 % (the map stays behind it). Header: back, the pickup field (amber dot) and the drop-off field (ink square) joined by a line, and a swap button whose arrows turn with a spring (`BookingController.swap()`, which re-quotes when both are set). The pickup defaults to "Current location" when the rider is inside a served city. The field that opens focused comes from `?focus=pickup|dropoff`.
+- Typing ≥ 2 characters searches `GET /api/maps/search` (300 ms debounce, in the served city that contains the rider: `riderCityProvider`, else the first city; UI language); an answer for an older query is dropped. Rows (`SuggestionRow` in a `ListView.builder` with a key per row): "Use my location", "Choose on the map", then saved places (home, work, star), recent places, the city's common places and the search results, each led by `placeIcon(category, type)` (airport, church, hotel, bus stop, train, hospital, school, shop, food, bank, fuel, museum, park; a pin otherwise) and the distance from the pickup (from the rider while the pickup itself is chosen), haversine on the phone, written by `formatDistance` ("850 m", "2.4 km", "14 km"). States: skeletons while searching, "search down" warning, illustrated "no results".
+- Picking a place for one field moves the focus to the other; with both set, `BookingController.quote()` and choose ride **replaces** the search. Drop-offs go to the recent places (with their category, so the icon comes back).
+- "Choose on the map" (`PinPicker`): the sheet becomes a small card, the map loses its insets so the camera centre is the place under the pin. The pin lifts while the map is dragged and drops with a spring when it stops; 350 ms after the map settles the centre is checked against the served cities (`outsideServiceArea`), snapped to the road for a pickup (`GET /api/maps/snap`) and named (`GET /api/maps/reverse`); a lookup for a centre the rider has since left is dropped. The card shows the place (its icon, name, address; skeletons while looking) and "Confirm pickup / drop-off". Back (the button or the system back) returns to the list.
 
-| Stage | Map | Sheet |
+### Choose ride (`rider/booking/quote_screen.dart`: `QuoteHeader`, `QuoteSheet`, `QuoteFooter`)
+
+- Map: the road from the estimate draws from the pickup over 600 ms (a growing prefix of the line, `routePrefix`; at once with reduced motion), the camera fits the whole road above the sheet; callouts "4 min" at the pickup (the shortest pickup ETA among the classes) and "Arrive 14:32" at the drop-off (now + the chosen class's pickup ETA + the ride's duration, local time: `arriveAt`); none when booking for later. While re-quoting (a place changed), the previous road stays on the map dimmed (`lastQuoteRouteProvider`) and the cards are skeletons.
+- Header: both places, "distance · time", Edit (→ the search, replacing this stage).
+- A horizontal carousel of `VehicleClassCard`s entering one after another: our car art per class (`VehicleArt`), seats, the pickup ETA (hidden when booking for later), the payable price with the undiscounted fare struck through when a promo lowered it; the chosen class has the amber ring.
+- "Fare breakdown" folds out: distance and time, base, distance and time fares, the promo discount, "minimum fare applied".
+- Rows: pickup time (flag `scheduledRides`, `chooseRideTime`: out-of-window times give `errorTooSoon` / `errorTooFarAhead`), payment method, promo code (flag `promos`; the promo sheet, `applyPromo` checks the format first so a malformed code is never sent; the outcome line under the row), the company ride's purpose (method "Company account": "Your company asks for this" when the policy says `requirePurpose`, the button disabled while empty).
+- "Quote expires in m:ss" is a `Countdown`: only that text ticks; when it reaches zero the sheet shows "Price expired" and the button becomes "Get a new price".
+- Footer: a maintenance notice when new trips are paused (the button disabled); the amber "Request <class>" or "Schedule <class>" button with the payable price; a `policy_violation` shows the server's sentence and "Pay personally instead".
+- Request: `POST /api/trips` (quote id, method, org id, purpose, the booking's idempotency key, reused after a failure), then the trip stage. `active_trip_exists` goes to the active trip; `quote_expired` / `invalid_quote` / `quote_used` fetch a new quote. Schedule: `POST /api/trips/scheduled` with `scheduledFor`, a toast, then Activity.
+- Quoting: `POST /api/pricing/estimates` for the vehicle types offered where the pickup is, with the promo code in use; the first estimate runs after the first frame. Payment methods: `GET /api/payments/methods` for the city (fallback cash), plus "Company account" when the flag `corporateBooking` is on and the JWT has an org id (`billingOrgId` = the first org id).
+
+### Trip (`rider/trip/rider_trip_screen.dart`: `TripSheet`, `TripTopBar`)
+
+The sheet content follows `riderStageOf(trip)` with a shared-axis switch, and the sheet settles at its resting size on every stage change.
+
+| Stage | Map (`tripMapIntentProvider`) | Sheet |
 |---|---|---|
-| finding | radar pulse at the pickup, pickup → drop-off line | "Requested" pill with the elapsed time, "Finding a driver", vehicle, drop-off, estimate, Cancel |
-| driverAssigned | the car (MarkerAnimator), the car's road to the pickup (from `tripEtaProvider`, else a straight line), the trip line as a secondary dashed leg; ETA callout over the car | progress bar (matched → on the way → arrived → riding), "<driver> is on the way", ETA badge, "live" or "position stale" line, photo with rating ("New" under three ratings), car and plate, the PIN (flag `tripPin`, when the trip has one), fare and method, Cancel (with the fee note after the free window) |
-| driverArrived | car and pickup | same card, "<driver> has arrived" |
-| inTrip | the car's road to the drop-off, ETA callout | "On the way to <drop-off>", ETA badge, driver, fare and method |
-| completed | both pins | total, "paid by <method>", "Pay" (digital) or "Receipt" (cash or corporate) → `/rider/trip/<id>/pay`, Done |
-| cancelled | both pins | "No driver found" (reason `NO_DRIVER_FOUND`) or "cancelled by <side>", the fee if any, Done |
+| finding | radar pulse at the pickup, the trip's road | "Requested" pill with the time searching (`ElapsedText`), "Finding your driver", drop-off and estimate, Cancel |
+| driverAssigned | the car gliding along its road to the pickup (`MarkerAnimator` snapped to the road from `tripEtaProvider`, else a straight line), "N min" over it, the trip's road as a dashed secondary leg | progress (matched → on the way → arrived → riding), "<driver> is on the way" with the ETA, "live" or "position stale" (checked every 5 s), the driver card: photo (`Hero`), name, `RatingSummary`, colour, make and model, `PlateBadge`; the PIN (flag `tripPin`), fare and method, Cancel (the fee note appears by itself when the free window closes) |
+| driverArrived | car and pickup | the same card, "<driver> has arrived" (and a toast) |
+| inTrip | the road split where the car is: driven in grey, ahead in amber; "Arrive HH:MM" at the drop-off | "On the way to <drop-off>", an "Arrive HH:MM" pill, driver and plate, fare and method |
+| completed | both pins and the road | the driver's photo, the total (`AnimatedMoney`), the promo line, "paid by", Pay or Receipt → `/rider/trip/<id>/pay`; confetti |
+| cancelled | both pins | "No driver found" or "cancelled by <side>", the fee, Done |
 
-- Top: back (only when the trip ended), Share (active and not `requested`), SOS (flag `sos`, while `sosAvailable`: matched, en route, in progress, or completed ≤ 30 min ago) → `/sos?trip=<id>`.
-- Stage changes play haptics; arrival shows a toast; completion plays confetti. When dispatch gives the trip to another driver (a `trip:status` with another `driver.userId`), `ActiveTripController` invalidates `tripPartiesProvider` (new name, photo, car) and the screen shows "Your driver changed" once.
-- Money shown is what the rider pays (`fare.payableMinor`: the fare minus a promo discount). Completed with a promo: under the total, "Promo code CODE · −X".
-- Cancel opens `showCancelSheet` with the reasons changedPlans, driverTooFar, driverAskedToCancel, wrongPickup, other, and a "no fee" or "a fee of 30 ETB may apply" pill (`riderCancelIsFree`, 2 min after the match; the fee is the constant `_cancelFeeMinor = 3000` in the screen). Calls `POST /api/trips/:id/cancel` with a new key.
-- Share: `POST /api/trips/:id/share`, then the share sheet with the link; when sharing, the button offers "share again" or "stop sharing" (`DELETE /api/trips/:id/share`).
-- Done: `activeTripProvider.clearIfEnded()` and `/rider/home`.
-- Providers: `tripProvider(id)`, `tripPartiesProvider(id)` (only once a driver is set), `driverLiveProvider(id)`, `tripEtaProvider(id)`, `featureProvider`.
-- Socket: `trip:status` (through `activeTripProvider`), `trip:subscribe` and `driver:location` (through `driverLiveProvider`).
-- Loading: skeleton list; error: `Problem`.
+- No call button: the trip parties carry no phone number.
+- Top: back once the trip ended; Share (a `RoundIconButton`; active and not `requested`; on → "share again / stop sharing") and SOS (red `RoundIconButton`, flag `sos`, while `sosAvailable`).
+- The camera fits each stage once (and again when the car's road or its first position arrives), never as the car moves; after a gesture it stays free with the Recenter pill.
+- When dispatch gives the trip to another driver, "Your driver changed" once.
+- Cancel: `showCancelSheet` (free for 2 min after the match, `_cancelFeeMinor` = 30 ETB after), `POST /api/trips/:id/cancel` with a new key.
+- Providers: `tripViewProvider(id)` (trip, stage, last car sample, ETA), `tripPartiesProvider(id)`, `driverLiveProvider(id)`, `tripEtaProvider(id)`, `featureProvider`.
+
+### PlacePicker (`rider/booking/route_editor_screen.dart`, `/account/places/pick?label=home|work|other`)
+
+The account's full-screen place picker for saving places (`RouteEditorScreen` in saved-place mode): one search field (`SuggestionRow`s with category icons), "Use my location", "Choose on the map" with its own map; the chosen place is returned with `pop`. Older links `/rider/book/route?mode=savedPlace&label=…` are sent here.
 
 ### PayScreen (`rider/payments/pay_screen.dart`)
 
+- Opens full-screen over the map shell (slide-up), with the driver's photo (the `Hero` from the trip sheet), name and plate on top.
 - Data: `tripPaymentsProvider(tripId)` = `GET /api/payments/trips/:tripId`, merged with `payment:action_required`, `payment:captured` and `payment:failed` events for this trip; polled every 5 s while the fare payment is open (the provider page has no return URL).
 - Cash and corporate trips: an instruction ("pay X in cash to the driver" or "your company pays").
 - Digital trips: a three-step tracker (started → approve in <provider> → paid / failed) and, by status:
@@ -149,6 +151,7 @@ One map and a sheet (snaps 42 %, 80 %) that changes with `riderStageOf(trip)`.
 
 ### RatingScreen (`rider/rating/rating_screen.dart`, both sides)
 
+- Rider side: opens full-screen over the map shell (slide-up) and the driver's photo is the `Hero` from the trip sheet or Pay.
 - Shows the other side's name (`tripPartiesProvider`), 1–5 stars, tag chips (`RatingTags.ofDriver` for riders, `ofRider` for drivers; positive tags first for 4–5 stars, negative first otherwise), a comment (max 500), and for riders a "Add a tip" row marked "Coming soon" (`kTipsEnabled` is false).
 - Submit: `POST /api/trips/:id/rating`; `already_rated` counts as done. Then a "thanks" illustration with Done. "Skip" finishes without rating.
 - Finishing clears the ended trip and goes to `doneRoute` (`/rider/home` or `/driver/home`).
@@ -172,18 +175,18 @@ One map and a sheet (snaps 42 %, 80 %) that changes with `riderStageOf(trip)`.
 
 ### DriverHomeScreen (`driver/shift/driver_home_screen.dart`)
 
-- Map: the driver's position (`lastPositionProvider`) as the car, follow mode `me` at zoom 15 until a gesture. With an offer: fit to the car, pickup and drop-off; a straight line car → pickup and the offer's road (`GET /api/maps/route` for pickup → drop-off).
-- Top chips: Online / Offline; while online "GPS good" / "GPS poor" and "Reconnecting" when the socket is not connected; "Dev tools" with fake location.
+- Map: the driver's own car animated between fixes (`MarkerAnimator`, the screen does not rebuild per fix), followed at zoom 15 until a gesture (then the "Recenter" pill). With an offer: fit to the car, pickup and drop-off once per offer; the way to the pickup dashed (secondary) and the offer's road solid (`GET /api/maps/route` for pickup → drop-off). The screen watches the raw position only while an offer is shown.
+- Top chips (with icons): Online (pulsing) / Offline; the balance (wallet icon, amber when `warning`, red when blocked; tap → top up); while online "GPS good" / "GPS poor" and "Reconnecting" when the socket is not connected; "Dev tools" with fake location.
 - A balance banner when the state is `warning`, `cashBlocked` or `blocked`, with "Top up" → `/driver/earnings/top-up`.
 - Sheet offline (snaps 32 %, 60 %):
   - "You were taken offline: <reason>" when the last session ended for a reason other than `DRIVER`;
-  - today's stats (`GET /api/payments/earnings/me?period=today`): net earnings, trips, and time online when a session exists;
+  - today's stats (`GET /api/payments/earnings/me?period=today`), each with an icon: net earnings, trips, and time online when a session exists (its own `TickingBuilder`, every 30 s);
   - the car (last used, from prefs `last_vehicle_id`, else the first drivable) with Ready / Not eligible and the denial text; tapping opens the vehicle picker (`GET /api/fleet/drivers/me/vehicles`);
   - "No vehicles" notice with "Add vehicle" → onboarding;
   - location errors with "Open settings";
-  - "Slide to go online" (enabled when the car may drive): asks for notification permission, location permission (`driverOnline`), then `POST /api/fleet/sessions` with an idempotency key kept across network failures; `already_online` refreshes the driver home.
+  - amber "Slide to go online" (enabled when the car may drive): asks for notification permission, location permission (`driverOnline`), then `POST /api/fleet/sessions` with an idempotency key kept across network failures; `already_online` refreshes the driver home.
 - Sheet online: "Waiting for offers" with a radar, the car, the stats, "Slide to go offline" (`DELETE /api/fleet/sessions/current`; a 404 counts as offline).
-- `OfferSheet` (`driver/offers/offer_sheet.dart`) replaces the sheet while there is an offer or an "expired/cancelled" notice (shown 4 s): "New trip", pickup ETA, trip distance and time, a 15 s countdown ring, pickup and drop-off, fare and method, "Slide to accept" (`POST /api/trips/:id/accept` with a key; `offer_closed` / `invalid_state` show "expired"), "Decline" (`POST /api/trips/:id/decline`, errors ignored). Accepting sets the active trip, and the router opens the trip screen.
+- `OfferSheet` (`driver/offers/offer_sheet.dart`) replaces the sheet while there is an offer or an "expired/cancelled" notice (shown 4 s). It springs up (`SpringSlideIn`, `AnbessaMotion.springDescription`; a fade when motion is reduced): "New trip" over the fare as the hero, the payment pill and pickup ETA, the class with its `VehicleArt` and the trip distance and time, pickup and drop-off, an `OfferRing` (its own `AnimationController` running down smoothly to `expiresAt`; only the ring repaints, and the sheet rebuilds once at zero to disable the slide), "Slide to accept" (`POST /api/trips/:id/accept` with a key; `offer_closed` / `invalid_state` show "expired"), "Decline" (`POST /api/trips/:id/decline`, errors ignored). Accepting sets the active trip, and the router opens the trip screen.
 - `ShiftController` follows the server's session: every 60 s while online it refreshes `GET /api/fleet/drivers/me`; when the session closes on the server, it stops streaming and keeps the end reason.
 - Socket: `trip:offer`, `trip:offer_expired`, `trip:offer_cancelled` (offers), `location:update` (pings).
 
@@ -193,16 +196,17 @@ A bottom sheet listing the cars; ineligible ones are dimmed with the denial mess
 
 ### DriverTripScreen (`driver/trip/driver_trip_screen.dart`)
 
-- Keeps the screen on while open when the "Keep screen on" preference is on.
-- Map: in-app navigation to the target (pickup, then drop-off) with the travelled part greyed; follow `driverBearing` (or `driver` when "Turn the map the way I'm driving" is off) at zoom 17; a gesture switches to overview; an ETA callout at the target. Without a route: a straight line. The trip line is drawn as a secondary leg on the way to the pickup.
-- Top: `TurnBanner` (tap → turn list) while navigating; back (ended trips); SOS (flag `sos`, while `sosAvailable`, so also for 30 min after drop-off); chips "Follow / Overview" and "Directions" (external app, asking which one when the preference is "ask").
-- Sheet: the rider's photo and name, the target address, the payment method pill; a call button only if `kMaskedCallsEnabled` (false).
+- Keeps the screen on while open when the "Keep screen on" preference is on (`wakelock_plus`).
+- Guidance runs from the location stream, never from `build`: `navigationProvider(NavTarget)` listens to `lastPositionProvider` itself; the screen `ref.listen`s to its state and hands the car animator the position matched to the route and the road's bearing, the voice guide the state, and the map a tick when the route or the ETA minute changes. A widget test counts the screen's builds over 40 s of fixes (at most one).
+- Map: the car glides along the guidance route (`MarkerAnimator` with the nav route); the camera drives with it in navigate mode (`FollowMode.driverBearing`: tilted, turned, car in the lower third, zoom by speed; `driver` when "Turn the map the way I'm driving" is off); a gesture frees the camera and shows the "Recenter" pill; the "Overview" chip fits the car and the target. The driven part (grey) and the rest (amber) split at the animated car's position (re-split every 3 m; only the map subtree rebuilds). An ETA callout at the target. Without a route yet: a straight line. The trip line is drawn as a secondary leg on the way to the pickup.
+- Top: `TurnBanner` (tap → `TurnListSheet`, live) while navigating; back (ended trips) and SOS (flag `sos`, while `sosAvailable`, so also for 30 min after drop-off) as `RoundIconButton`s; chips "Follow / Overview" and "Directions" (external app, asking which one when the preference is "ask"); a mute / unmute `RoundIconButton` for voice guidance (prefs `nav_voice`).
+- Sheet: the rider card (`AvatarImage`, name, the target address with an icon, the fare and payment pill, scaled down rather than squeezing the name at large text); a call button only if `kMaskedCallsEnabled` (false; the parties API has no rider rating, so none is shown). While navigating: time left, distance left and "Arrive 14:32" (`NavSummaryBar`); within 40 m of the target "You have arrived" with what to do next (slide when stopped / slide to complete). All slides are amber.
 
 | Stage | Actions |
 |---|---|
 | accepted | "Slide: on my way" → `POST /api/trips/:id/en-route`; "Cancel trip" |
-| toPickup | distance to the pickup (green within 150 m), "Slide: arrived" (green within 300 m) → `POST /api/trips/:id/arrive` (the server checks the position); "Cancel trip" |
-| waitingAtPickup | waiting timer, "free until 3:00" then "rider is waiting"; "Slide to start" → PIN sheet when `tripPin` is on (4 `PinBoxes`), then `POST /api/trips/:id/start {pin}`; "No-show" enabled after 5 min (counts down before) → cancel with `NO_SHOW` |
+| toPickup | straight-line distance to the pickup (green within 150 m; its own widget, rounded to 10 m), "Slide: arrived" → `POST /api/trips/:id/arrive` (the server checks the position); "Cancel trip" |
+| waitingAtPickup | waiting timer on a ring (its own `TickingBuilder`, the screen doesn't tick), "free until 3:00" then "rider is waiting"; "Slide to start" → PIN sheet when `tripPin` is on (4 `PinBoxes`), then `POST /api/trips/:id/start {pin}`; "No-show" enabled after 5 min (counts down before) → cancel with `NO_SHOW` |
 | inTrip | "Slide to complete" → `POST /api/trips/:id/complete` with a key kept across retries |
 | completed | "Collect X cash" (cash; X is `fare.payableMinor`, the fare minus the rider's promo discount, which the platform covers), "Company pays", or "Rider pays digitally"; "Rate rider" → `/driver/trip/<id>/rate`; "Back to driving" |
 | cancelled | "cancelled by <side>", the compensation earned if any, "Back to driving" |
@@ -297,7 +301,7 @@ The preferred mobile-money provider: `GET` / `PUT /api/payments/me/preferences`,
 
 ### SavedPlacesScreen (`profile/saved_places_screen.dart`)
 
-Home, Work and other places (`GET /api/trips/places`). Set or change opens the route editor in saved-place mode; Home and Work use `PUT /api/trips/places/home|work`, others `POST /api/trips/places`. Swipe or tap the bin to remove (`DELETE /api/trips/places/:id`).
+Home, Work and other places (`GET /api/trips/places`). Set or change opens the place picker (`/account/places/pick`, `pickAndSavePlace`, also used by the home sheet's "Set home/work"); Home and Work use `PUT /api/trips/places/home|work`, others `POST /api/trips/places`. Swipe or tap the bin to remove (`DELETE /api/trips/places/:id`).
 
 ### AppearanceScreen, NotificationsScreen, SafetyScreen, NavigationPrefsScreen, OrganizationsScreen (`profile/preference_screens.dart`)
 

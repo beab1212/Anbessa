@@ -107,7 +107,10 @@ class _MeasuredState extends State<_Measured> {
   Widget build(BuildContext context) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final h = context.size?.height ?? 0;
+      // offstage (a full-screen page covers the shell) there is no layout to measure
+      final box = context.findRenderObject();
+      if (box is! RenderBox || !box.hasSize) return;
+      final h = box.size.height;
       if ((h - _last).abs() > 0.5) {
         _last = h;
         widget.onHeight?.call(h);

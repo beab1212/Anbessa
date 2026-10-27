@@ -165,6 +165,16 @@ String minutesOf(int? seconds) {
 /// "5.2 km"
 String km(int? meters) => meters == null ? '—' : '${(meters / 1000).toStringAsFixed(meters < 10_000 ? 1 : 0)} km';
 
+/// A distance as people say it: "850 m" under a kilometre (rounded to 10 m, "< 50 m" very
+/// close), "2.4 km" up to 10 km, "14 km" beyond.
+String formatDistance(double meters) {
+  if (meters.isNaN || meters < 0) return '—';
+  if (meters < 50) return '< 50 m';
+  if (meters < 995) return '${((meters / 10).round() * 10)} m';
+  final k = meters / 1000;
+  return k < 9.95 ? '${k.toStringAsFixed(1)} km' : '${k.round()} km';
+}
+
 /// Short id for receipts and support: the last 6 characters, upper case.
 String shortId(String id) => id.replaceAll('-', '').toUpperCase().let((s) => s.length > 6 ? s.substring(s.length - 6) : s);
 

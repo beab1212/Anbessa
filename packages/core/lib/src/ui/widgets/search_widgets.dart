@@ -135,3 +135,45 @@ class SuggestionRow extends StatelessWidget {
     );
   }
 }
+
+/// The icon for a place by its Nominatim class ([category]) and kind ([type]): airports, places
+/// of worship, hotels, bus stops and stations, hospitals and clinics, schools and universities,
+/// shops, restaurants and cafés; a plain pin for anything else (and for places without a class).
+IconData placeIcon(String? category, String? type) {
+  final cat = (category ?? '').toLowerCase();
+  final t = (type ?? '').toLowerCase();
+  if (cat == 'aeroway' || t == 'aerodrome' || t == 'airport' || t == 'terminal') return Icons.local_airport_rounded;
+  if (t == 'bus_stop' || t == 'bus_station' || (cat == 'highway' && t == 'platform') || (cat == 'public_transport' && t.contains('bus'))) return Icons.directions_bus_rounded;
+  if (cat == 'railway' || t == 'station' || t == 'tram_stop') return Icons.train_rounded;
+  switch (cat) {
+    case 'amenity':
+      switch (t) {
+        case 'place_of_worship':
+          return Icons.church_rounded;
+        case 'hospital' || 'clinic' || 'doctors' || 'pharmacy':
+          return Icons.local_hospital_rounded;
+        case 'school' || 'university' || 'college' || 'kindergarten':
+          return Icons.school_rounded;
+        case 'restaurant' || 'cafe' || 'fast_food' || 'bar' || 'pub' || 'food_court':
+          return Icons.restaurant_rounded;
+        case 'bank' || 'atm':
+          return Icons.account_balance_rounded;
+        case 'fuel':
+          return Icons.local_gas_station_rounded;
+      }
+    case 'tourism':
+      switch (t) {
+        case 'hotel' || 'motel' || 'guest_house' || 'hostel':
+          return Icons.hotel_rounded;
+        case 'museum' || 'attraction' || 'gallery':
+          return Icons.museum_rounded;
+      }
+    case 'building' when t == 'church' || t == 'cathedral' || t == 'mosque':
+      return Icons.church_rounded;
+    case 'shop':
+      return Icons.shopping_bag_rounded;
+    case 'leisure' when t == 'park' || t == 'garden':
+      return Icons.park_rounded;
+  }
+  return Icons.place_rounded;
+}

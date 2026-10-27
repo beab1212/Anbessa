@@ -8,6 +8,7 @@ import 'package:ride_app_core/ride_app_core.dart';
 import '../../../core/l10n/l10n.dart';
 import '../../../core/network/providers.dart';
 import '../../flagged/flagged_modules.dart';
+import '../shell/rider_map_shell.dart' show driverAvatarHeroTag;
 import '../trip/active_trip_controller.dart';
 
 class RatingScreen extends ConsumerStatefulWidget {
@@ -73,7 +74,12 @@ class _RatingScreenState extends ConsumerState<RatingScreen> {
           if (_done) ...[
             IllustratedEmpty(illustration: AnbessaIllustration.celebrate, title: l.thanksRating, action: SizedBox(width: 200, child: PrimaryButton(label: l.done, onPressed: _finish))),
           ] else ...[
-            Center(child: AvatarImage(src: photo, name: name, size: 80, ring: true)),
+            Center(
+              child: widget.asDriver
+                  ? AvatarImage(src: photo, name: name, size: 80, ring: true)
+                  // the driver's photo flies in from the trip sheet or the pay page
+                  : Hero(tag: driverAvatarHeroTag(widget.tripId), child: AvatarImage(src: photo, name: name, size: 80, ring: true)),
+            ),
             const SizedBox(height: 12),
             Text(name, textAlign: TextAlign.center, style: AnbessaType.h2.copyWith(color: c.text)),
             const SizedBox(height: 4),

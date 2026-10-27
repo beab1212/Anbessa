@@ -1,377 +1,110 @@
-// Choosing the ride (workflow 05 B–C): the route on the map, one card per vehicle type with its
-// ETA and fixed price, the fare breakdown, the payment method, and Request. Quotes last 10
-// minutes; a new price is fetched when one expires. Also: a pickup time to book the ride for
-// later (workflow 12, flag `scheduledRides`), a promo code (workflow 15, flag `promos`) whose
-// discount shows on the cards and the button, and a company ride's purpose (workflow 11).
-
-import 'dart:async';
+// The choose-ride stage in the map shell (workflow 05 B–C). The map (drawn by the shell) shows the
+// road growing from the pickup, "N min" at the pickup and "Arrive HH:MM" at the drop-off. The sheet:
+// the route summary on top; a carousel of vehicle classes (our car art, seats, ETA, the price, the
+// original struck through when a promo lowers it; the chosen one ringed in amber), the fare details
+// to expand, the pickup time, payment, promo and a company ride's purpose; the amber
+// "Request <class> · <price>" button at the bottom. Quotes last 10 minutes: the expiry counts down
+// in its own small widget, and a new price is fetched when one expires. Changing a place refetches
+// in place: skeleton cards while the old road stays on the map, dimmed.
+// Also: booking for later (workflow 12, flag `scheduledRides`), a promo code (workflow 15, flag
+// `promos`) and a company ride's purpose and policy refusal (workflow 11).
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:latlong2/latlong.dart';
 import 'package:ride_app_core/ride_app_core.dart';
 import '../../../core/l10n/l10n.dart';
 import '../../../core/router/routes.dart';
 import '../../../core/session/session_controller.dart';
 import '../../config/client_config_provider.dart';
-import '../../maps/anbessa_map.dart';
 import '../trip/active_trip_controller.dart';
+import 'booking_actions.dart';
 import 'booking_controller.dart';
 
-class QuoteScreen extends ConsumerStatefulWidget {
-  const QuoteScreen({super.key});
-  @override
-  ConsumerState<QuoteScreen> createState() => _QuoteScreenState();
+/// The parts of the choose-ride stage the header, body and footer share.
+@immutable
+class QuoteUi {
+  const QuoteUi({this.requesting = false, this.error, this.expiredQuote});
+  final bool requesting;
+  final Object? error;
+  /// the id of a quote whose countdown reached zero
+  final String? expiredQuote;
+  bool get policyRefused => error is AppError && (error as AppError).code == ErrorCodes.policyViolation;
 }
 
-class _QuoteScreenState extends ConsumerState<QuoteScreen> {
-  Timer? _tick;
-  DateTime _now = DateTime.now().toUtc();
-  bool _requesting = false;
-  Object? _error;
-  double _sheetHeight = 0;
-  bool _breakdownOpen = false;
-  late final TextEditingController _purpose;
-
+class QuoteUiController extends Notifier<QuoteUi> {
   @override
-  void initState() {
-    super.initState();
-    _tick = Timer.periodic(const Duration(seconds: 1), (_) => setState(() => _now = DateTime.now().toUtc()));
-    final b = ref.read(bookingProvider);
-    _purpose = TextEditingController(text: b.purpose);
-    // after the first frame: providers can't change while the tree builds
-    if (b.ready && b.quotes.isEmpty && !b.quoting) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) ref.read(bookingProvider.notifier).quote();
-      });
-    }
-  }
+  QuoteUi build() => const QuoteUi();
+  void reset() => state = const QuoteUi();
+  void busy(bool v) => state = QuoteUi(requesting: v, error: v ? null : state.error, expiredQuote: state.expiredQuote);
+  void fail(Object? e) => state = QuoteUi(requesting: state.requesting, error: e, expiredQuote: state.expiredQuote);
+  void expired(String quoteId) => state = QuoteUi(requesting: state.requesting, error: state.error, expiredQuote: quoteId);
+}
 
-  @override
-  void dispose() {
-    _tick?.cancel();
-    _purpose.dispose();
-    super.dispose();
-  }
+final quoteUiProvider = NotifierProvider<QuoteUiController, QuoteUi>(QuoteUiController.new);
 
-  Future<void> _request() => _submit(() async {
-        final trip = await ref.read(bookingProvider.notifier).request();
-        Haptics.success();
-        if (mounted) context.go(Routes.riderTrip(trip.id));
-      });
+/// The chosen quote has expired (by its clock, or its countdown ran out on screen).
+bool quoteExpired(Quote? q, QuoteUi ui) => q != null && (q.isExpired(DateTime.now().toUtc()) || ui.expiredQuote == q.id);
 
-  Future<void> _schedule() => _submit(() async {
-        final s = await ref.read(bookingProvider.notifier).schedule();
-        Haptics.success();
-        if (!mounted) return;
-        showToast(context, context.l10n.scheduledBooked(dayAndTime(s.scheduledFor, locale: context.localeTag)), tone: NoticeTone.ok);
-        context.go(Routes.riderActivity);
-      });
+/// The vehicle class's name from client-config (its code when unknown).
+String vehicleName(ClientConfig cfg, String code) => cfg.vehicleTypes.where((v) => v.code == code).firstOrNull?.name ?? code;
 
-  Future<void> _submit(Future<void> Function() action) async {
-    Haptics.heavy();
-    setState(() {
-      _requesting = true;
-      _error = null;
-    });
-    try {
-      await action();
-    } on AppError catch (e) {
-      if (e.code == ErrorCodes.activeTripExists) {
-        await ref.read(activeTripProvider.notifier).refresh();
-        final t = ref.read(activeTripProvider).value;
-        if (t != null && mounted) context.go(Routes.riderTrip(t.id));
-        return;
-      }
-      if (e.code == ErrorCodes.quoteExpired || e.code == ErrorCodes.invalidQuote || e.code == ErrorCodes.quoteUsed) ref.read(bookingProvider.notifier).quote();
-      Haptics.error();
-      setState(() => _error = e);
-    } catch (e) {
-      Haptics.error();
-      setState(() => _error = e);
-    } finally {
-      if (mounted) setState(() => _requesting = false);
-    }
-  }
+/// The payment methods the rider may pick here (company billing when they belong to one).
+List<PaymentMethod> offeredMethods(WidgetRef ref) {
+  final methods = ref.watch(paymentMethodsProvider).value ?? PaymentMethodsConfig.fallback;
+  final session = ref.watch(currentSessionProvider);
+  final corporateOk = ref.watch(featureProvider(Feature.corporateBooking)) && (session?.claims.orgIds.isNotEmpty ?? false);
+  return [...methods.methods.where((m) => m != PaymentMethod.corporate), if (corporateOk) PaymentMethod.corporate];
+}
 
-  /// Now, or a time within the booking window (Addis time, like every time the app shows).
-  Future<void> _chooseTime() async {
-    final l = context.l10n;
-    final b = ref.read(bookingProvider);
-    final later = await showModalBottomSheet<bool>(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(padding: const EdgeInsets.fromLTRB(20, 4, 20, 8), child: Align(alignment: Alignment.centerLeft, child: Text(l.pickupTime, style: AnbessaType.h2.copyWith(color: ctx.colors.text)))),
-            ChoiceRow(title: l.now, selected: !b.scheduling, onTap: () => Navigator.pop(ctx, false)),
-            ChoiceRow(title: l.scheduleWhen, subtitle: b.scheduling ? dayAndTime(b.scheduledFor, locale: context.localeTag) : null, selected: b.scheduling, onTap: () => Navigator.pop(ctx, true)),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
-    if (later == null || !mounted) return;
-    if (!later) return ref.read(bookingProvider.notifier).scheduleAt(null);
-    const w = ScheduleWindow.tripService;
-    final now = DateTime.now().toUtc();
-    final current = toAddis(b.scheduledFor ?? w.suggested(now));
-    final first = toAddis(w.earliest(now));
-    final last = toAddis(w.latest(now));
-    final day = await showDatePicker(
-      context: context,
-      initialDate: DateTime(current.year, current.month, current.day),
-      firstDate: DateTime(first.year, first.month, first.day),
-      lastDate: DateTime(last.year, last.month, last.day),
-    );
-    if (day == null || !mounted) return;
-    final time = await showTimePicker(context: context, initialTime: TimeOfDay(hour: current.hour, minute: current.minute));
-    if (time == null || !mounted) return;
-    // the picked wall time is Addis time
-    final at = DateTime.utc(day.year, day.month, day.day, time.hour, time.minute).subtract(addisOffset);
-    final problem = w.check(at, DateTime.now().toUtc());
-    if (problem != null) {
-      Haptics.error();
-      showToast(context, describeError(l, AppError(status: 400, code: problem, message: problem)), tone: NoticeTone.warning);
+Future<void> _submit(BuildContext context, WidgetRef ref, Future<void> Function() action) async {
+  final ui = ref.read(quoteUiProvider.notifier);
+  Haptics.heavy();
+  ui.busy(true);
+  try {
+    await action();
+  } on AppError catch (e) {
+    if (e.code == ErrorCodes.activeTripExists) {
+      await ref.read(activeTripProvider.notifier).refresh();
+      final t = ref.read(activeTripProvider).value;
+      if (t != null && context.mounted) context.go(Routes.riderTrip(t.id));
       return;
     }
-    Haptics.selection();
-    ref.read(bookingProvider.notifier).scheduleAt(at);
+    if (e.code == ErrorCodes.quoteExpired || e.code == ErrorCodes.invalidQuote || e.code == ErrorCodes.quoteUsed) ref.read(bookingProvider.notifier).quote();
+    Haptics.error();
+    ui.fail(e);
+  } catch (e) {
+    Haptics.error();
+    ui.fail(e);
+  } finally {
+    ui.busy(false);
   }
+}
 
-  Future<void> _enterPromo() async {
-    final b = ref.read(bookingProvider);
-    final code = await showModalBottomSheet<String>(context: context, isScrollControlled: true, builder: (ctx) => _PromoSheet(initial: b.promoCode ?? b.promo?.code ?? '', applied: b.promoCode != null));
-    if (code == null || !mounted) return;
-    final booking = ref.read(bookingProvider.notifier);
-    if (code.isEmpty) return booking.removePromo();
-    await booking.applyPromo(code);
-    final outcome = ref.read(bookingProvider).promo;
-    if (outcome != null) outcome.applied ? Haptics.success() : Haptics.error();
-  }
+Future<void> requestRide(BuildContext context, WidgetRef ref) => _submit(context, ref, () async {
+      final trip = await ref.read(bookingProvider.notifier).request();
+      Haptics.success();
+      if (context.mounted) context.go(Routes.riderTrip(trip.id));
+    });
 
-  /// After a company policy refusal: the same ride on the first personal method.
-  void _payPersonally(List<PaymentMethod> offered) {
-    final m = offered.where((x) => x != PaymentMethod.corporate).firstOrNull;
-    if (m == null) return;
-    ref.read(bookingProvider.notifier).pay(m);
-    setState(() => _error = null);
-  }
+Future<void> scheduleRide(BuildContext context, WidgetRef ref) => _submit(context, ref, () async {
+      final s = await ref.read(bookingProvider.notifier).schedule();
+      Haptics.success();
+      if (!context.mounted) return;
+      showToast(context, context.l10n.scheduledBooked(dayAndTime(s.scheduledFor, locale: context.localeTag)), tone: NoticeTone.ok);
+      context.go(Routes.riderActivity);
+    });
 
-  Future<void> _choosePayment(List<PaymentMethod> offered, Session? session) async {
-    final l = context.l10n;
-    final c = context.colors;
-    final b = ref.read(bookingProvider);
-    final picked = await showModalBottomSheet<PaymentMethod>(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(padding: const EdgeInsets.fromLTRB(20, 4, 20, 8), child: Align(alignment: Alignment.centerLeft, child: Text(l.paymentMethod, style: AnbessaType.h2.copyWith(color: c.text)))),
-            for (final m in offered)
-              ChoiceRow(
-                title: paymentMethodLabel(l, m),
-                selected: b.paymentMethod == m,
-                onTap: () => Navigator.pop(ctx, m),
-              ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
-    if (picked != null) ref.read(bookingProvider.notifier).pay(picked, billingOrgId: picked == PaymentMethod.corporate ? session?.claims.orgIds.firstOrNull : null);
-  }
-
+/// The route on top of the sheet: pickup → drop-off, distance and time, Edit.
+class QuoteHeader extends ConsumerWidget {
+  const QuoteHeader({super.key});
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final l = context.l10n;
     final c = context.colors;
     final b = ref.watch(bookingProvider);
-    final cfg = ref.watch(configProvider);
-    final methods = ref.watch(paymentMethodsProvider).value ?? PaymentMethodsConfig.fallback;
-    final session = ref.watch(currentSessionProvider);
-    final corporateOk = ref.watch(featureProvider(Feature.corporateBooking)) && (session?.claims.orgIds.isNotEmpty ?? false);
-    final promos = ref.watch(featureProvider(Feature.promos));
-    final schedulingOn = ref.watch(featureProvider(Feature.scheduledRides));
-    final corporate = b.paymentMethod == PaymentMethod.corporate && b.billingOrgId != null;
-    final policy = corporate ? ref.watch(corporatePolicyProvider(b.billingOrgId!)).value : null;
-    final purposeMissing = corporate && (policy?.requirePurpose ?? false) && b.purpose.trim().isEmpty;
-    final policyRefused = _error is AppError && (_error as AppError).code == ErrorCodes.policyViolation;
-    final paused = cfg.maintenance.newTripsPaused;
     final quote = b.quote;
-    final expired = quote != null && quote.isExpired(_now);
-    String nameOf(String code) => cfg.vehicleTypes.where((v) => v.code == code).firstOrNull?.name ?? code;
-    final offered = [...methods.methods.where((m) => m != PaymentMethod.corporate), if (corporateOk) PaymentMethod.corporate];
-    if (!offered.contains(b.paymentMethod) && offered.isNotEmpty) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => ref.read(bookingProvider.notifier).pay(offered.first));
-    }
-    final pickup = b.pickup == null ? null : LatLng(b.pickup!.lat, b.pickup!.lng);
-    final dropoff = b.dropoff == null ? null : LatLng(b.dropoff!.lat, b.dropoff!.lng);
-    final route = b.route?.polyline6.isNotEmpty == true ? RouteLine.fromPolyline6(b.route!.polyline6) : (pickup != null && dropoff != null ? RouteLine.straight(pickup, dropoff) : null);
     final summary = b.route ?? (quote == null ? null : QuoteRoute(polyline6: '', distanceMeters: quote.distanceMeters, durationSeconds: quote.durationSeconds, approximate: quote.approximate));
-    final top = MediaQuery.paddingOf(context).top;
-
-    return Scaffold(
-      body: Stack(
-        children: [
-          AnbessaMap(
-            fit: [?pickup, ?dropoff],
-            pickup: pickup,
-            dropoff: dropoff,
-            routes: [?route],
-            topInset: top + 56,
-            bottomInset: _sheetHeight,
-            showControls: false,
-            callouts: [
-              if (pickup != null) MapCallout(point: pickup, label: b.pickup!.name, icon: Icons.trip_origin, offsetY: -52),
-              if (dropoff != null) MapCallout(point: dropoff, label: b.dropoff!.name, icon: Icons.stop_rounded, offsetY: -52),
-            ],
-          ),
-          Positioned(top: top + 8, left: 12, child: MapControlButton(icon: Icons.arrow_back, tooltip: l.back, onTap: () => context.pop())),
-          AppSheet(
-            snaps: const [0.48, 0.92],
-            onHeightChanged: (h) {
-              if ((h - _sheetHeight).abs() > 2) setState(() => _sheetHeight = h);
-            },
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-            header: _RouteSummary(b: b, summary: summary, onEdit: () => context.pushReplacement(Routes.riderRoute)),
-            footer: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                if (paused) Padding(padding: const EdgeInsets.only(bottom: 10), child: Notice(cfg.maintenance.message.isEmpty ? l.newTripsPaused : cfg.maintenance.message, tone: NoticeTone.warning)),
-                if (policyRefused) ...[
-                  Notice(describeError(l, _error), tone: NoticeTone.error),
-                  if (offered.any((m) => m != PaymentMethod.corporate)) Align(alignment: AlignmentDirectional.centerEnd, child: TextButton(onPressed: () => _payPersonally(offered), style: TextButton.styleFrom(visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 8)), child: Text(l.payPersonally))),
-                ] else
-                  Problem(_error, describe: (e) => describeError(l, e)),
-                if (_error != null && !policyRefused) const SizedBox(height: 10),
-                if (b.quotes.isEmpty && !b.quoting)
-                  const SizedBox.shrink()
-                else if (expired)
-                  PrimaryButton(label: l.getNewQuote, icon: Icons.refresh, onPressed: () => ref.read(bookingProvider.notifier).quote())
-                else
-                  PrimaryButton(
-                    label: b.scheduling ? l.scheduleFor(nameOf(quote?.vehicleType ?? '')) : l.requestRide(nameOf(quote?.vehicleType ?? '')),
-                    trailing: quote == null ? null : birr(quote.payableMinor, locale: context.localeTag),
-                    busy: _requesting || b.quoting,
-                    onPressed: paused || quote == null || purposeMissing ? null : (b.scheduling ? _schedule : _request),
-                  ),
-              ],
-            ),
-            builder: (context, _) => Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                if (b.quoting && b.quotes.isEmpty) ...[const SkeletonCard(height: 84), const SizedBox(height: 10), const SkeletonCard(height: 84), const SizedBox(height: 10), const SkeletonCard(height: 84)],
-                if (b.quoteError != null) Problem(b.quoteError, describe: (e) => describeError(l, e), onRetry: () => ref.read(bookingProvider.notifier).quote(), retryLabel: l.retry),
-                if (b.quotes.isNotEmpty) ...[
-                  if (quote?.approximate ?? false) Padding(padding: const EdgeInsets.only(bottom: 10), child: Notice(l.estimateApproximate, tone: NoticeTone.info)),
-                  for (final (i, q) in b.quotes.indexed)
-                    FadeSlideIn(
-                      delay: Duration(milliseconds: 50 * i),
-                      child: _QuoteCard(
-                        name: nameOf(q.vehicleType),
-                        seats: cfg.vehicleTypes.where((v) => v.code == q.vehicleType).firstOrNull?.seatsMax,
-                        quote: q,
-                        selected: q.vehicleType == b.vehicleType,
-                        expired: expired,
-                        showEta: !b.scheduling,
-                        onTap: () {
-                          Haptics.selection();
-                          ref.read(bookingProvider.notifier).choose(q.vehicleType);
-                        },
-                      ),
-                    ),
-                  if (quote?.breakdown != null) ...[
-                    const SizedBox(height: 4),
-                    InkWell(
-                      borderRadius: BorderRadius.circular(AnbessaRadius.md),
-                      onTap: () => setState(() => _breakdownOpen = !_breakdownOpen),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
-                        child: Row(
-                          children: [
-                            Text(l.fareBreakdown, style: AnbessaType.body2.copyWith(fontWeight: FontWeight.w600, color: c.text)),
-                            const Spacer(),
-                            AnimatedRotation(turns: _breakdownOpen ? 0.5 : 0, duration: AnbessaMotion.of(context, AnbessaMotion.base), child: Icon(Icons.expand_more, color: c.muted)),
-                          ],
-                        ),
-                      ),
-                    ),
-                    AnimatedSwitcherX(
-                      child: _breakdownOpen
-                          ? Padding(
-                              key: const ValueKey('bd'),
-                              padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
-                              child: Column(
-                                children: [
-                                  _BdRow(l.baseFare, quote!.breakdown!.baseMinor),
-                                  _BdRow(l.distanceFare, quote.breakdown!.distanceMinor),
-                                  _BdRow(l.timeFare, quote.breakdown!.timeMinor),
-                                  if (quote.discounted) _BdRow(l.promoCode, -quote.discountMinor),
-                                  if (quote.breakdown!.minimumApplied) Padding(padding: const EdgeInsets.only(top: 6), child: Text(l.minimumFareApplied, style: AnbessaType.caption.copyWith(color: c.muted))),
-                                ],
-                              ),
-                            )
-                          : const SizedBox.shrink(key: ValueKey('nobd')),
-                    ),
-                  ],
-                  const SizedBox(height: 4),
-                  SectionGroup(
-                    margin: EdgeInsets.zero,
-                    children: [
-                      if (schedulingOn) SettingsValueTile(icon: Icons.schedule, title: l.pickupTime, value: b.scheduling ? dayAndTime(b.scheduledFor, locale: context.localeTag) : l.now, onTap: _chooseTime),
-                      SettingsValueTile(icon: _methodIcon(b.paymentMethod), title: l.paymentMethod, value: paymentMethodLabel(l, b.paymentMethod), onTap: offered.length > 1 ? () => _choosePayment(offered, session) : null),
-                      if (promos) SettingsValueTile(icon: Icons.local_offer_outlined, title: l.promoCode, value: b.promoCode ?? l.promoAdd, onTap: b.quoting ? null : _enterPromo),
-                    ],
-                  ),
-                  if (promos && b.promo != null) Padding(padding: const EdgeInsets.fromLTRB(4, 8, 4, 0), child: _PromoLine(outcome: b.promo!, quote: quote)),
-                  if (corporate) ...[
-                    const SizedBox(height: 10),
-                    TextField(
-                      controller: _purpose,
-                      maxLength: 200,
-                      onChanged: (v) {
-                        ref.read(bookingProvider.notifier).setPurpose(v);
-                        if (policyRefused) setState(() => _error = null);
-                      },
-                      decoration: InputDecoration(labelText: l.purposeLabel, helperText: (policy?.requirePurpose ?? false) ? l.purposeRequired : l.purposeOptional, counterText: ''),
-                    ),
-                  ],
-                  if (b.scheduling) Padding(padding: const EdgeInsets.only(top: 10), child: Text(l.scheduleRepriceNote, style: AnbessaType.caption.copyWith(color: c.muted))),
-                  const SizedBox(height: 10),
-                  if (quote != null)
-                    Text(expired ? l.quoteExpired : l.quoteExpiresIn(mmss(quote.expiresAt.difference(_now))), style: AnbessaType.caption.copyWith(color: expired ? c.danger : c.muted, fontFeatures: AnbessaType.tabular)),
-                ],
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-IconData _methodIcon(PaymentMethod m) => switch (m) {
-      PaymentMethod.cash => Icons.payments_outlined,
-      PaymentMethod.mobileMoney => Icons.phone_iphone,
-      PaymentMethod.card => Icons.credit_card,
-      PaymentMethod.corporate => Icons.business_center_outlined,
-      _ => Icons.payment,
-    };
-
-class _RouteSummary extends StatelessWidget {
-  const _RouteSummary({required this.b, required this.summary, required this.onEdit});
-  final Booking b;
-  final QuoteRoute? summary;
-  final VoidCallback onEdit;
-  @override
-  Widget build(BuildContext context) {
-    final l = context.l10n;
-    final c = context.colors;
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Row(
@@ -380,7 +113,7 @@ class _RouteSummary extends StatelessWidget {
             children: [
               Container(width: 10, height: 10, decoration: BoxDecoration(color: c.accent, shape: BoxShape.circle)),
               Container(width: 2, height: 14, color: c.border),
-              Container(width: 10, height: 10, color: c.text),
+              Container(width: 10, height: 10, decoration: BoxDecoration(color: c.text, borderRadius: BorderRadius.circular(2))),
             ],
           ),
           const SizedBox(width: 10),
@@ -398,8 +131,12 @@ class _RouteSummary extends StatelessWidget {
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              if (summary != null) Text(l.distanceTime(km(summary!.distanceMeters), minutesOf(summary!.durationSeconds)), style: AnbessaType.caption.copyWith(color: c.muted, fontFeatures: AnbessaType.tabular)),
-              TextButton(onPressed: onEdit, style: TextButton.styleFrom(visualDensity: VisualDensity.compact, padding: EdgeInsets.zero), child: Text(l.edit)),
+              if (summary != null) Text(l.distanceTime(km(summary.distanceMeters), minutesOf(summary.durationSeconds)), style: AnbessaType.caption.copyWith(color: c.muted, fontFeatures: AnbessaType.tabular)),
+              TextButton(
+                onPressed: () => context.pushReplacement('${Routes.riderRoute}?focus=dropoff'),
+                style: TextButton.styleFrom(visualDensity: VisualDensity.compact, padding: EdgeInsets.zero, minimumSize: const Size(48, 36)),
+                child: Text(l.edit),
+              ),
             ],
           ),
         ],
@@ -407,6 +144,295 @@ class _RouteSummary extends StatelessWidget {
     );
   }
 }
+
+/// The classes, the fare details and the ride's options.
+class QuoteSheet extends ConsumerStatefulWidget {
+  const QuoteSheet({super.key});
+  @override
+  ConsumerState<QuoteSheet> createState() => _QuoteSheetState();
+}
+
+class _QuoteSheetState extends ConsumerState<QuoteSheet> {
+  bool _detailsOpen = false;
+  late final TextEditingController _purpose;
+
+  @override
+  void initState() {
+    super.initState();
+    final b = ref.read(bookingProvider);
+    _purpose = TextEditingController(text: b.purpose);
+    // after the first frame: providers can't change while the tree builds
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ref.read(quoteUiProvider.notifier).reset();
+      final now = ref.read(bookingProvider);
+      if (now.ready && now.quotes.isEmpty && !now.quoting) ref.read(bookingProvider.notifier).quote();
+    });
+  }
+
+  @override
+  void dispose() {
+    _purpose.dispose();
+    super.dispose();
+  }
+
+  Future<void> _enterPromo() async {
+    final b = ref.read(bookingProvider);
+    final code = await showModalBottomSheet<String>(context: context, isScrollControlled: true, builder: (ctx) => _PromoSheet(initial: b.promoCode ?? b.promo?.code ?? '', applied: b.promoCode != null));
+    if (code == null || !mounted) return;
+    final booking = ref.read(bookingProvider.notifier);
+    if (code.isEmpty) return booking.removePromo();
+    await booking.applyPromo(code);
+    final outcome = ref.read(bookingProvider).promo;
+    if (outcome != null) outcome.applied ? Haptics.success() : Haptics.error();
+  }
+
+  Future<void> _choosePayment(List<PaymentMethod> offered, Session? session) async {
+    final l = context.l10n;
+    final c = context.colors;
+    final b = ref.read(bookingProvider);
+    final picked = await showModalBottomSheet<PaymentMethod>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(padding: const EdgeInsets.fromLTRB(20, 4, 20, 8), child: Align(alignment: Alignment.centerLeft, child: Text(l.paymentMethod, style: AnbessaType.h2.copyWith(color: c.text)))),
+            for (final m in offered) ChoiceRow(leading: Icon(_methodIcon(m)), title: paymentMethodLabel(l, m), selected: b.paymentMethod == m, onTap: () => Navigator.pop(ctx, m)),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (picked != null) ref.read(bookingProvider.notifier).pay(picked, billingOrgId: picked == PaymentMethod.corporate ? session?.claims.orgIds.firstOrNull : null);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l = context.l10n;
+    final c = context.colors;
+    final b = ref.watch(bookingProvider);
+    final ui = ref.watch(quoteUiProvider);
+    final cfg = ref.watch(configProvider);
+    final session = ref.watch(currentSessionProvider);
+    final promos = ref.watch(featureProvider(Feature.promos));
+    final schedulingOn = ref.watch(featureProvider(Feature.scheduledRides));
+    final corporate = b.paymentMethod == PaymentMethod.corporate && b.billingOrgId != null;
+    final policy = corporate ? ref.watch(corporatePolicyProvider(b.billingOrgId!)).value : null;
+    final quote = b.quote;
+    final expired = quoteExpired(quote, ui);
+    final offered = offeredMethods(ref);
+    if (!offered.contains(b.paymentMethod) && offered.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => ref.read(bookingProvider.notifier).pay(offered.first));
+    }
+    final locale = context.localeTag;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (b.quoteError != null) Problem(b.quoteError, describe: (e) => describeError(l, e), onRetry: () => ref.read(bookingProvider.notifier).quote(), retryLabel: l.retry),
+        if (quote?.approximate ?? false) Padding(padding: const EdgeInsets.only(bottom: 10), child: Notice(l.estimateApproximate, tone: NoticeTone.info)),
+        // the classes: skeletons while (re)quoting
+        SingleChildScrollView(
+          key: const ValueKey('classes'),
+          scrollDirection: Axis.horizontal,
+          clipBehavior: Clip.none,
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: b.quotes.isEmpty && (b.quoting || b.quoteError == null)
+              ? Row(children: [for (var i = 0; i < 3; i++) const Padding(padding: EdgeInsets.only(right: 10), child: Skeleton.box(width: 132, height: 156, radius: AnbessaRadius.lg))])
+              : Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    for (final (i, q) in b.quotes.indexed)
+                      FadeSlideIn(
+                        key: ValueKey('in-${q.vehicleType}'),
+                        delay: Duration(milliseconds: 60 * i),
+                        child: Padding(
+                          padding: const EdgeInsets.only(right: 10),
+                          child: Opacity(
+                            opacity: expired ? 0.5 : 1,
+                            child: VehicleClassCard(
+                              key: ValueKey('class-${q.vehicleType}'),
+                              code: q.vehicleType,
+                              name: vehicleName(cfg, q.vehicleType),
+                              fareMinor: q.fareMinor,
+                              payableMinor: q.payableMinor,
+                              seats: cfg.vehicleTypes.where((v) => v.code == q.vehicleType).firstOrNull?.seatsMax,
+                              etaSeconds: q.etaToPickupSeconds,
+                              // the ETA is about now: none when booking for later
+                              minuteLabel: b.scheduling ? null : (m) => l.rideMinutes(m),
+                              selected: q.vehicleType == b.vehicleType,
+                              locale: locale,
+                              onTap: () {
+                                Haptics.selection();
+                                ref.read(bookingProvider.notifier).choose(q.vehicleType);
+                              },
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+        ),
+        if (quote != null) ...[
+          // the details of the chosen class, folded
+          InkWell(
+            key: const ValueKey('fare-details'),
+            borderRadius: BorderRadius.circular(AnbessaRadius.md),
+            onTap: () => setState(() => _detailsOpen = !_detailsOpen),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+              child: Row(
+                children: [
+                  Icon(Icons.receipt_long_rounded, size: 18, color: c.muted),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text(l.fareBreakdown, style: AnbessaType.body2.copyWith(fontWeight: FontWeight.w600, color: c.text))),
+                  Text(l.fareFixed, style: AnbessaType.caption.copyWith(color: c.muted)),
+                  AnimatedRotation(turns: _detailsOpen ? 0.5 : 0, duration: AnbessaMotion.of(context, AnbessaMotion.base), child: Icon(Icons.expand_more_rounded, color: c.muted)),
+                ],
+              ),
+            ),
+          ),
+          AnimatedSwitcherX(
+            child: !_detailsOpen
+                ? const SizedBox.shrink(key: ValueKey('nodetails'))
+                : Padding(
+                    key: const ValueKey('details'),
+                    padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
+                    child: Column(
+                      children: [
+                        _InfoRow(l.distanceTime(km(quote.distanceMeters), minutesOf(quote.durationSeconds)), null),
+                        if (quote.breakdown != null) ...[
+                          _BdRow(l.baseFare, quote.breakdown!.baseMinor),
+                          _BdRow(l.distanceFare, quote.breakdown!.distanceMinor),
+                          _BdRow(l.timeFare, quote.breakdown!.timeMinor),
+                        ],
+                        if (quote.discounted) _BdRow(l.promoCode, -quote.discountMinor),
+                        if (quote.breakdown?.minimumApplied ?? false) Padding(padding: const EdgeInsets.only(top: 6), child: Text(l.minimumFareApplied, style: AnbessaType.caption.copyWith(color: c.muted))),
+                      ],
+                    ),
+                  ),
+          ),
+          const SizedBox(height: 4),
+          SectionGroup(
+            margin: EdgeInsets.zero,
+            children: [
+              if (schedulingOn) SettingsValueTile(icon: Icons.schedule_rounded, title: l.pickupTime, value: b.scheduling ? dayAndTime(b.scheduledFor, locale: locale) : l.now, onTap: () => chooseRideTime(context, ref)),
+              SettingsValueTile(icon: _methodIcon(b.paymentMethod), title: l.paymentMethod, value: paymentMethodLabel(l, b.paymentMethod), onTap: offered.length > 1 ? () => _choosePayment(offered, session) : null),
+              if (promos) SettingsValueTile(icon: Icons.local_offer_rounded, title: l.promoCode, value: b.promoCode ?? l.promoAdd, onTap: b.quoting ? null : _enterPromo),
+            ],
+          ),
+          if (promos && b.promo != null) Padding(padding: const EdgeInsets.fromLTRB(4, 8, 4, 0), child: _PromoLine(outcome: b.promo!, quote: quote)),
+          if (corporate) ...[
+            const SizedBox(height: 10),
+            TextField(
+              controller: _purpose,
+              maxLength: 200,
+              onChanged: (v) {
+                ref.read(bookingProvider.notifier).setPurpose(v);
+                if (ui.policyRefused) ref.read(quoteUiProvider.notifier).fail(null);
+              },
+              decoration: InputDecoration(labelText: l.purposeLabel, helperText: (policy?.requirePurpose ?? false) ? l.purposeRequired : l.purposeOptional, counterText: ''),
+            ),
+          ],
+          if (b.scheduling) Padding(padding: const EdgeInsets.only(top: 10), child: Text(l.scheduleRepriceNote, style: AnbessaType.caption.copyWith(color: c.muted))),
+          const SizedBox(height: 10),
+          // the expiry counts down by itself; only its end rebuilds the sheet
+          if (expired)
+            Text(l.quoteExpired, style: AnbessaType.caption.copyWith(color: c.danger))
+          else
+            Countdown(
+              key: ValueKey('expiry-${quote.id}'),
+              until: quote.expiresAt,
+              format: (d) => l.quoteExpiresIn(mmss(d)),
+              style: AnbessaType.caption.copyWith(color: c.muted, fontFeatures: AnbessaType.tabular),
+              onDone: () => ref.read(quoteUiProvider.notifier).expired(quote.id),
+            ),
+        ],
+      ],
+    );
+  }
+}
+
+class _InfoRow extends StatelessWidget {
+  const _InfoRow(this.label, this.value);
+  final String label;
+  final String? value;
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(children: [Expanded(child: Text(label, style: AnbessaType.body2.copyWith(color: c.text2))), if (value != null) Text(value!, style: AnbessaType.body2.copyWith(color: c.text))]),
+    );
+  }
+}
+
+/// Notices and the amber Request (or Schedule) button, pinned under the sheet.
+class QuoteFooter extends ConsumerWidget {
+  const QuoteFooter({super.key});
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final l = context.l10n;
+    final b = ref.watch(bookingProvider);
+    final ui = ref.watch(quoteUiProvider);
+    final cfg = ref.watch(configProvider);
+    final paused = cfg.maintenance.newTripsPaused;
+    final quote = b.quote;
+    final expired = quoteExpired(quote, ui);
+    final corporate = b.paymentMethod == PaymentMethod.corporate && b.billingOrgId != null;
+    final policy = corporate ? ref.watch(corporatePolicyProvider(b.billingOrgId!)).value : null;
+    final purposeMissing = corporate && (policy?.requirePurpose ?? false) && b.purpose.trim().isEmpty;
+    final offered = offeredMethods(ref);
+    final name = vehicleName(cfg, quote?.vehicleType ?? '');
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (paused) Padding(padding: const EdgeInsets.only(bottom: 10), child: Notice(cfg.maintenance.message.isEmpty ? l.newTripsPaused : cfg.maintenance.message, tone: NoticeTone.warning)),
+        if (ui.policyRefused) ...[
+          Notice(describeError(l, ui.error), tone: NoticeTone.error),
+          if (offered.any((m) => m != PaymentMethod.corporate))
+            Align(
+              alignment: AlignmentDirectional.centerEnd,
+              child: TextButton(
+                onPressed: () {
+                  // the same ride on the first personal method
+                  final m = offered.where((x) => x != PaymentMethod.corporate).firstOrNull;
+                  if (m == null) return;
+                  ref.read(bookingProvider.notifier).pay(m);
+                  ref.read(quoteUiProvider.notifier).fail(null);
+                },
+                style: TextButton.styleFrom(visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 8)),
+                child: Text(l.payPersonally),
+              ),
+            ),
+        ] else
+          Problem(ui.error, describe: (e) => describeError(l, e)),
+        if (ui.error != null && !ui.policyRefused) const SizedBox(height: 10),
+        if (b.quotes.isEmpty && !b.quoting)
+          const SizedBox.shrink()
+        else if (expired)
+          PrimaryButton(label: l.getNewQuote, icon: Icons.refresh_rounded, onPressed: () => ref.read(bookingProvider.notifier).quote())
+        else
+          PrimaryButton(
+            label: b.scheduling ? l.scheduleFor(name) : l.requestRide(name),
+            trailing: quote == null ? null : birr(quote.payableMinor, locale: context.localeTag),
+            busy: ui.requesting || b.quoting,
+            onPressed: paused || quote == null || purposeMissing ? null : () => b.scheduling ? scheduleRide(context, ref) : requestRide(context, ref),
+          ),
+      ],
+    );
+  }
+}
+
+IconData _methodIcon(PaymentMethod m) => switch (m) {
+      PaymentMethod.cash => Icons.payments_outlined,
+      PaymentMethod.mobileMoney => Icons.phone_iphone,
+      PaymentMethod.card => Icons.credit_card,
+      PaymentMethod.corporate => Icons.business_center_outlined,
+      _ => Icons.payment,
+    };
 
 class _BdRow extends StatelessWidget {
   const _BdRow(this.label, this.minor);
@@ -422,86 +448,6 @@ class _BdRow extends StatelessWidget {
           Expanded(child: Text(label, style: AnbessaType.body2.copyWith(color: c.text2))),
           MoneyText(minor, locale: context.localeTag, style: AnbessaType.body2.copyWith(color: c.text)),
         ],
-      ),
-    );
-  }
-}
-
-class _QuoteCard extends StatelessWidget {
-  const _QuoteCard({required this.name, required this.quote, required this.selected, required this.onTap, this.seats, this.expired = false, this.showEta = true});
-  final String name;
-  final int? seats;
-  final Quote quote;
-  final bool selected;
-  final bool expired;
-  /// hidden when booking for later (the ETA is about now)
-  final bool showEta;
-  final VoidCallback onTap;
-  @override
-  Widget build(BuildContext context) {
-    final l = context.l10n;
-    final c = context.colors;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: AnimatedScale(
-        scale: selected ? 1.02 : 1,
-        duration: AnbessaMotion.of(context, AnbessaMotion.base),
-        curve: AnbessaMotion.spring,
-        child: Material(
-          color: c.surface,
-          borderRadius: BorderRadius.circular(AnbessaRadius.lg),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(AnbessaRadius.lg),
-            onTap: onTap,
-            child: Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(borderRadius: BorderRadius.circular(AnbessaRadius.lg), border: Border.all(color: selected ? c.text : c.border, width: selected ? 2 : 1)),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // wraps rather than overflows on a small phone with large text
-                        Wrap(
-                          spacing: 6,
-                          crossAxisAlignment: WrapCrossAlignment.end,
-                          children: [
-                            Text(name, style: AnbessaType.title.copyWith(color: c.text), maxLines: 1, overflow: TextOverflow.ellipsis),
-                            if (seats != null) Text('$seats ${l.seats.toLowerCase()}', style: AnbessaType.caption.copyWith(color: c.muted)),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        Wrap(
-                          spacing: 6,
-                          runSpacing: 4,
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          children: [
-                            if (showEta) FittedBox(fit: BoxFit.scaleDown, alignment: AlignmentDirectional.centerStart, child: EtaBadge(seconds: quote.etaToPickupSeconds, minuteLabel: (m) => l.etaMinutes(m), icon: Icons.schedule)),
-                            Text(l.distanceTime(km(quote.distanceMeters), minutesOf(quote.durationSeconds)), style: AnbessaType.caption.copyWith(color: c.muted), maxLines: 1, overflow: TextOverflow.ellipsis),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  // at most half the card, so the name and ETA keep their room
-                  Flexible(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        expired
-                            ? const Skeleton.line(width: 64, height: 18)
-                            : FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerRight, child: PriceTag(fareMinor: quote.fareMinor, payableMinor: quote.payableMinor, locale: context.localeTag, style: AnbessaType.h2.copyWith(color: c.text))),
-                        Text(l.fareFixed, textAlign: TextAlign.end, style: AnbessaType.caption.copyWith(color: c.muted, fontSize: 11)),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
       ),
     );
   }

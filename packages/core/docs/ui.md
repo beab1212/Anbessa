@@ -148,7 +148,7 @@ All exported from `widgets.dart`. They take their words as parameters; none of t
 | Widget | Purpose | Main parameters |
 |---|---|---|
 | `AppSheet` | the draggable bottom sheet of every map screen (a `DraggableScrollableSheet`) with snap points, a handle, a fixed header and footer, and its height reported so the map can keep its subject above it | `builder(context, scrollController)` (required), `snaps = [0.35, 0.7]` (fractions, ascending), `initialSnap = 0`, `header`, `footer`, `controller`, `onHeightChanged(px)`, `padding = (20, 4, 20, 20)`, `showHandle = true`, `expandOnKeyboard = true` |
-| `AppSheetController` | drives an `AppSheet` | `animateTo(snapIndex)`, `collapse()`, `expand()`, `size` |
+| `AppSheetController` | drives an `AppSheet` (the rider map shell changes the sheet's snap points per stage and calls `animateTo` after the frame) | `animateTo(snapIndex)`, `collapse()`, `expand()`, `size` |
 | `FloatingCard` | a non-draggable card over the map with the floating shadow | `child`, `padding = 16`, `radius = 24` |
 
 ### Feedback (`feedback.dart`)
@@ -233,6 +233,7 @@ All exported from `widgets.dart`. They take their words as parameters; none of t
 | `ServiceTile` | a rounded ~104×88 card with an icon or art over a label; selected = amber ring on amber-soft | `label`, `icon` or `art`, `selected`, `onTap`, `badge`, `width = 104`, `height = 88` (min) |
 | `SearchBarButton` | the big rounded "Where to?" bar: search icon, hint, optional trailing chip ("Now ▾") with its own tap; floating shadow (or flat with `elevated: false`); `heroTag` wraps it in a `Hero` | `hint`, `onTap`, `trailingLabel`, `trailingIcon = schedule_rounded`, `onTrailingTap` (defaults to `onTap`), `heroTag`, `elevated = true` |
 | `SuggestionRow` | a place suggestion: 40 px icon circle, title, subtitle, distance on the right, ripple | `title`, `subtitle`, `icon = place_rounded`, `distance`, `onTap`, `onLongPress`, `trailing`, `highlight` (amber circle) |
+| `placeIcon(category, type)` | the icon for a place by its Nominatim class and kind (`Place.category` / `Place.type`): airport, church (places of worship), hotel, bus stop, train, hospital (clinics, doctors, pharmacies), school (universities, colleges), shopping bag (any shop), food (restaurants, cafés, bars), bank, fuel, museum, park; `place_rounded` otherwise | |
 
 ### Vehicle classes (`vehicle_card.dart`)
 

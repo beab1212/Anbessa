@@ -1,27 +1,17 @@
-// The rider's trip screen at each stage, in light and dark, with large text.
+// The rider's trip stage in the map shell at each stage, in light and dark, with large text; a
+// stage change in place; and the tab bar hidden.
 
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:phone_app/core/l10n/generated/app_localizations.dart';
-import 'package:phone_app/core/network/providers.dart';
-import 'package:phone_app/core/push/local_notifications.dart';
-import 'package:phone_app/core/realtime/realtime_hub.dart';
-import 'package:phone_app/core/session/secure_store.dart';
-import 'package:phone_app/core/session/session_controller.dart';
-import 'package:phone_app/features/config/client_config_provider.dart';
+import 'package:latlong2/latlong.dart';
+import 'package:phone_app/features/maps/anbessa_map.dart';
 import 'package:phone_app/features/maps/nav/navigation_controller.dart';
+import 'package:phone_app/features/rider/shell/rider_map_shell.dart';
 import 'package:phone_app/features/rider/trip/active_trip_controller.dart';
-import 'package:phone_app/features/rider/trip/rider_trip_screen.dart';
 import 'package:ride_app_core/ride_app_core.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'support/fakes.dart';
-
-class FixedConfig extends ClientConfigController {
-  @override
-  Future<ClientConfig> build() async => ClientConfig.fromJson(fixture('client_config.json'));
-}
+import 'support/rider_shell.dart';
 
 Trip tripAt(String status, {bool withDriver = true}) {
   final j = Map<String, dynamic>.from(fixture('trip.json'));
@@ -35,74 +25,81 @@ Trip tripAt(String status, {bool withDriver = true}) {
   return Trip.fromJson(j);
 }
 
-Future<void> pumpTrip(WidgetTester tester, Trip trip, {Brightness brightness = Brightness.light}) async {
-  SharedPreferences.setMockInitialValues({});
-  final prefs = await SharedPreferences.getInstance();
-  tester.view.physicalSize = const Size(360 * 3, 740 * 3);
-  tester.view.devicePixelRatio = 3;
-  tester.platformDispatcher.textScaleFactorTestValue = 1.3;
-  addTearDown(tester.view.reset);
-  addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
-  await tester.pumpWidget(ProviderScope(
-    overrides: [
-      prefsProvider.overrideWithValue(prefs),
-      secureStoreProvider.overrideWithValue(MemorySecureStore()),
-      localNotificationsProvider.overrideWithValue(NoLocalNotifications()),
-      realtimeHubProvider.overrideWithValue(fakeHub()),
-      clientConfigProvider.overrideWith(FixedConfig.new),
-      sessionProvider.overrideWith(() => FixedSession(session())),
-      activeTripProvider.overrideWith(() => FixedActiveTrip(trip)),
-      tripPartiesProvider.overrideWith((ref, id) async => const TripParties(driverName: 'Almaz Tadesse', driverRating: 4.8, driverRatingCount: 12, vehicle: PartyVehicle(plateNumber: '3-A40402', make: 'Hyundai', model: 'Atos', color: 'Blue', vehicleType: 'economy'))),
-      driverLiveProvider.overrideWith((ref, id) => Stream.value(DriverLive(lat: trip.pickup.lat + 0.01, lng: trip.pickup.lng, heading: 180, speed: 8, at: DateTime.now().toUtc()))),
-      routeFetcherProvider.overrideWithValue(({required fromLat, required fromLng, required toLat, required toLng, steps = false}) async => const RouteSteps(polyline6: '', distanceMeters: 1200, durationSeconds: 240, approximate: true, steps: [])),
-    ],
-    child: MaterialApp(
-      theme: anbessaTheme(brightness: brightness),
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
-      supportedLocales: AppLocalizations.supportedLocales,
-      home: RiderTripScreen(tripId: trip.id),
-    ),
-  ));
-  await tester.pump();
-  await tester.pump(const Duration(milliseconds: 600));
-  // the parties and ETA futures land a frame later
-  await tester.pump();
-  await tester.pump(const Duration(seconds: 1));
-}
+Future<ShellHarness> pumpTrip(WidgetTester tester, Trip trip, {Brightness brightness = Brightness.light}) => pumpRiderShell(
+      tester,
+      at: '/rider/trip/${trip.id}',
+      brightness: brightness,
+      overrides: [
+        activeTripProvider.overrideWith(() => FixedActiveTrip(trip)),
+        tripPartiesProvider.overrideWith((ref, id) async => const TripParties(driverName: 'Almaz Tadesse', driverRating: 4.8, driverRatingCount: 12, vehicle: PartyVehicle(plateNumber: '3-A40402', make: 'Hyundai', model: 'Atos', color: 'Blue', vehicleType: 'economy'))),
+        driverLiveProvider.overrideWith((ref, id) => Stream.value(DriverLive(lat: trip.pickup.lat + 0.01, lng: trip.pickup.lng, heading: 180, speed: 8, at: DateTime.now().toUtc()))),
+        routeFetcherProvider.overrideWithValue(({required fromLat, required fromLng, required toLat, required toLng, steps = false}) async => const RouteSteps(polyline6: '', distanceMeters: 1200, durationSeconds: 240, approximate: true, steps: [])),
+      ],
+    );
 
 void main() {
-  testWidgets('finding a driver: radar, elapsed time, cancel', (tester) async {
-    await pumpTrip(tester, tripAt('requested', withDriver: false));
+  testWidgets('finding a driver: the pulse at the pickup, time searching, cancel; no tab bar', (tester) async {
+    final t = tripAt('requested', withDriver: false);
+    final h = await pumpTrip(tester, t);
     expect(find.text('Finding your driver'), findsOneWidget);
     expect(find.text('Cancel trip'), findsOneWidget);
-    expect(find.text('Share trip'), findsNothing); // nothing to follow until a driver is on it
+    // the pulse sits on the map at the pickup
+    final map = tester.widget<AnbessaMap>(find.byType(AnbessaMap));
+    expect(map.overlays.single.point, LatLng(t.pickup.lat, t.pickup.lng));
+    expect(map.overlays.single.child, isA<RadarPulse>());
+    expect(find.byType(ElapsedText), findsOneWidget);
+    expect(find.byTooltip('Share trip'), findsNothing); // nothing to follow until a driver is on it
+    expect(find.byType(NavigationBar), findsNothing);
     expect(tester.takeException(), isNull);
+    await endShell(tester, h);
   });
 
-  testWidgets('driver assigned: name, rating, plate, PIN, ETA', (tester) async {
-    await pumpTrip(tester, tripAt('matched'));
+  testWidgets('driver assigned: photo (Hero), name, rating, car, plate, ETA, share and SOS', (tester) async {
+    final t = tripAt('matched');
+    final h = await pumpTrip(tester, t);
     expect(find.textContaining('Almaz Tadesse'), findsWidgets);
-    expect(find.text('3-A40402'), findsOneWidget);
+    expect(find.byType(PlateBadge), findsOneWidget);
+    expect(find.textContaining('A40402'), findsOneWidget);
     expect(find.textContaining('4.8'), findsOneWidget);
+    expect(find.text('Blue Hyundai Atos'), findsOneWidget);
     expect(find.textContaining('min'), findsWidgets);
-    expect(find.text('Share trip'), findsOneWidget);
+    expect(find.byWidgetPredicate((w) => w is Hero && w.tag == driverAvatarHeroTag(t.id)), findsOneWidget);
+    expect(find.byTooltip('Share trip'), findsOneWidget);
+    expect(find.byTooltip('SOS'), findsOneWidget);
     expect(tester.takeException(), isNull);
+    await endShell(tester, h);
   });
 
-  testWidgets('arrived and riding, in dark mode', (tester) async {
-    await pumpTrip(tester, tripAt('en_route'), brightness: Brightness.dark);
+  testWidgets('arrived, then riding with "Arrive HH:MM", in dark mode', (tester) async {
+    var h = await pumpTrip(tester, tripAt('en_route'), brightness: Brightness.dark);
     expect(find.textContaining('arrived'), findsWidgets);
     expect(tester.takeException(), isNull);
-    await pumpTrip(tester, tripAt('in_progress'), brightness: Brightness.dark);
+    await endShell(tester, h);
+    h = await pumpTrip(tester, tripAt('in_progress'), brightness: Brightness.dark);
     expect(find.text('Riding'), findsOneWidget);
+    expect(find.byKey(const ValueKey('arrive-at')), findsOneWidget);
+    expect(find.textContaining(RegExp(r'^Arrive \d\d:\d\d$')), findsWidgets);
     expect(tester.takeException(), isNull);
+    await endShell(tester, h);
+  });
+
+  testWidgets('a stage change swaps the sheet in place, on the same map', (tester) async {
+    final h = await pumpTrip(tester, tripAt('matched'));
+    final map = tester.state(find.byType(RiderMapShell));
+    h.container.read(activeTripProvider.notifier).replace(tripAt('in_progress'));
+    await settle(tester);
+    expect(find.text('Riding'), findsOneWidget);
+    expect(tester.state(find.byType(RiderMapShell)), same(map)); // the shell (and its map) stayed
+    expect(tester.takeException(), isNull);
+    await endShell(tester, h);
   });
 
   testWidgets('completed: the total and the pay button', (tester) async {
-    await pumpTrip(tester, tripAt('completed'));
+    final h = await pumpTrip(tester, tripAt('completed'));
     expect(find.text("You've arrived"), findsOneWidget);
     expect(find.textContaining('140'), findsWidgets);
     expect(tester.takeException(), isNull);
+    await endShell(tester, h);
   });
 
   testWidgets('completed with a promo: the rider pays the fare minus the discount', (tester) async {
@@ -110,9 +107,10 @@ void main() {
     j['status'] = 'completed';
     j['times'] = {...asJson(j['times']), 'completedAt': '2026-10-27T09:30:00Z'};
     j['fare'] = {...asJson(j['fare']), 'finalMinor': 14000, 'promoDiscountMinor': 3000, 'promoCode': 'WELCOME30', 'payableMinor': 11000};
-    await pumpTrip(tester, Trip.fromJson(j), brightness: Brightness.dark);
+    final h = await pumpTrip(tester, Trip.fromJson(j), brightness: Brightness.dark);
     expect(find.text(birr(11000)), findsWidgets);
     expect(find.text('Promo code WELCOME30 · −${birr(3000)}'), findsOneWidget);
     expect(tester.takeException(), isNull);
+    await endShell(tester, h);
   });
 }

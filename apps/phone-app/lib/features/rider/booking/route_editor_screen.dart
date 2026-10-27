@@ -1,7 +1,8 @@
-// Where from and where to, on one screen (workflow 05 A1–2): two fields, search as you type
-// (mapping-service, debounced 300 ms) grouped with saved, recent and popular places, "use my
-// location", or drag the map and confirm the centre (reverse-geocoded, pickups snapped to the
-// road). Also picks a place to save (`mode=savedPlace`), returning it to the caller.
+// A full-screen place picker, used by the account to save Home, Work and other places
+// (`/account/places/pick`, mode savedPlace): search as you type (mapping-service, debounced 300 ms)
+// with common places, "use my location", or drag the map and confirm the centre, returning the
+// place to the caller. Booking a ride uses the search stage of the rider map shell instead
+// (search_sheet.dart); the book mode here is kept for older callers.
 
 import 'dart:async';
 
@@ -18,8 +19,8 @@ import '../../config/client_config_provider.dart';
 import '../../maps/anbessa_map.dart';
 import '../places/saved_places_controller.dart';
 import 'booking_controller.dart';
-
-enum RouteField { pickup, dropoff }
+import 'search_sheet.dart' show RouteField;
+import '../shell/map_intent.dart' show riderCityProvider;
 
 enum RouteEditorMode { book, savedPlace }
 
@@ -103,7 +104,7 @@ class _RouteEditorScreenState extends ConsumerState<RouteEditorScreen> {
     _debounce = Timer(const Duration(milliseconds: 300), () async {
       setState(() => _searching = true);
       try {
-        final city = ref.read(currentCityProvider);
+        final city = ref.read(riderCityProvider);
         final results = await ref.read(apisProvider).maps.search(text, cityId: city.id, language: context.localeTag);
         if (!mounted) return;
         setState(() {
@@ -215,7 +216,7 @@ class _RouteEditorScreenState extends ConsumerState<RouteEditorScreen> {
   Widget build(BuildContext context) {
     final l = context.l10n;
     final c = context.colors;
-    final city = ref.watch(currentCityProvider);
+    final city = ref.watch(riderCityProvider);
     final b = ref.watch(bookingProvider);
     final text = _activeCtrl.text.trim();
     final saved = ref.watch(savedPlacesProvider).value ?? const <SavedPlace>[];
@@ -346,22 +347,21 @@ class _RouteEditorScreenState extends ConsumerState<RouteEditorScreen> {
             child: ListView(
               padding: const EdgeInsets.only(bottom: 24),
               children: [
-                _Row(title: l.useCurrentLocation, busy: _resolving, onTap: _resolving ? null : _useMyLocation),
-                _Row(title: l.chooseOnMap, onTap: () => setState(() => _onMap = true)),
+                SuggestionRow(icon: Icons.my_location_rounded, highlight: true, title: l.useCurrentLocation, trailing: _resolving ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : null, onTap: _resolving ? null : _useMyLocation),
+                SuggestionRow(icon: Icons.map_rounded, highlight: true, title: l.chooseOnMap, onTap: () => setState(() => _onMap = true)),
                 const Divider(height: 8),
                 if (_searchDown && text.length >= 2) Padding(padding: const EdgeInsets.fromLTRB(16, 8, 16, 8), child: Notice(l.searchDown, tone: NoticeTone.warning)),
                 if (_searching) const Padding(padding: EdgeInsets.symmetric(horizontal: 16), child: SkeletonList(rows: 3)),
                 if (savedHits.isNotEmpty) ...[
                   _Header(l.savedPlacesHeader),
-                  for (final p in savedHits) _Row(title: p.name, subtitle: p.address, onTap: () => _picked(p.place)),
+                  for (final p in savedHits) SuggestionRow(key: ValueKey('s:${p.id}'), icon: Icons.star_rounded, title: p.name, subtitle: p.address, onTap: () => _picked(p.place)),
                 ],
                 if (recentHits.isNotEmpty) ...[
                   _Header(l.recentPlaces),
-                  for (final p in recentHits) _Row(title: p.name, subtitle: p.label, onTap: () => _picked(p)),
+                  for (final p in recentHits) SuggestionRow(key: ValueKey('r:${p.lat},${p.lng}'), icon: Icons.history_rounded, title: p.name, subtitle: p.label, onTap: () => _picked(p)),
                 ],
                 if (local.isNotEmpty || remote.isNotEmpty) _Header(text.length >= 2 ? l.searchResults : l.commonPlaces),
-                for (final p in local) _Row(title: p.name, subtitle: p.label, onTap: () => _picked(p)),
-                for (final p in remote) _Row(title: p.name, subtitle: p.label, onTap: () => _picked(p)),
+                for (final p in [...local, ...remote]) SuggestionRow(key: ValueKey('p:${p.lat},${p.lng},${p.name}'), icon: placeIcon(p.category, p.type), title: p.name, subtitle: p.label, onTap: () => _picked(p)),
                 if (text.length >= 2 && savedHits.isEmpty && recentHits.isEmpty && local.isEmpty && remote.isEmpty && !_searching && !_searchDown)
                   IllustratedEmpty(illustration: AnbessaIllustration.searchEmpty, title: l.noResults, compact: true),
               ],
@@ -381,22 +381,4 @@ class _Header extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(20, 14, 16, 4),
         child: Text(text, style: AnbessaType.label.copyWith(color: context.colors.muted, letterSpacing: 0.4)),
       );
-}
-
-class _Row extends StatelessWidget {
-  const _Row({required this.title, this.subtitle, this.onTap, this.busy = false});
-  final String title;
-  final String? subtitle;
-  final VoidCallback? onTap;
-  final bool busy;
-  @override
-  Widget build(BuildContext context) {
-    final c = context.colors;
-    return ListTile(
-      title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: AnbessaType.body.copyWith(fontWeight: FontWeight.w500)),
-      subtitle: subtitle == null || subtitle!.isEmpty ? null : Text(subtitle!, maxLines: 1, overflow: TextOverflow.ellipsis, style: AnbessaType.caption.copyWith(color: c.muted)),
-      trailing: busy ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : null,
-      onTap: onTap,
-    );
-  }
 }

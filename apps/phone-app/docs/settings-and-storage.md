@@ -24,6 +24,7 @@ Every key is declared in `lib/core/prefs_keys.dart` (`PrefsKeys`). Four controll
 | `nav_bearing` | bool | true | `NavPrefsController` | driver map turns with the heading (`driverBearing`) or stays north up |
 | `nav_app` | String (`ask`, `google`, `waze`, `system`) | absent = ask | `NavPrefsController` | which app "Directions" opens |
 | `keep_awake` | bool | true | `NavPrefsController` | wakelock on the driver trip screen |
+| `nav_voice` | bool | true | `NavVoiceController` (`maps/nav/voice_guide.dart`) | spoken turn-by-turn guidance on the driver trip screen (the speaker button on the map) |
 | `last_vehicle_id` | String | absent | `ShiftController.goOnline` | the car preselected on the driver home |
 | `client_config` | String (raw JSON) | absent | `ClientConfigController._fetch` | the last good client config, used when the fetch fails |
 | `map_mode` | String (`flat`, `threeD`, `satellite`) | absent (flat) | `MapModeController` (`features/maps/map_mode.dart`) | the map view; 3D shows flat where the vector engine doesn't run |

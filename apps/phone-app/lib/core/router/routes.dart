@@ -46,6 +46,8 @@ abstract final class Routes {
   static const sessions = '/account/sessions';
   static const paymentPrefs = '/account/payments';
   static const savedPlaces = '/account/places';
+  /// the full-screen place picker that saves Home, Work or another place ([label]: home | work | other)
+  static String pickSavedPlace(String label) => '/account/places/pick?label=$label';
   static const appearance = '/account/appearance';
   static const notifications = '/account/notifications';
   static const safety = '/account/safety';

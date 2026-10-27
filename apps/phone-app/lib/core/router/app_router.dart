@@ -22,15 +22,12 @@ import '../../features/profile/account_screens.dart';
 import '../../features/profile/preference_screens.dart';
 import '../../features/profile/profile_screen.dart';
 import '../../features/profile/saved_places_screen.dart';
-import '../../features/rider/booking/quote_screen.dart';
 import '../../features/rider/booking/route_editor_screen.dart';
 import '../../features/rider/history/history_screens.dart';
-import '../../features/rider/scheduled/scheduled_rides_screen.dart';
-import '../../features/rider/home/rider_home_screen.dart';
-import '../../features/rider/payments/pay_screen.dart';
 import '../../features/rider/rating/rating_screen.dart';
+import '../../features/rider/scheduled/scheduled_rides_screen.dart';
+import '../../features/rider/shell/rider_map_shell.dart';
 import '../../features/rider/trip/active_trip_controller.dart';
-import '../../features/rider/trip/rider_trip_screen.dart';
 import '../../features/shell/shells.dart';
 import '../../features/support/lost_item_screens.dart';
 import '../../features/support/sos_screen.dart';
@@ -74,10 +71,14 @@ class RouterNotifier extends ChangeNotifier {
   }
 }
 
+/// The root navigator: full-screen pages over the tab shells (pay and rate over the rider's map).
+final rootNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'root');
+
 final routerProvider = Provider<GoRouter>((ref) {
   final notifier = RouterNotifier(ref);
   ref.onDispose(notifier.dispose);
   return GoRouter(
+    navigatorKey: rootNavigatorKey,
     initialLocation: Routes.splash,
     refreshListenable: notifier,
     debugLogDiagnostics: false,
@@ -97,13 +98,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/top-up/:id', redirect: (_, _) => Routes.driverEarnings),
 
       StatefulShellRoute.indexedStack(
-        builder: (_, _, shell) => RiderShell(shell: shell),
+        builder: (_, state, shell) => RiderShell(shell: shell, location: state.uri),
         branches: [
-          StatefulShellBranch(routes: [
-            GoRoute(path: Routes.riderHome, builder: (_, _) => const RiderHomeScreen(), routes: [
-              GoRoute(path: 'book/pickup', redirect: (_, _) => Routes.riderPickup),
-            ]),
-          ]),
+          // home, search, choose ride and the trip share one map (rider_map_shell.dart)
+          StatefulShellBranch(routes: [riderMapShellRoute(rootNavigatorKey)]),
           StatefulShellBranch(routes: [
             GoRoute(path: Routes.riderActivity, builder: (_, _) => HistoryScreen(as: 'rider', receiptRoute: Routes.riderReceipt), routes: [
               GoRoute(path: ':id', builder: (_, s) => ReceiptScreen(tripId: s.pathParameters['id']!, asDriver: false)),
@@ -114,22 +112,6 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(path: Routes.riderPickup, redirect: (_, _) => '${Routes.riderRoute}?focus=pickup'),
       GoRoute(path: Routes.riderDropoff, redirect: (_, _) => '${Routes.riderRoute}?focus=dropoff'),
-      GoRoute(
-        path: Routes.riderRoute,
-        pageBuilder: (_, s) => slideUpPage(
-          s,
-          RouteEditorScreen(
-            focus: s.uri.queryParameters['focus'] == 'pickup' ? RouteField.pickup : RouteField.dropoff,
-            mode: s.uri.queryParameters['mode'] == 'savedPlace' ? RouteEditorMode.savedPlace : RouteEditorMode.book,
-            savedLabel: s.uri.queryParameters['label'],
-          ),
-        ),
-      ),
-      GoRoute(path: Routes.riderQuote, pageBuilder: (_, s) => slideUpPage(s, const QuoteScreen())),
-      GoRoute(path: '/rider/trip/:id', builder: (_, s) => RiderTripScreen(tripId: s.pathParameters['id']!), routes: [
-        GoRoute(path: 'pay', builder: (_, s) => PayScreen(tripId: s.pathParameters['id']!)),
-        GoRoute(path: 'rate', builder: (_, s) => RatingScreen(tripId: s.pathParameters['id']!, asDriver: false, doneRoute: Routes.riderHome)),
-      ]),
 
       StatefulShellRoute.indexedStack(
         builder: (_, _, shell) => DriverShell(shell: shell),
@@ -165,7 +147,9 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: Routes.language, builder: (_, _) => const LanguageScreen()),
       GoRoute(path: Routes.sessions, builder: (_, _) => const SessionsScreen()),
       GoRoute(path: Routes.paymentPrefs, builder: (_, _) => const PaymentPreferencesScreen()),
-      GoRoute(path: Routes.savedPlaces, builder: (_, _) => const SavedPlacesScreen()),
+      GoRoute(path: Routes.savedPlaces, builder: (_, _) => const SavedPlacesScreen(), routes: [
+        GoRoute(path: 'pick', pageBuilder: (_, s) => slideUpPage(s, RouteEditorScreen(mode: RouteEditorMode.savedPlace, savedLabel: s.uri.queryParameters['label']))),
+      ]),
       GoRoute(path: Routes.appearance, builder: (_, _) => const AppearanceScreen()),
       GoRoute(path: Routes.notifications, builder: (_, _) => const NotificationsScreen()),
       GoRoute(path: Routes.safety, builder: (_, _) => const SafetyScreen()),
@@ -190,7 +174,8 @@ final routerProvider = Provider<GoRouter>((ref) {
 
 const _authPaths = {Routes.welcome, Routes.signIn, Routes.verify};
 const _anywherePrefixes = ['/account', '/sos', '/support', '/scheduled'];
-/// The route editor also picks saved places from the account, whatever the mode.
+/// `/rider/book/route?mode=savedPlace` (older links) picks a place to save, whatever the mode; the
+/// route sends it on to the account's place picker.
 const _riderBookingPrefix = '/rider/book';
 
 String? _redirect(Ref ref, GoRouterState state) {

@@ -151,7 +151,7 @@ The payload of the socket event `trip:offer` (produced by `services/trip-service
 
 | Class | Endpoint | Fields |
 |---|---|---|
-| `Place` | `GET /api/maps/search` (`results[]`), `GET /api/maps/reverse` | `name`, `label?` (full address line), `lat`, `lng`. Has `toJson()`, `copyWith`, equality on lat, lng and name |
+| `Place` | `GET /api/maps/search` (`results[]`), `GET /api/maps/reverse` | `name`, `label?` (full address line), `lat`, `lng`, `category?` and `type?` (Nominatim's class and kind, e.g. `amenity` / `hospital`; empty strings become null; `placeIcon` reads them). Has `toJson()`, `copyWith` (keeps the class), equality on lat, lng and name |
 | `SavedPlace` | `GET /api/trips/places` (`places[]`), `PUT /api/trips/places/:label`, `POST /api/trips/places` | `id`, `label` (`PlaceLabel`), `name`, `address?`, `lat`, `lng`. `place` converts to a `Place` |
 | `NearbyCar` | `GET /api/locations/nearby`, `cars[]` | `lat`, `lng`, `heading?` |
 | `NearbyCars` | `GET /api/locations/nearby` | `cars`, `etaSeconds?` (nearest car), `driversNearby`, `approximate`. `NearbyCars.none` is the empty value |

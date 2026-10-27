@@ -6,25 +6,35 @@ import 'json.dart';
 
 @immutable
 class Place {
-  const Place({required this.name, this.label, required this.lat, required this.lng});
+  const Place({required this.name, this.label, required this.lat, required this.lng, this.category, this.type});
   /// short name shown first ("Bole International Airport")
   final String name;
   /// full address line
   final String? label;
   final double lat;
   final double lng;
+  /// what kind of place it is, as Nominatim classes it (`amenity`, `aeroway`, `shop`…); null
+  /// for places that didn't come from search (empty strings from the API become null)
+  final String? category;
+  /// the kind within [category] (`hospital`, `aerodrome`, `bus_stop`…)
+  final String? type;
 
-  factory Place.fromJson(Json j) => Place(name: str(j, 'name'), label: strOrNull(j, 'label'), lat: readDouble(j, 'lat'), lng: readDouble(j, 'lng'));
+  factory Place.fromJson(Json j) => Place(
+        name: str(j, 'name'), label: strOrNull(j, 'label'), lat: readDouble(j, 'lat'), lng: readDouble(j, 'lng'),
+        category: _blankToNull(strOrNull(j, 'category')), type: _blankToNull(strOrNull(j, 'type')),
+      );
 
-  Json toJson() => {'name': name, 'label': ?label, 'lat': lat, 'lng': lng};
+  Json toJson() => {'name': name, 'label': ?label, 'lat': lat, 'lng': lng, 'category': ?category, 'type': ?type};
 
-  Place copyWith({String? name, String? label}) => Place(name: name ?? this.name, label: label ?? this.label, lat: lat, lng: lng);
+  Place copyWith({String? name, String? label}) => Place(name: name ?? this.name, label: label ?? this.label, lat: lat, lng: lng, category: category, type: type);
 
   @override
   bool operator ==(Object other) => other is Place && other.lat == lat && other.lng == lng && other.name == name;
   @override
   int get hashCode => Object.hash(lat, lng, name);
 }
+
+String? _blankToNull(String? s) => s == null || s.trim().isEmpty ? null : s;
 
 /// Well-known places per city, shown before the first keystroke and when search is down
 /// (same list as apps/web/src/components/PlacePicker.tsx).

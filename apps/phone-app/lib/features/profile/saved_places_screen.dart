@@ -8,6 +8,24 @@ import '../../core/l10n/l10n.dart';
 import '../../core/router/routes.dart';
 import '../rider/places/saved_places_controller.dart';
 
+/// Pick a place on the full-screen picker and save it as [label]; the error when saving failed.
+Future<Object?> pickAndSavePlace(BuildContext context, WidgetRef ref, PlaceLabel label) async {
+  final p = await context.push<Place>(Routes.pickSavedPlace(label.name));
+  if (p == null || !context.mounted) return null;
+  try {
+    if (label == PlaceLabel.other) {
+      await ref.read(savedPlacesProvider.notifier).add(p);
+    } else {
+      await ref.read(savedPlacesProvider.notifier).setFixed(label, p);
+    }
+    Haptics.success();
+    if (context.mounted) showToast(context, context.l10n.placeSaved, tone: NoticeTone.ok);
+    return null;
+  } catch (e) {
+    return e;
+  }
+}
+
 class SavedPlacesScreen extends ConsumerStatefulWidget {
   const SavedPlacesScreen({super.key});
   @override
@@ -18,19 +36,8 @@ class _SavedPlacesScreenState extends ConsumerState<SavedPlacesScreen> {
   Object? _error;
 
   Future<void> _pick(PlaceLabel label) async {
-    final p = await context.push<Place>('${Routes.riderRoute}?mode=savedPlace&label=${label.name}');
-    if (p == null || !mounted) return;
-    try {
-      if (label == PlaceLabel.other) {
-        await ref.read(savedPlacesProvider.notifier).add(p);
-      } else {
-        await ref.read(savedPlacesProvider.notifier).setFixed(label, p);
-      }
-      Haptics.success();
-      if (mounted) showToast(context, context.l10n.placeSaved, tone: NoticeTone.ok);
-    } catch (e) {
-      setState(() => _error = e);
-    }
+    final e = await pickAndSavePlace(context, ref, label);
+    if (e != null && mounted) setState(() => _error = e);
   }
 
   @override

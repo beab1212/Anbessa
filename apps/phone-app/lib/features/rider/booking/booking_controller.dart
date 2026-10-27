@@ -206,23 +206,31 @@ class BookingController extends Notifier<Booking> {
 
   List<Place> get recent {
     final raw = ref.read(prefsProvider).getStringList(PrefsKeys.recentPlaces) ?? const [];
-    return raw.map((s) {
-      final parts = s.split('|');
-      return parts.length == 4 ? Place(name: parts[0], label: parts[1].isEmpty ? null : parts[1], lat: double.tryParse(parts[2]) ?? 0, lng: double.tryParse(parts[3]) ?? 0) : null;
-    }).whereType<Place>().toList();
+    return raw.map(_decodeRecent).whereType<Place>().toList();
   }
 
   void remember(Place p) {
-    final list = [p, ...recent.where((x) => x != p)].take(maxRecent).map((x) => '${x.name}|${x.label ?? ''}|${x.lat}|${x.lng}').toList();
+    final list = [p, ...recent.where((x) => x != p)].take(maxRecent).map(_encodeRecent).toList();
     ref.read(prefsProvider).setStringList(PrefsKeys.recentPlaces, list);
     ref.read(recentPlacesProvider.notifier).set(recent);
   }
 
   void forget(Place p) {
-    final list = recent.where((x) => x != p).map((x) => '${x.name}|${x.label ?? ''}|${x.lat}|${x.lng}').toList();
+    final list = recent.where((x) => x != p).map(_encodeRecent).toList();
     ref.read(prefsProvider).setStringList(PrefsKeys.recentPlaces, list);
     ref.read(recentPlacesProvider.notifier).set(recent);
   }
+}
+
+/// A recent place in preferences: `name|label|lat|lng|category|type` (older entries have the
+/// first four only).
+String _encodeRecent(Place x) => '${x.name}|${x.label ?? ''}|${x.lat}|${x.lng}|${x.category ?? ''}|${x.type ?? ''}';
+
+Place? _decodeRecent(String s) {
+  final parts = s.split('|');
+  if (parts.length != 4 && parts.length != 6) return null;
+  String? opt(int i) => parts.length > i && parts[i].isNotEmpty ? parts[i] : null;
+  return Place(name: parts[0], label: opt(1), lat: double.tryParse(parts[2]) ?? 0, lng: double.tryParse(parts[3]) ?? 0, category: opt(4), type: opt(5));
 }
 
 final bookingProvider = NotifierProvider<BookingController, Booking>(BookingController.new);

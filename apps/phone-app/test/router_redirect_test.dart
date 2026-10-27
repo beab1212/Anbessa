@@ -119,6 +119,18 @@ void main() {
     expect(await redirect(Routes.lostItem('l1'), signedIn: session(), trip: trip), isNull);
   });
 
+  test('the rider map shell: its stages are rider routes; saving a place works in either mode', () async {
+    expect(await redirect(Routes.riderQuote, signedIn: session(), mode: AppMode.rider), isNull);
+    expect(await redirect('${Routes.riderRoute}?focus=pickup', signedIn: session(), mode: AppMode.rider), isNull);
+    // a driver saving Home from the account
+    final s = session(roles: driverRoles);
+    expect(await redirect(Routes.pickSavedPlace('home'), signedIn: s, mode: AppMode.driver, driverHome: home('ACTIVE')), isNull);
+    expect(await redirect('${Routes.riderRoute}?mode=savedPlace&label=home', signedIn: s, mode: AppMode.driver, driverHome: home('ACTIVE')), isNull);
+    // an active trip still takes over the booking stages
+    final trip = Trip.fromJson(fixture('trip.json'));
+    expect(await redirect(Routes.riderQuote, signedIn: session(), trip: trip), Routes.riderTrip(trip.id));
+  });
+
   test('a rider start never fetches the driver profile; switching to driver mode does', () async {
     SharedPreferences.setMockInitialValues({});
     final prefs = await SharedPreferences.getInstance();

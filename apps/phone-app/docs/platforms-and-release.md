@@ -106,7 +106,7 @@ Other keys: `UIBackgroundModes` `location` and `remote-notification`; `FlutterDe
 
 - Location is always simulated (`Env.fakeLocationOn` is true on Linux) with the dev panel on the driver screens.
 - If no keyring is available, a debug build keeps the session token in SharedPreferences (`insecure_session_token`); a release build fails.
-- Local notifications, push, compass and the offer vibration are no-ops off Android/iOS.
+- Local notifications, push, compass, the offer vibration and spoken guidance (flutter_tts) are no-ops off Android/iOS.
 - `wakelock_plus` is pinned below 1.8.1 because newer versions need a dbus version `geolocator_linux` cannot use (`pubspec.yaml` comment).
 - Run two windows to play rider and driver: `flutter run -d linux --dart-define-from-file=env/dev-host.json`.
 
