@@ -36,11 +36,11 @@ export const envSchema = z
     SERVICE_URLS: z.string().default(
       "auth-service=http://localhost:3001,trip-service=http://localhost:3002,location-service=http://localhost:3003," +
         "pricing-service=http://localhost:3004,payment-service=http://localhost:3005,notification-service=http://localhost:3006," +
-        "mapping-service=http://localhost:3007,fleet-service=http://localhost:3008,audit-service=http://localhost:3010," +
+        "mapping-service=http://localhost:3007,fleet-service=http://localhost:3008,support-service=http://localhost:3009,audit-service=http://localhost:3010," +
         "realtime-gateway=http://localhost:3000",
     ).transform(toTargets),
     // Kafka consumer groups whose lag the system page shows
-    CONSUMER_GROUPS: z.string().default("location-service,notification-service,fleet-service,payment-service,audit-service").transform(list),
+    CONSUMER_GROUPS: z.string().default("location-service,notification-service,fleet-service,payment-service,audit-service,support-service").transform(list),
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV === "production") {

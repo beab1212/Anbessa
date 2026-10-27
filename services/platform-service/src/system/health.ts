@@ -23,7 +23,7 @@ export interface ServiceHealth {
 }
 
 /** Services that keep a transactional outbox (they answer /internal/ops/outbox). */
-const OUTBOX_OWNERS = ["auth-service", "trip-service", "fleet-service", "payment-service"];
+const OUTBOX_OWNERS = ["auth-service", "trip-service", "fleet-service", "payment-service", "support-service"];
 
 async function getJson(url: string, token?: string, timeoutMs = 2000): Promise<{ ok: boolean; status: number; body: unknown; ms: number }> {
   const started = Date.now();

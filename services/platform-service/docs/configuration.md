@@ -16,10 +16,10 @@ Source: `src/config/index.ts` (zod). `loadConfig()` drops variables that are emp
 | `AUTH_ISSUER` | expected `iss` of access tokens | `http://localhost:3001` | set to the real issuer | URL |
 | `AUTH_JWKS_URL` | auth-service JWKS | `http://localhost:3001/api/auth/jwks` | set | URL |
 | `AUTH_INTERNAL_URL` | auth-service base URL for `/internal/cities/:id` and `/internal/authz/snapshot` | `http://localhost:3001` | set | URL |
-| `SERVICE_URLS` | system page: `name=url,name=url` of every service | the ten local services on `localhost:3000–3010` (see `.env.example`) | set to in-cluster URLs | parsed into `{ name, url }[]`; not URL-validated |
-| `CONSUMER_GROUPS` | system page: consumer groups whose lag is shown | `location-service,notification-service,fleet-service,payment-service,audit-service` | no | CSV |
+| `SERVICE_URLS` | system page: `name=url,name=url` of every service | the eleven local services on `localhost:3000–3010` (see `.env.example`) | set to in-cluster URLs | parsed into `{ name, url }[]`; not URL-validated |
+| `CONSUMER_GROUPS` | system page: consumer groups whose lag is shown | `location-service,notification-service,fleet-service,payment-service,audit-service,support-service` | no | CSV |
 
-Names in `SERVICE_URLS` matter: outbox checks are made only for `auth-service`, `trip-service`, `fleet-service`, `payment-service`; integrations read `notification-service`, `mapping-service`, `realtime-gateway`, `fleet-service`, `payment-service`.
+Names in `SERVICE_URLS` matter: outbox checks are made only for `auth-service`, `trip-service`, `fleet-service`, `payment-service`, `support-service`; integrations read `notification-service`, `mapping-service`, `realtime-gateway`, `fleet-service`, `payment-service`.
 
 Test-only: `TEST_DATABASE_URL` (default `postgresql://ride:ride@localhost:5432/platform_service_test`, must end in `_test`) in `tests/integration/global-setup.ts`.
 
