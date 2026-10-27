@@ -47,6 +47,8 @@ class PushService {
       // ignore: deprecated_member_use
       m.onTokenRefresh.listen((t) => _register(t));
       _ready = true;
+      // init runs after the first frame, so the stored session may already be in: register now
+      if (ref.read(currentSessionProvider) != null) unawaited(registerForCurrentUser());
     } catch (e) {
       debugPrint('push unavailable: $e');
     }

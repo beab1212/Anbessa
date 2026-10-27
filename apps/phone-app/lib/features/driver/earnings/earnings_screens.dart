@@ -79,9 +79,9 @@ class _EarningsScreenState extends ConsumerState<EarningsScreen> {
                                   const SizedBox(height: 12),
                                   StatRow(
                                     children: [
-                                      StatTile(label: l.tripsToday, icon: Icons.route_outlined, value: AnimatedCounter(value: s.trips, format: (v) => v.round().toString())),
-                                      StatTile(label: l.grossFares, icon: Icons.receipt_long_outlined, value: AnimatedMoney(s.grossMinor, locale: loc)),
-                                      StatTile(label: l.cashCollected, icon: Icons.payments_outlined, value: AnimatedMoney(s.cashCollectedMinor, locale: loc)),
+                                      StatTile(label: l.tripsToday, icon: Icons.route_rounded, value: AnimatedCounter(value: s.trips, format: (v) => v.round().toString())),
+                                      StatTile(label: l.grossFares, icon: Icons.receipt_long_rounded, value: AnimatedMoney(s.grossMinor, locale: loc)),
+                                      StatTile(label: l.cashCollected, icon: Icons.payments_rounded, value: AnimatedMoney(s.cashCollectedMinor, locale: loc)),
                                     ],
                                   ),
                                   if (s.byDay.length > 1) ...[const SizedBox(height: 16), EarningsChart(days: s.byDay)],
@@ -138,7 +138,7 @@ class _EarningsScreenState extends ConsumerState<EarningsScreen> {
                           const SizedBox(height: 14),
                           Row(
                             children: [
-                              Expanded(child: PrimaryButton(label: l.topUp, icon: Icons.add, onPressed: () => context.push(Routes.driverTopUp))),
+                              Expanded(child: PrimaryButton(label: l.topUp, icon: Icons.add_rounded, onPressed: () => context.push(Routes.driverTopUp))),
                               const SizedBox(width: 8),
                               Expanded(child: OutlinedButton(onPressed: b.accountId == null ? null : () => context.push(Routes.driverStatement), child: Text(l.statement))),
                             ],
@@ -152,7 +152,7 @@ class _EarningsScreenState extends ConsumerState<EarningsScreen> {
                       margin: EdgeInsets.zero,
                       children: [
                         SettingsTile(
-                          icon: Icons.account_balance_outlined,
+                          icon: Icons.account_balance_rounded,
                           title: l.payoutMethod,
                           subtitle: b.payoutMethod == null ? l.noPayoutMethod : '${providerLabel(b.payoutMethod!.provider)} ${b.payoutMethod!.destination ?? ''}',
                           iconTone: b.payoutMethod == null ? c.warning : null,
@@ -160,13 +160,13 @@ class _EarningsScreenState extends ConsumerState<EarningsScreen> {
                         ),
                         if (b.referenceCode != null)
                           SettingsTile(
-                            icon: Icons.tag,
+                            icon: Icons.tag_rounded,
                             title: l.referenceCode,
                             subtitle: l.referenceCodeHint,
                             chevron: false,
                             trailing: MonoText(b.referenceCode!, style: AnbessaType.title.copyWith(color: c.text, letterSpacing: 1.5)),
                           ),
-                        if (b.accountId != null) SettingsTile(icon: Icons.history, title: l.topUps, onTap: () => context.push(Routes.driverTopUps)),
+                        if (b.accountId != null) SettingsTile(icon: Icons.history_rounded, title: l.topUps, onTap: () => context.push(Routes.driverTopUps)),
                       ],
                     ),
                     Padding(padding: const EdgeInsets.only(top: 8), child: Text(l.payoutsWeekly(birr(b.policy.minPayoutMinor, locale: loc)), style: AnbessaType.caption.copyWith(color: c.muted))),
@@ -314,7 +314,7 @@ class _TopUpScreenState extends ConsumerState<TopUpScreen> {
               margin: EdgeInsets.zero,
               children: [
                 for (final p in providers)
-                  ChoiceRow(title: p.label, subtitle: p.isSimulated ? l.simulatedProvider : null, leading: Icon(Icons.account_balance_wallet_outlined, color: c.accentStrong), selected: provider == p.provider, onTap: () => setState(() => _provider = p.provider)),
+                  ChoiceRow(title: p.label, subtitle: p.isSimulated ? l.simulatedProvider : null, leading: Icon(Icons.account_balance_wallet_rounded, color: c.accentStrong), selected: provider == p.provider, onTap: () => setState(() => _provider = p.provider)),
               ],
             ),
             const SizedBox(height: 12),
@@ -374,7 +374,7 @@ class _PayoutMethodScreenState extends ConsumerState<PayoutMethodScreen> {
             margin: EdgeInsets.zero,
             children: [
               for (final (code, name) in const [('telebirr', 'telebirr'), ('cbebirr', 'CBE Birr'), ('chapa', 'Bank account (Chapa)')])
-                ChoiceRow(title: name, leading: Icon(code == 'chapa' ? Icons.account_balance_outlined : Icons.phone_iphone, color: c.accentStrong), selected: _provider == code, onTap: () => setState(() => _provider = code)),
+                ChoiceRow(title: name, leading: Icon(code == 'chapa' ? Icons.account_balance_rounded : Icons.phone_iphone_rounded, color: c.accentStrong), selected: _provider == code, onTap: () => setState(() => _provider = code)),
             ],
           ),
           const SizedBox(height: 14),
@@ -436,12 +436,12 @@ class _StatementScreenState extends ConsumerState<StatementScreen> {
   }
 
   IconData _icon(String kind) => switch (kind) {
-        'TRIP_SETTLEMENT' => Icons.directions_car_outlined,
-        'TOP_UP' => Icons.add_card_outlined,
-        'PAYOUT' => Icons.account_balance_outlined,
-        'REFUND' => Icons.undo,
+        'TRIP_SETTLEMENT' => Icons.directions_car_rounded,
+        'TOP_UP' => Icons.add_card_rounded,
+        'PAYOUT' => Icons.account_balance_rounded,
+        'REFUND' => Icons.undo_rounded,
         'CANCELLATION_FEE' => Icons.close_rounded,
-        _ => Icons.receipt_long_outlined,
+        _ => Icons.receipt_long_rounded,
       };
 
   @override
@@ -512,7 +512,7 @@ class TopUpsScreen extends ConsumerWidget {
                       children: [
                         for (final t in list)
                           SettingsTile(
-                            icon: t.channel == 'MOBILE_MONEY' ? Icons.phone_iphone : t.channel == 'OFFICE_CASH' ? Icons.payments_outlined : Icons.account_balance_outlined,
+                            icon: t.channel == 'MOBILE_MONEY' ? Icons.phone_iphone_rounded : t.channel == 'OFFICE_CASH' ? Icons.payments_rounded : Icons.account_balance_rounded,
                             title: '${t.channel == 'MOBILE_MONEY' ? l.mobileMoney : t.channel == 'OFFICE_CASH' ? l.cash : 'Bank'}${t.provider != null && t.provider != 'bank' ? ' · ${providerLabel(t.provider!)}' : ''}',
                             subtitle: dayAndTime(t.createdAt, locale: context.localeTag),
                             chevron: false,

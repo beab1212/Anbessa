@@ -41,8 +41,8 @@ class LanguageScreen extends ConsumerWidget {
         children: [
           SectionGroup(
             children: [
-              ChoiceRow(title: l.english, subtitle: 'English', selected: current == 'en', onTap: () => ref.read(localeProvider.notifier).set(const Locale('en'))),
-              ChoiceRow(title: l.amharic, subtitle: 'አማርኛ', selected: current == 'am', onTap: () => ref.read(localeProvider.notifier).set(const Locale('am'))),
+              ChoiceRow(title: l.english, subtitle: 'English', leading: const Icon(Icons.language_rounded), selected: current == 'en', onTap: () => ref.read(localeProvider.notifier).set(const Locale('en'))),
+              ChoiceRow(title: l.amharic, subtitle: 'አማርኛ', leading: const Icon(Icons.translate_rounded), selected: current == 'am', onTap: () => ref.read(localeProvider.notifier).set(const Locale('am'))),
             ],
           ),
         ],
@@ -78,6 +78,7 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
               Padding(padding: const EdgeInsets.fromLTRB(16, 12, 16, 4), child: Text(l.sessionsLede, style: TextStyle(color: c.text2))),
               for (final s in list)
                 ListTile(
+                  leading: Icon(_deviceIcon(s.userAgent), color: c.text2),
                   title: Text(s.userAgent ?? l.thisDevice, maxLines: 1, overflow: TextOverflow.ellipsis),
                   subtitle: Text('${dayAndTime(s.createdAt, locale: context.localeTag)}${s.ipAddress != null ? ' · ${s.ipAddress}' : ''}'),
                   trailing: TextButton(
@@ -104,6 +105,13 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
       ),
     );
   }
+}
+
+IconData _deviceIcon(String? userAgent) {
+  final ua = (userAgent ?? '').toLowerCase();
+  if (ua.contains('iphone') || ua.contains('android') || ua.contains('dart')) return Icons.smartphone_rounded;
+  if (ua.contains('ipad') || ua.contains('tablet')) return Icons.tablet_rounded;
+  return Icons.computer_rounded;
 }
 
 class PaymentPreferencesScreen extends ConsumerStatefulWidget {
@@ -146,7 +154,7 @@ class _PaymentPreferencesScreenState extends ConsumerState<PaymentPreferencesScr
             },
             child: Column(
               children: [
-                for (final p in providers) RadioListTile(value: p.provider, title: Text(p.label), subtitle: p.isSimulated ? Text(l.simulatedProvider) : null),
+                for (final p in providers) RadioListTile(value: p.provider, secondary: Icon(Icons.phone_iphone_rounded, color: c.text2), title: Text(p.label), subtitle: p.isSimulated ? Text(l.simulatedProvider) : null),
               ],
             ),
           ),

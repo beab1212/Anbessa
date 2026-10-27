@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:phone_app/core/network/providers.dart';
 import 'package:phone_app/core/router/app_router.dart';
 import 'package:phone_app/core/router/routes.dart';
 import 'package:phone_app/core/session/session_controller.dart';
@@ -8,6 +9,7 @@ import 'package:phone_app/features/driver/shift/shift_controller.dart';
 import 'package:phone_app/features/intro/intro_screen.dart';
 import 'package:phone_app/features/rider/trip/active_trip_controller.dart';
 import 'package:ride_app_core/ride_app_core.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'support/fakes.dart';
 
@@ -45,6 +47,16 @@ Future<String?> redirect(
 class OfflineSession extends SessionController {
   @override
   Future<Session?> build() async => throw const AppError(status: 0, code: ErrorCodes.network, message: 'offline', retryable: true);
+}
+
+/// Counts how often the driver's profile is fetched.
+class CountingDriverHome extends DriverHomeController {
+  static var builds = 0;
+  @override
+  Future<DriverHome> build() async {
+    builds++;
+    return home('ACTIVE');
+  }
 }
 
 class FixedIntroSeen extends IntroSeen {
@@ -105,5 +117,46 @@ void main() {
     expect(await redirect(Routes.supportNewAbout(trip.id), signedIn: session(), trip: trip), isNull);
     expect(await redirect(Routes.supportTicket('t1'), signedIn: session(), trip: trip), isNull);
     expect(await redirect(Routes.lostItem('l1'), signedIn: session(), trip: trip), isNull);
+  });
+
+  test('a rider start never fetches the driver profile; switching to driver mode does', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    CountingDriverHome.builds = 0;
+    final c = ProviderContainer(retry: (_, _) => null, overrides: [
+      prefsProvider.overrideWithValue(prefs),
+      introSeenProvider.overrideWith(() => FixedIntroSeen(true)),
+      sessionProvider.overrideWith(() => FixedSession(session(roles: driverRoles))),
+      activeTripProvider.overrideWith(() => FixedActiveTrip(null)),
+      driverHomeProvider.overrideWith(CountingDriverHome.new),
+      updateRequiredProvider.overrideWithValue(false),
+    ]);
+    addTearDown(c.dispose);
+    await c.read(modeProvider.notifier).set(AppMode.rider);
+    // listened, like the router the app watches (an unlistened provider's listeners are paused)
+    final notifier = c.listen(Provider((ref) {
+      final n = RouterNotifier(ref);
+      ref.onDispose(n.dispose);
+      return n;
+    }), (_, _) {}).read();
+    await c.read(sessionProvider.future);
+    await Future<void>.delayed(Duration.zero);
+    expect(notifier.followsDriverHome, isFalse);
+    expect(c.exists(driverHomeProvider), isFalse);
+    expect(CountingDriverHome.builds, 0);
+
+    var notified = 0;
+    notifier.addListener(() => notified++);
+    await c.read(modeProvider.notifier).set(AppMode.driver);
+    await Future<void>.delayed(Duration.zero);
+    expect(notifier.followsDriverHome, isTrue);
+    await c.read(driverHomeProvider.future);
+    await Future<void>.delayed(Duration.zero);
+    expect(CountingDriverHome.builds, 1);
+    expect(notified, greaterThan(1)); // the mode change, then the profile arriving
+
+    await c.read(modeProvider.notifier).set(AppMode.rider);
+    await Future<void>.delayed(Duration.zero);
+    expect(notifier.followsDriverHome, isFalse);
   });
 }

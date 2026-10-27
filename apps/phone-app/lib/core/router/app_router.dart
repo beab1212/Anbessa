@@ -5,6 +5,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:ride_app_core/ride_app_core.dart';
 import '../../features/auth/auth_screens.dart';
 import '../../features/bootstrap/gates.dart';
 import '../../features/config/client_config_provider.dart';
@@ -38,17 +39,39 @@ import '../session/session_controller.dart';
 import 'routes.dart';
 import 'transitions.dart';
 
-/// Re-runs the redirect when what it depends on changes.
+/// Re-runs the redirect when what it depends on changes. The driver's profile
+/// (`driverHomeProvider`, GET /api/fleet/drivers/me) is only listened to in driver mode, so a
+/// rider's start never asks for it; the subscription follows the mode.
 class RouterNotifier extends ChangeNotifier {
   RouterNotifier(this.ref) {
     ref.listen(sessionProvider, (_, _) => notifyListeners());
     ref.listen(modeProvider, (_, _) => notifyListeners());
     ref.listen(activeTripProvider, (_, _) => notifyListeners());
     ref.listen(updateRequiredProvider, (_, _) => notifyListeners());
-    ref.listen(driverHomeProvider, (_, _) => notifyListeners());
     ref.listen(introSeenProvider, (_, _) => notifyListeners());
+    ref.listen<AppMode?>(effectiveModeProvider, (_, mode) => _followDriverHome(mode), fireImmediately: true);
   }
   final Ref ref;
+  ProviderSubscription<AsyncValue<DriverHome>>? _driverHome;
+
+  void _followDriverHome(AppMode? mode) {
+    if (mode == AppMode.driver) {
+      _driverHome ??= ref.listen(driverHomeProvider, (_, _) => notifyListeners());
+    } else {
+      _driverHome?.close();
+      _driverHome = null;
+    }
+  }
+
+  /// Whether the driver's profile is being followed (for tests).
+  @visibleForTesting
+  bool get followsDriverHome => _driverHome != null;
+
+  @override
+  void dispose() {
+    _driverHome?.close();
+    super.dispose();
+  }
 }
 
 final routerProvider = Provider<GoRouter>((ref) {

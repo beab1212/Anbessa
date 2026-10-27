@@ -158,7 +158,7 @@ One map and a sheet (snaps 42 %, 80 %) that changes with `riderStageOf(trip)`.
 - `tripHistoryProvider(as)` = `GET /api/trips?as=rider|driver` (20 per page), next page when scrolled within 400 px of the end, pull to refresh.
 - People who can drive see a Rider / Driver switch. A period filter: all, this week (7 days), this month (one calendar month back from today), applied on the loaded trips.
 - Riders (flag `scheduledRides`): "Upcoming" above the past trips (`UpcomingRidesSection`, nothing when empty), one `ScheduledRideTile` per booking: pickup time (Addis), status pill (Booked, Finding a driver, Driver search started, Cancelled, Couldn't book), drop-off, pickup, "vehicle · booked price · method", "Driver search starts at hh:mm" while booked, and "Cancel booking" while `cancellable` (status SCHEDULED): a confirmation dialog ("free until we start looking for a driver"), then `POST /api/trips/scheduled/:id/cancel` and "Booking cancelled"; a failure shows the error and refreshes the list. Pull to refresh reloads both lists.
-- Trips grouped by day ("Today", "Yesterday", or the date). Tap → the receipt route. Rows show what the rider paid (`payableMinor`) on the rider side and the fare on the driver side.
+- Trips grouped by day ("Today", "Yesterday", or the date). The grouping and the period filter run in `historyDaysProvider((as, period))` (`groupTripsByDay`, by the day in Addis Ababa), once per page loaded or filter change, not in `build`; the list is a `ListView.builder` (upcoming rides, one card per day, the "loading more" spinner) with a key on every day card and trip row. Tap → the receipt route. Rows show what the rider paid (`payableMinor`) on the rider side and the fare on the driver side.
 - States: skeleton list, error with Retry, illustrated empty state.
 
 ### ReceiptScreen (`rider/history/history_screens.dart`, both sides)
@@ -268,15 +268,20 @@ The cars from `driverHomeProvider` (own and fleet), add button → `/driver/onbo
 
 ### AccountScreen (`profile/account_hub_screen.dart`)
 
-- Profile card (avatar, name, phone, rating from `GET /api/trips/me/rating`, trips count from the loaded history) → `/account/profile`.
-- Mode: "Switch to driver", "Become a driver", or "Switch to rider".
-- Rider: saved places, payment preferences, scheduled rides (flag `scheduledRides`) → `/scheduled`.
-- Driver: vehicles, navigation, earnings, and "Lost items" (flag `support`) → `/support/lost-items`.
-- Preferences: language, appearance, notifications. Safety: emergency contact. Account: organisations (names, invitation count badge), signed-in devices. Help (flag `support`) → `/support`. About: sign out (confirmation dialog), delete account (flag), the app version.
+A GoRide/Yango-style hub on the canvas, under a pinned "Account" app bar. Every row leads with a rounded Material icon in a `SettingsIcon` square.
+
+- **Header** (its own widget, so the rating and count arriving rebuild only it): the photo at 72 px with an amber ring inside a `Hero` tagged `me-avatar` (`meAvatarHeroTag`; `ProfileScreen` carries the same tag, so the photo flies into the profile), the name (h1, one line), the phone, then "★ 4.9 · 128 · 12 trips" (rating from `GET /api/trips/me/rating`). Tap anywhere → `/account/profile`.
+- **Trip count** (`tripCountProvider(as)`): there is no count endpoint, so it is one light page, `GET /api/trips?as=…&limit=20`, shown as "N trips", or "20+ trips" when the page has a `next` cursor. If the Activity list (`tripHistoryProvider`) is already loaded its numbers are reused without a request. The hub never watches the full history list, so paging through Activity doesn't rebuild it. It re-counts when a trip ends (the same key as the payment badge).
+- **Quick actions** (`QuickActionCircle` row): Trips → the mode's Activity tab; Help → `/support` (flag `support`); rider: Places → `/account/places`, driver: Earnings → the Earnings tab; Settings → `/account/appearance`.
+- **Mode**: "Switch to driver", "Become a driver" (with its lede), or "Switch to rider" (amber icon).
+- **Ride** (rider): saved places, payment preferences, scheduled rides (flag `scheduledRides`) → `/scheduled`.
+- **Drive** (driver): vehicles, navigation, earnings, and "Lost items" (flag `support`) → `/support/lost-items`.
+- **Preferences**: language (current value), appearance (current value), notifications. **Safety**: emergency contact (red icon, the contact's name or "Not set"). **Account**: organisations (names, invitation count badge), signed-in devices, delete account (flag `accountDeletion`, "Coming soon"). **Help** (flag `support`) → `/support`.
+- **Sign out**: its own card, danger tone, no chevron; a confirmation dialog. Then the version footer ("Version 1.0.0+7").
 
 ### ProfileScreen (`profile/profile_screen.dart`)
 
-Avatar with a camera button: take a photo, choose from gallery, or remove. The image is picked at 256 px, quality 70, sent as a JPEG data URL; if it is over 48 KB the gallery picker opens again at 160 px, quality 50. Name field (≥ 2 chars, Save enabled when changed). Phone shown read-only. `POST /api/auth/update-user`.
+Avatar (112 px, the `me-avatar` Hero from the account header) with a camera button: take a photo, choose from gallery, or remove. The image is picked at 256 px, quality 70, sent as a JPEG data URL; if it is over 48 KB the gallery picker opens again at 160 px, quality 50. Name field (≥ 2 chars, Save enabled when changed). Phone shown read-only. `POST /api/auth/update-user`.
 
 ### LanguageScreen (`profile/account_screens.dart`)
 

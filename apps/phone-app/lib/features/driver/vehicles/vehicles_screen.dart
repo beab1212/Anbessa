@@ -19,13 +19,13 @@ class VehiclesScreen extends ConsumerWidget {
     final home = ref.watch(driverHomeProvider);
     final all = home.value?.allVehicles ?? const <Vehicle>[];
     return Scaffold(
-      appBar: AppBar(title: Text(l.vehicles), actions: [IconButton(tooltip: l.addVehicle, icon: const Icon(Icons.add), onPressed: () => context.push(Routes.driverVehicleNew))]),
+      appBar: AppBar(title: Text(l.vehicles), actions: [IconButton(tooltip: l.addVehicle, icon: const Icon(Icons.add_rounded), onPressed: () => context.push(Routes.driverVehicleNew))]),
       body: RefreshIndicator(
         onRefresh: () => ref.read(driverHomeProvider.notifier).refresh(),
         child: home.isLoading && home.value == null
             ? const Padding(padding: EdgeInsets.all(16), child: SkeletonList(rows: 2))
             : all.isEmpty
-                ? ListView(children: [const SizedBox(height: 40), IllustratedEmpty(illustration: AnbessaIllustration.carWaiting, title: l.noVehicles, action: PrimaryButton(label: l.addVehicle, icon: Icons.add, onPressed: () => context.push(Routes.driverVehicleNew)))])
+                ? ListView(children: [const SizedBox(height: 40), IllustratedEmpty(illustration: AnbessaIllustration.carWaiting, title: l.noVehicles, action: PrimaryButton(label: l.addVehicle, icon: Icons.add_rounded, onPressed: () => context.push(Routes.driverVehicleNew)))])
                 : ListView(
                     padding: const EdgeInsets.all(16),
                     children: [

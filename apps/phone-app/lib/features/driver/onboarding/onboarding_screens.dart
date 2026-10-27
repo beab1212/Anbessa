@@ -98,7 +98,7 @@ class OnboardingHubScreen extends ConsumerWidget {
                           StepperHeader(steps: [l.stepApply, l.stepDocuments, l.stepVehicle, l.stepReview], current: p.current, done: p.done),
                           const SizedBox(height: 18),
                           if (approved)
-                            IllustratedEmpty(illustration: AnbessaIllustration.celebrate, title: l.waitingForReviewTitle.replaceFirst(l.waitingForReviewTitle, driverStatusLabel(l, DriverStatus.active)), body: session?.canDrive == true ? l.approvedLede : l.waitingForReviewLede, compact: true, action: session?.canDrive == true ? PrimaryButton(label: l.goOnline, icon: Icons.power_settings_new, onPressed: () => context.go(Routes.driverHome)) : null)
+                            IllustratedEmpty(illustration: AnbessaIllustration.celebrate, title: l.waitingForReviewTitle.replaceFirst(l.waitingForReviewTitle, driverStatusLabel(l, DriverStatus.active)), body: session?.canDrive == true ? l.approvedLede : l.waitingForReviewLede, compact: true, action: session?.canDrive == true ? PrimaryButton(label: l.goOnline, icon: Icons.power_settings_new_rounded, onPressed: () => context.go(Routes.driverHome)) : null)
                           else if (d?.status == DriverStatus.pendingReview)
                             IllustratedEmpty(illustration: AnbessaIllustration.documents, title: l.waitingForReviewTitle, body: l.waitingForReviewLede, compact: true)
                           else
@@ -113,7 +113,7 @@ class OnboardingHubScreen extends ConsumerWidget {
                         title: l.yourApplication,
                         margin: EdgeInsets.zero,
                         children: [
-                          SettingsTile(icon: Icons.badge_outlined, title: d.fullName, subtitle: '${l.licenseNumber} ${d.licenseNumber}', chevron: false, trailing: StatusPill(driverStatusLabel(l, d.status), tone: _driverTone(d.status))),
+                          SettingsTile(icon: Icons.badge_rounded, title: d.fullName, subtitle: '${l.licenseNumber} ${d.licenseNumber}', chevron: false, trailing: StatusPill(driverStatusLabel(l, d.status), tone: _driverTone(d.status))),
                         ],
                       ),
                       const SizedBox(height: 16),
@@ -126,14 +126,14 @@ class OnboardingHubScreen extends ConsumerWidget {
                           if (home.allVehicles.isEmpty) Padding(padding: const EdgeInsets.fromLTRB(16, 14, 16, 14), child: Text(l.noVehicles, style: AnbessaType.body2.copyWith(color: c.muted))),
                           for (final v in home.allVehicles)
                             SettingsTile(
-                              icon: Icons.directions_car_outlined,
+                              icon: Icons.directions_car_rounded,
                               title: '${v.plateNumber} · ${v.label}',
                               subtitle: v.isFleet ? l.fleetCar : vehicleStatusLabel(l, v.status),
                               trailing: StatusPill(vehicleStatusLabel(l, v.status), tone: _vehicleTone(v.status)),
                               chevron: !v.isFleet,
                               onTap: v.isFleet ? null : () => context.push(Routes.driverVehicle(v.id)),
                             ),
-                          SettingsTile(icon: Icons.add, title: l.addVehicle, iconTone: c.accentStrong, onTap: () => context.push(Routes.driverVehicleNew)),
+                          SettingsTile(icon: Icons.add_rounded, title: l.addVehicle, iconTone: c.accentStrong, onTap: () => context.push(Routes.driverVehicleNew)),
                         ],
                       ),
                     ],
@@ -188,9 +188,9 @@ class _NextAction extends ConsumerWidget {
         ),
         const SizedBox(height: 16),
         switch (progress.current) {
-          0 => PrimaryButton(label: l.apply, icon: Icons.badge_outlined, onPressed: () => context.push(Routes.driverApply)),
-          1 => PrimaryButton(label: l.upload, icon: Icons.upload_file, onPressed: () => context.push(Routes.driverDocuments('DRIVER', d!.userId))),
-          2 => PrimaryButton(label: l.addVehicle, icon: Icons.directions_car_outlined, onPressed: () => context.push(Routes.driverVehicleNew)),
+          0 => PrimaryButton(label: l.apply, icon: Icons.badge_rounded, onPressed: () => context.push(Routes.driverApply)),
+          1 => PrimaryButton(label: l.upload, icon: Icons.upload_file_rounded, onPressed: () => context.push(Routes.driverDocuments('DRIVER', d!.userId))),
+          2 => PrimaryButton(label: l.addVehicle, icon: Icons.directions_car_rounded, onPressed: () => context.push(Routes.driverVehicleNew)),
           _ => _SubmitButton(ready: d?.checklist.readyToSubmit == true, missing: d?.checklist.missingForSubmit ?? const []),
         },
       ],
@@ -243,7 +243,7 @@ class _ChecklistGroup extends StatelessWidget {
       children: [
         for (final i in items)
           SettingsTile(
-            icon: i.document?.status == DocumentStatus.approved ? Icons.check_circle : i.document == null ? Icons.radio_button_unchecked : Icons.pending_outlined,
+            icon: i.document?.status == DocumentStatus.approved ? Icons.check_circle_rounded : i.document == null ? Icons.radio_button_unchecked_rounded : Icons.pending_rounded,
             iconTone: i.document?.status == DocumentStatus.approved ? c.success : i.document == null ? c.muted : c.warning,
             title: documentKindLabel(l, i.kind),
             subtitle: i.required ? null : l.optional,
@@ -275,7 +275,7 @@ class _SubmitButtonState extends ConsumerState<_SubmitButton> {
         Problem(_error, describe: (e) => describeError(l, e)),
         PrimaryButton(
           label: l.submitForReview,
-          icon: Icons.send_outlined,
+          icon: Icons.send_rounded,
           busy: _busy,
           onPressed: !widget.ready
               ? null
@@ -405,8 +405,8 @@ class _DocumentsScreenState extends ConsumerState<DocumentsScreen> {
               SectionGroup(
                 margin: EdgeInsets.zero,
                 children: [
-                  SettingsTile(icon: Icons.photo_camera_outlined, title: l.takePhoto, onTap: () => Navigator.pop(ctx, 'camera')),
-                  SettingsTile(icon: Icons.photo_library_outlined, title: l.chooseFromGallery, onTap: () => Navigator.pop(ctx, 'gallery')),
+                  SettingsTile(icon: Icons.photo_camera_rounded, title: l.takePhoto, onTap: () => Navigator.pop(ctx, 'camera')),
+                  SettingsTile(icon: Icons.photo_library_rounded, title: l.chooseFromGallery, onTap: () => Navigator.pop(ctx, 'gallery')),
                 ],
               ),
             ],
@@ -547,7 +547,7 @@ class _DocumentCard extends StatelessWidget {
                   ],
                   Expanded(
                     child: item.needsUpload
-                        ? PrimaryButton(label: l.upload, icon: Icons.upload_file, onPressed: enabled ? onPick : null)
+                        ? PrimaryButton(label: l.upload, icon: Icons.upload_file_rounded, onPressed: enabled ? onPick : null)
                         : OutlinedButton(onPressed: enabled ? onPick : null, child: Text(l.replace)),
                   ),
                 ],
@@ -846,7 +846,7 @@ class _VehicleScreenState extends ConsumerState<VehicleScreen> {
               if (v.status == VehicleStatus.draft || v.status == VehicleStatus.rejected) ...[
                 if (!cl.readyToSubmit) Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(l.missingDocs(cl.missingForSubmit.map((k) => documentKindLabel(l, k)).join(', ')), style: AnbessaType.caption.copyWith(color: c.muted))),
                 Problem(_error, describe: (e) => describeError(l, e)),
-                PrimaryButton(label: l.submitForReview, icon: Icons.send_outlined, busy: _busy, onPressed: !cl.readyToSubmit ? null : () => _submit(v)),
+                PrimaryButton(label: l.submitForReview, icon: Icons.send_rounded, busy: _busy, onPressed: !cl.readyToSubmit ? null : () => _submit(v)),
               ],
             ],
           );

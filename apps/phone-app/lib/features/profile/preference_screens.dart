@@ -23,7 +23,7 @@ class AppearanceScreen extends ConsumerWidget {
         children: [
           SectionGroup(
             children: [
-              for (final (m, title, icon) in [(ThemeMode.system, l.themeSystem, Icons.brightness_auto_outlined), (ThemeMode.light, l.themeLight, Icons.light_mode_outlined), (ThemeMode.dark, l.themeDark, Icons.dark_mode_outlined)])
+              for (final (m, title, icon) in [(ThemeMode.system, l.themeSystem, Icons.brightness_auto_rounded), (ThemeMode.light, l.themeLight, Icons.light_mode_rounded), (ThemeMode.dark, l.themeDark, Icons.dark_mode_rounded)])
                 ChoiceRow(title: title, leading: Icon(icon), selected: mode == m, onTap: () => ref.read(themeModeProvider.notifier).set(m)),
             ],
           ),
@@ -64,22 +64,22 @@ class NotificationsScreen extends ConsumerWidget {
               else if (m == null)
                 Padding(padding: const EdgeInsets.all(12), child: Problem(marketing.error, describe: (e) => describeError(l, e), onRetry: () => ref.invalidate(marketingPrefsProvider), retryLabel: l.retry))
               else ...[
-                SettingsSwitchTile(icon: Icons.campaign_outlined, title: l.marketingPush, value: m.push, onChanged: (v) => setMarketing(push: v)),
-                SettingsSwitchTile(icon: Icons.sms_outlined, title: l.marketingSms, value: m.sms, onChanged: (v) => setMarketing(sms: v)),
+                SettingsSwitchTile(icon: Icons.campaign_rounded, title: l.marketingPush, value: m.push, onChanged: (v) => setMarketing(push: v)),
+                SettingsSwitchTile(icon: Icons.sms_rounded, title: l.marketingSms, value: m.sms, onChanged: (v) => setMarketing(sms: v)),
               ],
             ],
           ),
           Padding(padding: const EdgeInsets.fromLTRB(4, 0, 4, 16), child: Text(l.marketingLede, style: AnbessaType.caption.copyWith(color: c.muted))),
           SectionGroup(
             children: [
-              SettingsSwitchTile(icon: Icons.directions_car_outlined, title: l.notifTripUpdates, subtitle: l.notifTripUpdatesLede, value: n.trip, onChanged: (v) => ref.read(notificationPrefsProvider.notifier).set(trip: v)),
-              SettingsSwitchTile(icon: Icons.volume_up_outlined, title: l.notifSound, value: n.sound, onChanged: (v) => ref.read(notificationPrefsProvider.notifier).set(sound: v)),
+              SettingsSwitchTile(icon: Icons.directions_car_rounded, title: l.notifTripUpdates, subtitle: l.notifTripUpdatesLede, value: n.trip, onChanged: (v) => ref.read(notificationPrefsProvider.notifier).set(trip: v)),
+              SettingsSwitchTile(icon: Icons.volume_up_rounded, title: l.notifSound, value: n.sound, onChanged: (v) => ref.read(notificationPrefsProvider.notifier).set(sound: v)),
             ],
           ),
           SectionGroup(
             children: [
-              SettingsSwitchTile(icon: Icons.vibration, title: l.notifVibrateOffer, value: h.vibrateOnOffer, onChanged: (v) => ref.read(hapticsSettingsProvider.notifier).setVibrateOnOffer(v)),
-              SettingsSwitchTile(icon: Icons.touch_app_outlined, title: l.notifHaptics, value: h.haptics, onChanged: (v) => ref.read(hapticsSettingsProvider.notifier).setHaptics(v)),
+              SettingsSwitchTile(icon: Icons.vibration_rounded, title: l.notifVibrateOffer, value: h.vibrateOnOffer, onChanged: (v) => ref.read(hapticsSettingsProvider.notifier).setVibrateOnOffer(v)),
+              SettingsSwitchTile(icon: Icons.touch_app_rounded, title: l.notifHaptics, value: h.haptics, onChanged: (v) => ref.read(hapticsSettingsProvider.notifier).setHaptics(v)),
             ],
           ),
           Text(l.notifOtherLocal, style: AnbessaType.caption.copyWith(color: c.muted)),
@@ -159,17 +159,17 @@ class NavigationPrefsScreen extends ConsumerWidget {
         children: [
           SectionGroup(
             children: [
-              SettingsSwitchTile(icon: Icons.explore_outlined, title: l.navFollowBearing, value: p.bearing, onChanged: (v) => ref.read(navPrefsProvider.notifier).set(bearing: v)),
-              SettingsSwitchTile(icon: Icons.brightness_high_outlined, title: l.keepAwake, value: p.keepAwake, onChanged: (v) => ref.read(navPrefsProvider.notifier).set(keepAwake: v)),
+              SettingsSwitchTile(icon: Icons.explore_rounded, title: l.navFollowBearing, value: p.bearing, onChanged: (v) => ref.read(navPrefsProvider.notifier).set(bearing: v)),
+              SettingsSwitchTile(icon: Icons.brightness_high_rounded, title: l.keepAwake, value: p.keepAwake, onChanged: (v) => ref.read(navPrefsProvider.notifier).set(keepAwake: v)),
             ],
           ),
           SectionGroup(
             title: l.navApp,
             children: [
-              ChoiceRow(title: l.navAsk, selected: p.ask, onTap: () => ref.read(navPrefsProvider.notifier).set(ask: true)),
-              ChoiceRow(title: l.navGoogleMaps, selected: !p.ask && p.app == NavApp.google, onTap: () => ref.read(navPrefsProvider.notifier).set(ask: false, app: NavApp.google)),
-              ChoiceRow(title: l.navWaze, selected: !p.ask && p.app == NavApp.waze, onTap: () => ref.read(navPrefsProvider.notifier).set(ask: false, app: NavApp.waze)),
-              ChoiceRow(title: l.navSystemMaps, selected: !p.ask && p.app == NavApp.system, onTap: () => ref.read(navPrefsProvider.notifier).set(ask: false, app: NavApp.system)),
+              ChoiceRow(title: l.navAsk, leading: const Icon(Icons.help_center_rounded), selected: p.ask, onTap: () => ref.read(navPrefsProvider.notifier).set(ask: true)),
+              ChoiceRow(title: l.navGoogleMaps, leading: const Icon(Icons.map_rounded), selected: !p.ask && p.app == NavApp.google, onTap: () => ref.read(navPrefsProvider.notifier).set(ask: false, app: NavApp.google)),
+              ChoiceRow(title: l.navWaze, leading: const Icon(Icons.directions_rounded), selected: !p.ask && p.app == NavApp.waze, onTap: () => ref.read(navPrefsProvider.notifier).set(ask: false, app: NavApp.waze)),
+              ChoiceRow(title: l.navSystemMaps, leading: const Icon(Icons.navigation_rounded), selected: !p.ask && p.app == NavApp.system, onTap: () => ref.read(navPrefsProvider.notifier).set(ask: false, app: NavApp.system)),
             ],
           ),
         ],
@@ -255,14 +255,14 @@ class _OrganizationsScreenState extends ConsumerState<OrganizationsScreen> {
                 children: [
                   for (final o in orgs)
                     SettingsTile(
-                      icon: o.isFleet ? Icons.local_shipping_outlined : Icons.business_outlined,
+                      icon: o.isFleet ? Icons.local_shipping_rounded : Icons.business_rounded,
                       title: o.name,
                       subtitle: o.status,
                       chevron: false,
                       trailing: o.isCorporate && corporate.length > 1
                           ? IconButton(
                               tooltip: l.defaultBilling,
-                              icon: Icon((billing ?? corporate.first.id) == o.id ? Icons.check_circle : Icons.radio_button_unchecked, color: (billing ?? corporate.first.id) == o.id ? c.text : c.borderStrong),
+                              icon: Icon((billing ?? corporate.first.id) == o.id ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded, color: (billing ?? corporate.first.id) == o.id ? c.text : c.borderStrong),
                               onPressed: () => ref.read(billingOrgProvider.notifier).set(o.id),
                             )
                           : null,

@@ -51,19 +51,29 @@ class SessionController extends AsyncNotifier<Session?> {
     }
   }
 
+  /// Mints the access token and reads the profile at the same time: get-session authorises with
+  /// the session bearer, not the JWT, so neither waits for the other (one round trip at start
+  /// instead of two). A refused session fails the whole load; a profile that couldn't be read
+  /// for any other reason is left empty.
   Future<Session> _load() async {
     final tokens = ref.read(tokenManagerProvider);
+    final profileF = _profile();
+    // handled below; this only keeps an early failure from being reported as unhandled
+    profileF.ignore();
     final jwt = await tokens.accessToken(force: true);
     if (jwt == null) throw const AppError(status: 401, code: ErrorCodes.sessionEnded, message: 'Signed out');
     final claims = tokens.claims!;
-    Profile profile;
+    final profile = await profileF ?? Profile(id: claims.userId, name: '', phone: '');
+    return Session(claims: claims, profile: profile);
+  }
+
+  Future<Profile?> _profile() async {
     try {
-      profile = (await ref.read(authApiProvider).session()) ?? Profile(id: claims.userId, name: '', phone: '');
+      return await ref.read(authApiProvider).session();
     } on AppError catch (e) {
       if (e.isAuth) rethrow;
-      profile = Profile(id: claims.userId, name: '', phone: '');
+      return null;
     }
-    return Session(claims: claims, profile: profile);
   }
 
   /// After a verified OTP: keep the session token, mint the first access token, load the profile.

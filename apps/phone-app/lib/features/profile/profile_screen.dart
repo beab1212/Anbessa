@@ -10,6 +10,7 @@ import 'package:ride_app_core/ride_app_core.dart';
 import '../../core/l10n/l10n.dart';
 import '../../core/network/providers.dart';
 import '../../core/session/session_controller.dart';
+import 'account_hub_screen.dart' show meAvatarHeroTag;
 
 class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
@@ -48,9 +49,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            ListTile(title: Text(l.takePhotoOption), onTap: () => Navigator.pop(ctx, 'camera')),
-            ListTile(title: Text(l.chooseFromGalleryOption), onTap: () => Navigator.pop(ctx, 'gallery')),
-            if (ref.read(currentSessionProvider)?.profile.image != null) ListTile(title: Text(l.removePhoto, style: TextStyle(color: context.colors.danger)), onTap: () => Navigator.pop(ctx, 'remove')),
+            ListTile(leading: const Icon(Icons.photo_camera_rounded), title: Text(l.takePhotoOption), onTap: () => Navigator.pop(ctx, 'camera')),
+            ListTile(leading: const Icon(Icons.photo_library_rounded), title: Text(l.chooseFromGalleryOption), onTap: () => Navigator.pop(ctx, 'gallery')),
+            if (ref.read(currentSessionProvider)?.profile.image != null) ListTile(leading: Icon(Icons.delete_outline_rounded, color: context.colors.danger), title: Text(l.removePhoto, style: TextStyle(color: context.colors.danger)), onTap: () => Navigator.pop(ctx, 'remove')),
           ],
         ),
       ),
@@ -101,7 +102,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               child: Stack(
                 alignment: Alignment.center,
                 children: [
-                  AvatarImage(src: s?.profile.image, name: s?.displayName ?? '', size: 112, ring: true),
+                  Hero(tag: meAvatarHeroTag, child: AvatarImage(src: s?.profile.image, name: s?.displayName ?? '', size: 112, ring: true)),
                   if (_photoBusy) SizedBox(width: 28, height: 28, child: CircularProgressIndicator(strokeWidth: 2.5, color: c.text)),
                 ],
               ),
@@ -114,7 +115,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           const SizedBox(height: 12),
           SectionGroup(
             margin: EdgeInsets.zero,
-            children: [SettingsValueTile(icon: Icons.phone_outlined, title: l.phoneLabelShort, value: formatPhone(s?.profile.phone))],
+            children: [SettingsValueTile(icon: Icons.phone_rounded, title: l.phoneLabelShort, value: formatPhone(s?.profile.phone))],
           ),
           const SizedBox(height: 12),
           Problem(_error, describe: (e) => describeError(l, e)),

@@ -54,7 +54,7 @@ class SupportScreen extends ConsumerWidget {
           children: [
             Text(l.supportLede, style: AnbessaType.body.copyWith(color: c.text2)),
             const SizedBox(height: 16),
-            PrimaryButton(label: l.newTicket, onPressed: () => context.push(Routes.supportNew)),
+            PrimaryButton(label: l.newTicket, icon: Icons.add_comment_rounded, onPressed: () => context.push(Routes.supportNew)),
             const SizedBox(height: 24),
             ...tickets.when(
               loading: () => const [SkeletonList(rows: 3, avatar: false)],
@@ -67,7 +67,7 @@ class SupportScreen extends ConsumerWidget {
                     children: [
                       for (final t in list)
                         SettingsTile(
-                          icon: Icons.chat_bubble_outline,
+                          icon: Icons.chat_bubble_outline_rounded,
                           title: t.subject,
                           subtitle: _ticketLine(context, t),
                           trailing: StatusPill(ticketStatusLabel(l, t.status), tone: ticketStatusTone(t.status)),
@@ -83,7 +83,7 @@ class SupportScreen extends ConsumerWidget {
                 children: [
                   for (final i in lost)
                     SettingsTile(
-                      icon: Icons.backpack_outlined,
+                      icon: Icons.backpack_rounded,
                       title: _short(i.description, 60),
                       subtitle: l.lostReportedOn(dayAndTime(i.createdAt, locale: context.localeTag)),
                       trailing: StatusPill(lostItemStatusLabel(l, i.status), tone: lostItemStatusTone(i.status)),
@@ -193,7 +193,7 @@ class _NewTicketScreenState extends ConsumerState<NewTicketScreen> {
             title: l.ticketWhatAbout,
             children: [
               for (final cat in ticketCategoriesForApp)
-                ChoiceRow(title: ticketCategoryLabel(l, cat), subtitle: ticketCategoryHint(l, cat), selected: _category == cat, onTap: () => setState(() => _category = cat)),
+                ChoiceRow(title: ticketCategoryLabel(l, cat), subtitle: ticketCategoryHint(l, cat), leading: Icon(ticketCategoryIcon(cat)), selected: _category == cat, onTap: () => setState(() => _category = cat)),
             ],
           ),
           if (_category == TicketCategory.safety) ...[Notice(l.ticketSafetyNotice, tone: NoticeTone.warning), const SizedBox(height: 16)],
@@ -201,7 +201,7 @@ class _NewTicketScreenState extends ConsumerState<NewTicketScreen> {
           const SizedBox(height: 16),
           SectionGroup(
             title: l.ticketTrip,
-            children: [SettingsValueTile(icon: Icons.route_outlined, title: l.ticketTripLabel, value: tripLabel, onTap: _pickTrip)],
+            children: [SettingsValueTile(icon: Icons.route_rounded, title: l.ticketTripLabel, value: tripLabel, onTap: _pickTrip)],
           ),
           TextField(
             controller: _text,
@@ -245,9 +245,10 @@ class _TripPicker extends ConsumerWidget {
             SectionGroup(
               margin: EdgeInsets.zero,
               children: [
-                ChoiceRow(title: l.ticketNoTrip, selected: selected == null, onTap: () => Navigator.pop(context, '')),
+                ChoiceRow(title: l.ticketNoTrip, leading: const Icon(Icons.do_not_disturb_on_rounded), selected: selected == null, onTap: () => Navigator.pop(context, '')),
                 for (final t in trips)
                   ChoiceRow(
+                    leading: const Icon(Icons.receipt_long_rounded),
                     title: t.dropoff.address ?? '—',
                     subtitle: '${dayAndTime(t.times.requestedAt, locale: context.localeTag)} · ${tripStatusLabel(l, t.status)}',
                     selected: selected == t.id,
@@ -407,3 +408,14 @@ class _ReopenDialogState extends State<_ReopenDialog> {
     );
   }
 }
+
+/// The leading icon of a help-request category.
+IconData ticketCategoryIcon(TicketCategory c) => switch (c) {
+      TicketCategory.safety => Icons.shield_rounded,
+      TicketCategory.payment => Icons.payments_rounded,
+      TicketCategory.trip => Icons.local_taxi_rounded,
+      TicketCategory.lostItem => Icons.backpack_rounded,
+      TicketCategory.account => Icons.person_rounded,
+      TicketCategory.feedback => Icons.rate_review_rounded,
+      TicketCategory.unknown => Icons.help_outline_rounded,
+    };

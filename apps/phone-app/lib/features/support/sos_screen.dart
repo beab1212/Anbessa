@@ -190,7 +190,7 @@ class _SosScreenState extends ConsumerState<SosScreen> {
             Text(l.sosLede, style: AnbessaType.body.copyWith(color: c.text2)),
             const SizedBox(height: 24),
           ],
-          PrimaryButton(label: l.callPolice, icon: Icons.phone, danger: true, onPressed: () => _call(policeNumber)),
+          PrimaryButton(label: l.callPolice, icon: Icons.phone_rounded, danger: true, onPressed: () => _call(policeNumber)),
           const SizedBox(height: 12),
           if (alert == null || _phase != _Phase.sent) ...[
             if (_phase == _Phase.sending)
@@ -217,7 +217,7 @@ class _SosScreenState extends ConsumerState<SosScreen> {
             const SizedBox(height: 24),
             SectionGroup(
               margin: EdgeInsets.zero,
-              children: [SettingsTile(icon: Icons.phone_outlined, title: l.sosCallContact(contact.name), subtitle: formatPhone(contact.phone), chevron: false, onTap: () => _call(contact.phone))],
+              children: [SettingsTile(icon: Icons.phone_rounded, title: l.sosCallContact(contact.name), subtitle: formatPhone(contact.phone), chevron: false, onTap: () => _call(contact.phone))],
             ),
           ],
         ],

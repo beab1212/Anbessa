@@ -69,9 +69,9 @@ class _SavedPlacesScreenState extends ConsumerState<SavedPlacesScreen> {
                     Dismissible(
                       key: ValueKey(p.id),
                       direction: DismissDirection.endToStart,
-                      background: Container(color: c.dangerSoft, alignment: Alignment.centerRight, padding: const EdgeInsets.only(right: 20), child: Icon(Icons.delete_outline, color: c.danger)),
+                      background: Container(color: c.dangerSoft, alignment: Alignment.centerRight, padding: const EdgeInsets.only(right: 20), child: Icon(Icons.delete_outline_rounded, color: c.danger)),
                       onDismissed: (_) => ref.read(savedPlacesProvider.notifier).remove(p.id),
-                      child: SettingsTile(icon: Icons.star_rounded, title: p.name, subtitle: p.address, chevron: false, trailing: IconButton(tooltip: l.removePlace, icon: const Icon(Icons.delete_outline), onPressed: () => ref.read(savedPlacesProvider.notifier).remove(p.id))),
+                      child: SettingsTile(icon: Icons.star_rounded, title: p.name, subtitle: p.address, chevron: false, trailing: IconButton(tooltip: l.removePlace, icon: const Icon(Icons.delete_outline_rounded), onPressed: () => ref.read(savedPlacesProvider.notifier).remove(p.id))),
                     ),
                 ],
               ),

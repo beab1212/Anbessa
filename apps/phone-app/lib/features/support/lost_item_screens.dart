@@ -271,7 +271,7 @@ class DriverLostItemsScreen extends ConsumerWidget {
                     children: [
                       for (final i in list)
                         SettingsTile(
-                          icon: Icons.backpack_outlined,
+                          icon: Icons.backpack_rounded,
                           title: _short(i.description),
                           subtitle: l.lostReportedOn(dayAndTime(i.createdAt, locale: context.localeTag)),
                           trailing: StatusPill(lostItemStatusLabel(l, i.status), tone: lostItemStatusTone(i.status)),

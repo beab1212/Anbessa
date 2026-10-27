@@ -1,10 +1,12 @@
 // The app: theme, locale, router. Push taps and local-notification taps are routed here.
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:ride_app_core/ride_app_core.dart';
 import 'core/l10n/l10n.dart';
+import 'core/perf.dart';
 import 'core/push/local_notifications.dart';
 import 'core/push/push_service.dart';
 import 'core/router/app_router.dart';
@@ -32,6 +34,20 @@ class _AnbessaAppState extends ConsumerState<AnbessaApp> with WidgetsBindingObse
     local.launchPayload().then((p) {
       if (p != null) _onLocalTap(p);
     });
+    if (!kReleaseMode) _watchHomeShown();
+  }
+
+  /// Perf: the first time either home is on screen (debug and profile builds).
+  void _watchHomeShown() {
+    final delegate = ref.read(routerProvider).routerDelegate;
+    void check() {
+      final path = delegate.currentConfiguration.uri.path;
+      if (path != Routes.riderHome && path != Routes.driverHome) return;
+      delegate.removeListener(check);
+      WidgetsBinding.instance.addPostFrameCallback((_) => Perf.mark('home shown', once: true));
+    }
+
+    delegate.addListener(check);
   }
 
   @override

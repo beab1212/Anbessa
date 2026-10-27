@@ -46,6 +46,35 @@ final tripHistoryProvider = AsyncNotifierProvider.family<TripHistory, ({List<Tri
 
 enum HistoryPeriod { all, week, month }
 
+/// One day of past trips (the day in Addis Ababa), newest first as the list comes.
+typedef TripDay = ({DateTime day, DateTime firstAt, List<Trip> trips});
+
+/// The loaded history filtered by period and grouped by day. Worked out here, once per page
+/// loaded or filter change, instead of on every build of the screen.
+final historyDaysProvider = Provider.family<List<TripDay>, ({String as, HistoryPeriod period})>((ref, arg) {
+  final trips = ref.watch(tripHistoryProvider(arg.as).select((h) => h.value?.trips)) ?? const <Trip>[];
+  return groupTripsByDay(trips, period: arg.period, now: DateTime.now());
+});
+
+List<TripDay> groupTripsByDay(List<Trip> trips, {HistoryPeriod period = HistoryPeriod.all, required DateTime now}) {
+  final since = switch (period) {
+    HistoryPeriod.week => now.subtract(const Duration(days: 7)),
+    HistoryPeriod.month => DateTime(now.year, now.month - 1, now.day),
+    HistoryPeriod.all => null,
+  };
+  final days = <DateTime, List<Trip>>{};
+  final first = <DateTime, DateTime>{};
+  for (final t in trips) {
+    final at = t.times.requestedAt;
+    if (since != null && !at.isAfter(since)) continue;
+    final d = toAddis(at);
+    final key = DateTime.utc(d.year, d.month, d.day);
+    first.putIfAbsent(key, () => at);
+    days.putIfAbsent(key, () => []).add(t);
+  }
+  return [for (final e in days.entries) (day: e.key, firstAt: first[e.key]!, trips: List.unmodifiable(e.value))];
+}
+
 class HistoryScreen extends ConsumerStatefulWidget {
   const HistoryScreen({super.key, required this.as, required this.receiptRoute});
   /// rider | driver
@@ -84,17 +113,11 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     // the rider's upcoming scheduled rides sit above the past trips
     final rider = _as == 'rider';
     final now = DateTime.now();
-    final since = switch (_period) {
-      HistoryPeriod.week => now.subtract(const Duration(days: 7)),
-      HistoryPeriod.month => DateTime(now.year, now.month - 1, now.day),
-      HistoryPeriod.all => null,
-    };
-    final trips = (h.value?.trips ?? const <Trip>[]).where((t) => since == null || t.times.requestedAt.isAfter(since)).toList();
-    // group by day
-    final groups = <String, List<Trip>>{};
-    for (final t in trips) {
-      groups.putIfAbsent(_dayLabel(l, t.times.requestedAt, now), () => []).add(t);
-    }
+    final days = ref.watch(historyDaysProvider((as: _as, period: _period)));
+    final empty = days.isEmpty;
+    final hasMore = h.value?.next != null;
+    // built lazily: the upcoming rides, one card per day, the "loading more" spinner
+    final count = (rider ? 1 : 0) + days.length + (hasMore ? 1 : 0);
     return Scaffold(
       appBar: AppBar(title: Text(l.activityTitle)),
       body: Column(
@@ -117,26 +140,34 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                 if (rider) ref.read(scheduledRidesProvider.notifier).refresh();
                 await ref.read(tripHistoryProvider(_as).notifier).refresh();
               },
-              child: h.isLoading && trips.isEmpty
+              child: h.isLoading && empty
                   ? const Padding(padding: EdgeInsets.symmetric(horizontal: 16), child: SkeletonList(rows: 6))
-                  : h.hasError && trips.isEmpty
+                  : h.hasError && empty
                       ? ListView(children: [Padding(padding: const EdgeInsets.all(16), child: Problem(h.error, describe: (e) => describeError(l, e), onRetry: () => ref.read(tripHistoryProvider(_as).notifier).refresh(), retryLabel: l.retry))])
-                      : trips.isEmpty
+                      : empty
                           ? ListView(padding: const EdgeInsets.symmetric(horizontal: 16), children: [if (rider) const UpcomingRidesSection(), const SizedBox(height: 60), IllustratedEmpty(illustration: AnbessaIllustration.noTrips, title: l.noTrips, body: l.noTripsLede)])
-                          : ListView(
+                          : ListView.builder(
+                              key: PageStorageKey('history-$_as'),
                               controller: _scroll,
                               padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-                              children: [
-                                if (rider) const UpcomingRidesSection(),
-                                for (final e in groups.entries) ...[
-                                  Padding(padding: const EdgeInsets.fromLTRB(4, 14, 4, 6), child: Text(e.key, style: AnbessaType.label.copyWith(color: c.muted, letterSpacing: 0.4))),
-                                  SectionGroup(
-                                    margin: EdgeInsets.zero,
-                                    children: [for (final t in e.value) _TripRow(trip: t, driverSide: _as == 'driver', onTap: () => context.push(widget.receiptRoute(t.id)))],
-                                  ),
-                                ],
-                                if (h.value?.next != null) const Padding(padding: EdgeInsets.all(16), child: Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)))),
-                              ],
+                              itemCount: count,
+                              itemBuilder: (context, i) {
+                                if (rider && i == 0) return const UpcomingRidesSection(key: ValueKey('upcoming'));
+                                final di = i - (rider ? 1 : 0);
+                                if (di >= days.length) return const Padding(key: ValueKey('more'), padding: EdgeInsets.all(16), child: Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))));
+                                final d = days[di];
+                                return Column(
+                                  key: ValueKey(d.day),
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Padding(padding: const EdgeInsets.fromLTRB(4, 14, 4, 6), child: Text(_dayLabel(l, d.firstAt, now), style: AnbessaType.label.copyWith(color: c.muted, letterSpacing: 0.4))),
+                                    SectionGroup(
+                                      margin: EdgeInsets.zero,
+                                      children: [for (final t in d.trips) _TripRow(key: ValueKey(t.id), trip: t, driverSide: _as == 'driver', onTap: () => context.push(widget.receiptRoute(t.id)))],
+                                    ),
+                                  ],
+                                );
+                              },
                             ),
             ),
           ),
@@ -155,7 +186,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
 }
 
 class _TripRow extends StatelessWidget {
-  const _TripRow({required this.trip, required this.onTap, this.driverSide = false});
+  const _TripRow({super.key, required this.trip, required this.onTap, this.driverSide = false});
   final Trip trip;
   /// drivers see the fare their earning is based on; riders what they paid
   final bool driverSide;

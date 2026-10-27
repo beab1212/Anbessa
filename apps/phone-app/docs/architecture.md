@@ -27,7 +27,7 @@ apps/phone-app/
       config/                     client config, feature flags, city, app version, update gate
       intro/                      the first-launch carousel
       shell/shells.dart           rider and driver bottom-navigation shells
-      maps/                       AnbessaMap, markers, routes, tiles, MarkerAnimator, nearby cars, compass; nav/ (NavigationController, turn banner, external navigation)
+      maps/                       AnbessaMap, markers, routes, tiles, MarkerAnimator, nearby cars, compass; scene/ (MapScene native layers, CameraDirector, MapBinding, RouteTrack); nav/ (NavigationController, turn banner, external navigation)
       rider/                      home, booking (route editor, quote), trip, payments, rating, history, places
       driver/                     onboarding, shift (home), offers, trip, earnings, vehicles
       profile/                    account hub, profile, settings screens and their controllers
@@ -43,13 +43,15 @@ apps/phone-app/
 
 `lib/main.dart`:
 
-1. `WidgetsFlutterBinding.ensureInitialized()`.
-2. `SharedPreferences.getInstance()`, injected as `prefsProvider` so every later read is synchronous.
-3. A `ProviderContainer` is created with that override.
-4. `installHaptics(container)` replaces `Haptics.sink` (see [Haptics](#haptics)).
-5. `localNotificationsProvider.init()` (Android/iOS only, a no-op elsewhere).
-6. `pushServiceProvider.init()` (only when all four `FIREBASE_*` defines are set, on Android/iOS).
-7. `runApp(UncontrolledProviderScope(container, AnbessaApp()))`.
+1. `Perf.start()` and the `main start` mark (see [Performance notes](#performance-notes)).
+2. `WidgetsFlutterBinding.ensureInitialized()`.
+3. `SharedPreferences.getInstance()`, injected as `prefsProvider` so every later read is synchronous. This is the only thing awaited before the first frame.
+4. A `ProviderContainer` is created with that override.
+5. `installHaptics(container)` replaces `Haptics.sink` (see [Haptics](#haptics)).
+6. `AvatarImage.networkBuilder` is set once to a `CachedNetworkImage` (https profile photos from the disk cache; the initials on failure). Core stays free of that dependency.
+7. The container starts listening to `sessionProvider`, so the stored session is checked (token mint and profile in parallel, see [Cold start](#cold-start-sessioncontrollerbuild)) while the first frame is drawn; its first settled value logs `session ready`.
+8. `runApp(UncontrolledProviderScope(container, AnbessaApp()))`.
+9. After the first frame (`first frame` mark): `localNotificationsProvider.init()` (Android/iOS only, a no-op elsewhere), then `pushServiceProvider.init()` (only when all four `FIREBASE_*` defines are set, on Android/iOS). Neither holds the splash any more. Because push may now be ready after the session, `PushService.init` registers the device itself when someone is already signed in (the `currentSessionProvider` listener only fires on changes). `AnbessaApp` subscribes to push taps in `initState`, before push is ready, so no tap is missed; the launch payload of a local notification is read the same way as before.
 
 Everything else is built lazily by Riverpod the first time something reads it.
 
@@ -57,7 +59,8 @@ Everything else is built lazily by Riverpod the first time something reads it.
 
 - builds `MaterialApp.router` with `anbessaTheme()` / `anbessaTheme(brightness: dark)`, `themeModeProvider`, `localeProvider`, the two supported locales and `routerProvider`;
 - on `AppLifecycleState.resumed`, calls `clientConfigProvider.notifier.refresh()` and `activeTripProvider.notifier.refresh()` (events may have been missed while paused);
-- routes push taps and local-notification taps (see [Push notifications](#push-notifications)).
+- routes push taps and local-notification taps (see [Push notifications](#push-notifications));
+- outside release builds, logs the `home shown` mark the first time the router's location is `/rider/home` or `/driver/home` (after that frame).
 
 The first screen is `/splash`; the router's guards move on from there once the session has been read.
 
@@ -187,7 +190,7 @@ On the OTP screen with `?driver=1`, `modeProvider` is set to driver right after 
 ### Cold start (`SessionController.build`)
 
 1. No `session_token` in secure storage → `null` (signed out).
-2. Otherwise `_load()`: `TokenManager.accessToken(force: true)`, then `GET /api/auth/get-session` for the profile (if that fails with a non-auth error, an empty profile is used).
+2. Otherwise `_load()`: `TokenManager.accessToken(force: true)` and `GET /api/auth/get-session` **at the same time** (get-session authorises with the session bearer, not the JWT, so it doesn't need the mint; one round trip at start instead of two). If the profile call fails with a non-auth error an empty profile is used; an auth error from either fails the load. The profile future is `ignore()`d until awaited so an early failure isn't reported as unhandled.
 3. An `AppError` that `isAuth` (401 or `session_ended`) or `isForbidden` (403) clears the token and the cache → `null`.
 4. Any other `AppError` (network down): if `TokenManager.claims` is set, a session with an empty profile is returned; otherwise the error is rethrown.
 
@@ -329,7 +332,7 @@ Every route is registered whatever the feature flags say; the flags only hide th
    - Paths starting with `/account`, `/sos`, `/support`, `/scheduled` are allowed in either mode and **skip the remaining guards** (so the active-trip guard does not apply to them).
    - Paths starting with `/rider/book` are allowed in driver mode and skip the remaining guards (the route editor picks saved places from the account).
    - A rider on a `/driver…` path goes to `/rider/home`; a driver on a `/rider…` path goes to `/driver/home`.
-5. **Driver not approved.** In driver mode, once `driverHomeProvider` has a value: approved = `session.canDrive && (driver?.isActive ?? true)`. If not approved, every path goes to `/driver/onboarding` except paths under `/driver/onboarding`, `/driver/account`, `/driver/vehicles` and paths under `/driver/earnings`.
+5. **Driver not approved.** In driver mode, once `driverHomeProvider` has a value (it is only read here, and `RouterNotifier` only listens to it, in driver mode: it follows `effectiveModeProvider` and opens the `driverHomeProvider` subscription when the mode becomes driver, closing it when it leaves, so a rider's start never calls `GET /api/fleet/drivers/me`): approved = `session.canDrive && (driver?.isActive ?? true)`. If not approved, every path goes to `/driver/onboarding` except paths under `/driver/onboarding`, `/driver/account`, `/driver/vehicles` and paths under `/driver/earnings`.
 6. **Active trip.** If `activeTripProvider` holds a trip with `isActive`, any path that does not start with `/rider/trip/<id>` (rider) or `/driver/trip/<id>` (driver) goes there.
 
 `redirectFor(ref, uri)` runs the same function without a GoRouter, for `test/router_redirect_test.dart`.
@@ -463,75 +466,121 @@ Starts at Meskel Square (9.0107, 38.7613), accuracy 5 m, permission always grant
 
 | Engine | File | Where | Draws |
 |---|---|---|---|
-| Vector: MapLibre (`maplibre` 0.3.6; 0.3.7 needs Flutter 3.47) | `vector_map.dart` | Android, iOS | vector tiles; flat, 3D (tilted, buildings extruded) and satellite |
-| Raster: flutter_map + `flutter_map_animations` | `raster_map.dart` | Linux desktop, tests (MapLibre has no desktop or test implementation) | raster tiles; flat and satellite (3D shows flat) |
+| Vector: MapLibre (`maplibre` 0.3.6; 0.3.7 needs Flutter 3.47) | `vector_map.dart` | Android, iOS | vector tiles; flat, 3D (tilted, buildings extruded) and satellite; cars, pins, the person and routes as native layers (`MapScene`) |
+| Raster: flutter_map + `flutter_map_animations` | `raster_map.dart` | Linux desktop, tests (MapLibre has no desktop or test implementation) | raster tiles; flat and satellite (3D shows flat); everything as Flutter widgets / flutter_map layers |
 
-Both draw the same pins: `pinsFor()` builds one list of `MapPin`s (overlays, nearby cars, pickup, drop-off, the person, the car, callouts) and each engine places them (`MarkerLayer` / MapLibre `WidgetLayer`). Pins are Flutter widgets, so they look the same on both. Route lines share `routeStroke()`.
+Both engines hand every camera decision to one `CameraDirector` through a `MapBinding` (`scene/`), so they behave the same. Files:
+
+| File | Role |
+|---|---|
+| `scene/map_scene.dart` | `MapScene`: owns the native GeoJSON sources, layers and images on the vector engine |
+| `scene/scene_style.dart` | the layer definitions (`sceneLayers(SceneLook)`), route colours |
+| `scene/scene_geojson.dart` | pure builders of each source's FeatureCollection, ids (`SceneIds`), `NearbyCarFrame` |
+| `scene/scene_images.dart` | the images, painted on a canvas: top-down car (amber, grey when stale), small nearby car, pickup ring and drop-off square pins, the person's dot and heading cone, label chips |
+| `scene/camera_director.dart` | `CameraDirector` and `CameraPort` (what an engine gives it); pure helpers `navZoomForSpeed`, `fitZoomFor`, `lowerThirdPadding`, `followMoveDuration` |
+| `scene/map_binding.dart` | turns `AnbessaMap` parameters into director calls (when is an intent new) |
+| `scene/route_track.dart` | `RouteTrack`: a route with cumulative metres, point and bearing at a distance, projection onto a window of it |
+| `marker_animator.dart`, `nearby_cars_layer.dart` | the animators that feed the map |
+
+### The map scene (vector engine)
+
+When a style has loaded, `MapScene.attach(style, look)` registers the images once (`addImageFromCanvas`, painted at the screen's pixel ratio and scaled down with `icon-size`, because the plugin's `addImage` scales bitmaps by the device pixel ratio), adds fixed GeoJSON sources (`anb-routes`, `anb-pins`, `anb-nearby`, `anb-driver`, `anb-me`) and the layers that draw them, bottom to top:
+
+| Layer | Source | Drawing |
+|---|---|---|
+| `anbessa-buildings-3d` | `openmaptiles` | 3D only: extruded buildings (theme-coloured), under the routes |
+| `anb-route-secondary` | routes, `kind = secondary` | dashed line (the leg that isn't the current one) |
+| `anb-route-traversed` | `kind = traversed` | grey line (the part already driven) |
+| `anb-route-casing`, `anb-route-fill` | `kind = primary` | amber line on an ink casing |
+| `anb-route-straight` | `kind = straight` | dotted line (no road geometry) |
+| `anb-nearby-cars`, `anb-nearby-label` | nearby | small cars turned by `bearing`, `icon-opacity` from the feature's `opacity`; the label image over the `lead` car |
+| `anb-pin` | pins | pickup ring / drop-off square, anchored at the bottom (the tip) |
+| `anb-me-cone`, `anb-me-dot` | me | heading cone (when there is a heading) and the blue dot |
+| `anb-driver-car`, `anb-driver-label` | driver | the followed car turned by `bearing`; the "4 min" label above it |
+
+Line layers use `line-cap`/`line-join: round` and zoom-interpolated widths. Symbol layers for cars use `icon-rotation-alignment: map` and `icon-pitch-alignment: map` (they lie flat on the road under tilt) and `icon-allow-overlap`. Labels over cars are images re-painted when their text changes, so they move with the car natively.
+
+After that, `setRoutes`, `setPins`, `setDriverCar`, `setDriverLabel`, `setNearbyCars`, `setNearbyLabel` and `setMe` only replace their own source's data with `updateGeoJsonSource`: no layer is removed and re-added for a data change (the plugin's declarative `layers:` did that on every change and is not used). Updates are coalesced per source to at most one every 33 ms (the latest wins); identical data isn't sent; routes are compared by a cheap key (kind, length, first, middle and last point). A style change (theme, satellite, a custom style) calls `detach()`; the next style-loaded callback re-creates everything from the last data. Switching flat ↔ 3D on the same style only adds or removes the buildings layer.
+
+The only Flutter widgets over the vector map are the screen's `overlays` (the search pulse) and up to three `callouts` (`ml.WidgetLayer`, keyed, faded in with `FadeSlideIn`). `WidgetLayer` positions trail the native camera, so callouts are hidden while a gesture is in progress.
 
 ### Map modes (`map_mode.dart`, `map_styles.dart`)
 
 | Mode | Vector engine | Raster engine |
 |---|---|---|
 | Flat (2D) | OpenFreeMap `positron` (light) / `dark` (dark theme): quiet styles so routes and cars stand out | `TILE_URL` or OpenStreetMap; dark theme darkens them (or `TILE_URL_DARK`) |
-| 3D | the same style, camera pitch 55° (60° while navigating), OpenMapTiles buildings extruded under the route (`anbessa-buildings-3d`, theme-coloured); tilt by gesture | not available: flat |
+| 3D | the same style, camera pitch 55° (also while navigating; flat and satellite tilt 45° while navigating), OpenMapTiles buildings extruded under the route (`anbessa-buildings-3d`, theme-coloured); tilt by gesture | not available: flat |
 | Satellite | an inline raster style over Esri World Imagery (`SATELLITE_TILE_URL` overrides) | the same imagery as a tile layer |
 
 The chosen mode is stored in preferences (`map_mode`) and applies to every map. `effectiveMapModeProvider` turns 3D into flat where the vector engine doesn't run. The mode switch is the first map control (its label is the mode: "2D", "3D", "Sat"); it opens a sheet with the three choices. Defaults need no API key; production points `MAP_STYLE_URL` / `MAP_STYLE_URL_DARK` / `SATELLITE_TILE_URL` at its own servers (Esri imagery's terms should be checked before production use).
+
+### Camera (`CameraDirector`)
+
+Modes: `free`, `overview(points)`, `follow(subject)` (north up, `followZoom`), `navigate(subject)` (turned with the subject, tilted 55° in 3D and 45° on the flat and satellite maps, the subject at two thirds of the free height via padding, zoom by speed: 17.5 up to 20 km/h → 15.5 from 80 km/h, smoothed).
+
+- The subject is a `ValueListenable<AnimatedPose?>` (the car's `MarkerAnimator`, or a pose made from `mePose`), never a widget rebuild. On the vector engine each new subject value sends `animateCamera` with a duration equal to the gap since the last move (300–1000 ms), at most every 300 ms (a trailing move carries the last value), so moves chain into one glide. The raster engine moves on every subject change (flutter_map moves are cheap Dart calls).
+- Overview fits only on an explicit call (a new `fitKey`, a new follow mode, recenter) and when the insets settle (250 ms after the last change). A fit keeps the current bearing, and points closer than zoom 17 are centred at 17 in one move instead of `fitBounds` zooming past it first. One point is shown at zoom 15.
+- Any user gesture (`MapEventStartMoveCamera` with reason `apiGesture`; drag/pinch/double tap/scroll on raster) switches to `free`, keeps the interrupted mode, and raises `showRecenter`; the map shows core's `RecenterPill` above the sheet. `recenter()` goes back to the interrupted mode. A forced overview (new `fitKey`) wins over a gesture; an unkeyed points change does not.
+- Insets come from `topInset`, the live `sheetHeight` (or `bottomInset`) and `padding`'s sides; fits add 48 px above and 32 px below.
+
+`MapBinding.sync()` runs on every widget update and decides whether the intent is new: a different `follow` → `follow()`/`navigate()`; `follow: none` with `fit` points → `overview()` when `fitKey` changed (or, without a key, the points changed); `follow: none` without points → `free()` unless the person already freed it.
 
 ### AnbessaMap
 
 | Parameter | Meaning |
 |---|---|
-| `fit` | points to keep in view (pickup, drop-off, car…); refitted when they change or the insets change |
+| `fit`, `fitKey` | points to show when nothing is followed; fitted when `fitKey` changes (without a key: when the points change), when the insets settle, and on recenter — never because the screen rebuilt |
 | `center`, `zoom = 13` | the start when there is nothing to fit or follow; default centre is the current city's bbox centre |
 | `pickup`, `dropoff` | pickup: an ink ring pin; drop-off: a filled square pin |
-| `driverPose` | the animated car (`AnimatedPose` from a `MarkerAnimator`); `driver` is an older static form |
+| `driverCar` | the animated car: a `MarkerAnimator` (any `ValueListenable<AnimatedPose?>`), drawn every frame without rebuilding the screen |
+| `driverCarLabel` | a label above the car ("4 min") |
+| `driverPose`, `driver` | older forms of the car (redrawn on rebuild) |
 | `mePose` | the person's dot with heading cone (the raster engine also draws the accuracy circle); `me` is the older point form |
 | `routes` | `RouteLine`s; `line` is an older straight dotted line |
-| `cars` | anonymous nearby cars (`CarPose`) |
-| `callouts` | labels above points (`MapCallout`: ETA over the car, place names over pins) |
+| `nearbyCars`, `nearbyLabel` | the cars around the rider (`CarsAnimator.frames`) and a label above the nearest; `cars` (`CarPose`) is the older still form |
+| `callouts` | labels at fixed points (`MapCallout`, at most three are drawn) |
 | `overlays` | any widget at a point (`MapOverlay`), e.g. the search pulse at the pickup |
-| `topInset`, `bottomInset` | pixels covered by banners and the sheet; fits and follows keep the subject in the free area, and the controls and credit sit above `bottomInset` |
-| `follow`, `followZoom = 16` | `FollowMode` |
+| `topInset`, `sheetHeight`, `bottomInset` | pixels covered by banners and the sheet. `sheetHeight` is a `ValueListenable<double>` the sheet writes to directly (the screen doesn't rebuild while it's dragged); it replaces `bottomInset` |
+| `follow`, `followZoom = 16` | `FollowMode`: `none`, `me` (the person; falls back to the car when there is no position), `driver` (follow, north up), `driverBearing` (navigate) |
 | `showControls`, `showModeSwitch`, `interactive`, `padding` | |
-| `onUserGesture` | every pan, pinch or turn by the person (screens drop follow mode on it; the route editor lifts its pin) |
-| `onRecenter` | the recenter control was pressed (screens follow again); with it the control always shows |
+| `onUserGesture` | every pan, pinch or turn by the person (the route editor lifts its pin; screens may drop their follow flag) |
+| `onRecenter` | the recenter control or pill was pressed; with it the control always shows |
 | `onTap`, `onMove` | `onMove` gets the camera centre after a gesture ends (drag-to-pick) |
 
-Behaviour (both engines):
+Other behaviour:
 
-- `FollowMode`: `none`, `me`, `driver` (north up), `driverBearing` (map turned so the car's heading points up, the car in the lower part of the free area). The raster engine moves the camera on every rebuild; the vector engine at most ~12 times a second (each move crosses to native code).
-- A gesture while following breaks the follow (and calls `onUserGesture`); recenter restores it.
-- A north needle shows when the map is turned outside `driverBearing`; tapping it turns north up.
-- Fits are animated (`AnbessaMotion.camera`) unless reduced motion is on; 48 px above, 32 px below and the side padding; a single point is shown at zoom 15; the vector engine never fits closer than zoom 17.
+- A north needle shows when the map is turned outside navigation; tapping it turns north up.
 - The credit line is drawn by the app (one line, 9 px). A raster tile error sets `mapTilesDownProvider`.
-- Pins add the map's rotation so headings stay true. The car is amber on a trip, green off a trip, faint when stale.
+- Raster pins add the map's rotation so headings stay true. The car is amber, grey when stale.
 
 ### Route lines (`route_layer.dart`)
 
-| Kind | Drawing |
+| Kind | Drawing (both engines) |
 |---|---|
-| `primary` | 9 px casing under a 5 px line: ink on the light map; amber on the dark map and over imagery (black disappears there) |
-| `traversed` | 5 px faint line (the part already driven) |
-| `secondary` | 4 px dashed line (the leg that is not the current one) |
-| `straight` | 3 px dotted line (no geometry) |
+| `primary` | amber line on an ink casing (5 / 9 px on raster; 3→9 px by zoom on vector) |
+| `traversed` | grey line (the part already driven) |
+| `secondary` | dashed line (the leg that is not the current one) |
+| `straight` | dotted line (no geometry) |
 
-`RouteLine.fromPolyline6(encoded)` decodes the services' polylines; null or empty gives an empty line, which is not drawn. The vector engine caches its line layers (MapLibre compares layers by identity) and rebuilds them only when the routes or the look change.
+`RouteLine.fromPolyline6(encoded)` decodes the services' polylines; null or empty gives an empty line, which is not drawn.
 
 ### MarkerAnimator (`marker_animator.dart`)
 
-Glides a car between GPS samples. Defaults: `maxGlide` 4 s, `deadReckonFor` 8 s, `snapOverMeters` 300, `staleAfter` 20 s.
+Glides a car between GPS samples; a `ValueListenable<AnimatedPose?>` (`lat`, `lng`, `heading`, `stale`, `speed`). Defaults: `maxGlide` 4 s, `deadReckonFor` 6 s, `snapOverMeters` 300, `staleAfter` 20 s, `parkedSpeed` 1.5 m/s, `offRouteMeters` 40, `backTolerance` 25 m.
 
-- The first sample, or a sample more than 300 m away, snaps.
-- Otherwise the shown pose glides from where it is to the sample over the time between samples (capped at 4 s); the heading turns the short way (`lerpAngleDeg`). A missing heading is computed from the movement.
-- After the glide, if the speed is above 0.5 m/s, the car keeps moving at that speed along its heading (`geoOffset`) for up to 8 s more. Speed comes from the sample, or is computed from the distance and time between samples.
-- More than 20 s without a sample marks the pose `stale` and stops the ticker.
+- The first sample, or one more than 300 m from the shown pose, snaps.
+- With a `route` (a `RouteTrack`), each sample is projected onto the road within a window from the last progress (25 m behind to max(200 m, 2 × speed × gap + 60 m) ahead; the whole road when that misses). Progress is monotonic: a sample up to 25 m behind is jitter and holds the car. The shown pose moves along the road's distance over the sample gap (linear in distance, so speed is continuous across samples), and its heading is the road's bearing across ±6 m (turning through corners). When the next sample is late it keeps rolling along the road at the last speed for up to 6 s, then stops. A sample more than 40 m off the road is drawn where it is.
+- Without a route the glide is a straight line, heading the short way (`lerpAngleDeg`), and there is no dead reckoning.
+- Heading without a route: the sample's heading when given; below 1.5 m/s (measured from the samples when not given) the last heading is kept, so a parked car doesn't spin on GPS jitter; otherwise the bearing of the movement (when it moved more than 3 m).
+- The ticker runs only while gliding or rolling. More than 20 s without a sample marks the pose `stale` (a timer flips it).
 
-Used by `RiderTripScreen` (the driver's car) and, per car, by `CarsAnimator`.
+Fed by `RiderTripScreen` (the driver's car; route = the ETA polyline to the target, or the trip's road while riding), `DriverHomeScreen` and `DriverTripScreen` (the driver's own car from `lastPositionProvider`; on a trip the route is the guidance route), and per car by `CarsAnimator`.
 
 ### Nearby cars (`nearby_cars_layer.dart`)
 
-`NearbyCarsController.watch(lat, lng)` starts polling `GET /api/locations/nearby` every 10 s, and polls at once when the point moved more than 150 m. `stop()` cancels. The rider home starts it when it has a position, stops it when the app is paused and restarts it on resume. `CarsAnimator` matches each new car to the nearest existing animator within 150 m (so a moving car glides instead of blinking), with `maxGlide` 3 s and no dead reckoning.
+`NearbyCarsController.watch(lat, lng)` starts polling `GET /api/locations/nearby` every 10 s, and polls at once when the point moved more than 150 m. `stop()` cancels; `pause()` stops polling but remembers the point, `resume()` polls at once and goes on. The rider home pauses it (and its `CarsAnimator`) while it is covered by another screen or tab (`TickerMode`), stops it when the app is paused and restarts it on resume.
+
+`CarsAnimator` matches each new car to the nearest existing animator within 150 m (so a moving car glides instead of blinking), with `maxGlide` 3 s and no dead reckoning; a new car fades in and a car that left fades out (400 ms, per-feature opacity). It publishes one `List<NearbyCarFrame>` per tick on `frames` (the map draws it natively; the screen never rebuilds for it), and its ticker stops when nothing moves or while `paused`.
 
 ### Navigation (`nav/`)
 
@@ -607,3 +656,15 @@ Tap routing (`AnbessaApp._onPushTap`, by the payload `type`; template names from
 - `show()` (general channel) has no caller.
 
 The notification preference toggles in Account → Notifications are stored but not read by any of this code (see [settings-and-storage.md](settings-and-storage.md)).
+
+## Performance notes
+
+- **Timing marks** (`lib/core/perf.dart`): `Perf.mark(name, {once})` logs `[perf] +412 ms first frame` (milliseconds since `Perf.start()`, the first line of `main`; the engine's own start-up comes before it) and adds an instant event to the DevTools timeline. Nothing happens in release builds; debug and profile log (profile is where the numbers mean something). Marks today: `main start`, `first frame`, `session ready` (main.dart), `home shown` (app.dart). `Perf.log` keeps the lines.
+- **Cold start**: only SharedPreferences is awaited before `runApp`; notifications and push start after the first frame; the token mint and get-session run in parallel ([Boot](#boot), [Cold start](#cold-start-sessioncontrollerbuild)). The offline-at-start behaviour is unchanged (splash with "Try again").
+- **Riders never fetch the driver profile at boot**: `RouterNotifier` listens to `driverHomeProvider` only in driver mode (test: "a rider start never fetches the driver profile…" in `test/router_redirect_test.dart`).
+- **Payment badge** (`paymentDueProvider`, `features/rider/payments/payment_due_controller.dart`): watches `activeTripProvider.select(paymentDueKeyOf)`, i.e. only `(tripId while live, live)`. A trip starting and a trip ending re-check; `trip:status` changes of a live trip (matched → en route → in progress) and clearing a seen trip don't. Paying still invalidates it (`pay_screen.dart`).
+- **Account trip count**: one light page instead of watching the whole history ([screens.md](screens.md#accountscreen-profileaccount_hub_screendart)).
+- **History**: grouping and filtering live in `historyDaysProvider`; the list is a keyed `ListView.builder`.
+- **Avatars** (`packages/core/lib/src/ui/widgets/avatar_image.dart`): a data-URL photo is base64-decoded once into a `MemoryImage` kept in a 32-entry LRU keyed by the string's hash (checked against the string on a hit). Rebuilds hand Flutter the same provider, so the `ImageCache` hits and the JPEG isn't decoded again either.
+- **Ticking texts**: `Countdown`, `ElapsedText` and `TickingBuilder` in core (`ticking.dart`) rebuild only themselves once a second and pause in a muted `TickerMode`. The quote, trip and offer screens still run screen-wide 1 s timers; they move to these widgets with the map rewrite.
+

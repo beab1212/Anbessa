@@ -1009,6 +1009,19 @@
       }
     }
   },
+  "tripsCountAtLeast": "{count}+ trips",
+  "@tripsCountAtLeast": {
+    "description": "Account header when there are more trips than the first page counted",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "quickTrips": "Trips",
+  "quickPlaces": "Places",
+  "quickSettings": "Settings",
+  "editProfileHint": "Edit your name and photo",
   "yourRating": "Your rating",
   "navigation": "Navigation",
   "navFollowBearing": "Turn the map the way I'm driving",
