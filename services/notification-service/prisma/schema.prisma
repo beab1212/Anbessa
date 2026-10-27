@@ -63,3 +63,96 @@ model Notification {
   @@index([userId, createdAt(sort: Desc)])
   @@map("notification")
 }
+
+// ── campaigns (workflow 15 step 13: marketing push/SMS to rider or driver segments) ──────────────
+
+/// Who can be reached by a campaign: a rider or driver seen active in a city, kept from trip and
+/// driver events (trip.requested, trip.completed, driver.online). No phone numbers here.
+model CampaignAudience {
+  userId       String   @map("user_id") @db.Uuid
+  role         String // RIDER | DRIVER
+  cityId       String   @map("city_id")
+  lastActiveAt DateTime @map("last_active_at") @db.Timestamptz
+
+  @@id([userId, role, cityId])
+  @@index([cityId, role, lastActiveAt(sort: Desc)])
+  @@map("campaign_audience")
+}
+
+/// A marketing message to one segment (city + role + optional last-active window) on one channel.
+model Campaign {
+  id             String             @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  cityId         String             @map("city_id")
+  audience       String // RIDER | DRIVER
+  lastActiveDays Int?               @map("last_active_days")
+  channel        String // PUSH | SMS
+  title          String?
+  body           String
+  status         String             @default("DRAFT") // DRAFT | SCHEDULED | SENDING | SENT | CANCELLED
+  scheduledAt    DateTime?          @map("scheduled_at") @db.Timestamptz
+  startedAt      DateTime?          @map("started_at") @db.Timestamptz
+  finishedAt     DateTime?          @map("finished_at") @db.Timestamptz
+  targeted       Int                @default(0)
+  createdBy      String             @map("created_by") @db.Uuid
+  updatedBy      String             @map("updated_by") @db.Uuid
+  createdAt      DateTime           @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  deliveries     CampaignDelivery[]
+
+  @@index([status, scheduledAt])
+  @@index([cityId, createdAt(sort: Desc)])
+  @@map("campaign")
+}
+
+/// One recipient of a campaign: fixed when sending starts, sent at the campaign rate limit.
+model CampaignDelivery {
+  campaignId String    @map("campaign_id") @db.Uuid
+  campaign   Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  userId     String    @map("user_id") @db.Uuid
+  status     String    @default("PENDING") // PENDING | IN_FLIGHT | SENT | SKIPPED | FAILED
+  attempts   Int       @default(0)
+  /// SKIPPED / FAILED: no_device, no_phone, provider error (first 200 chars)
+  error      String?
+  updatedAt  DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  sentAt     DateTime? @map("sent_at") @db.Timestamptz
+
+  @@id([campaignId, userId])
+  @@index([status, campaignId])
+  @@map("campaign_delivery")
+}
+
+/// Marketing opt-outs per channel (the user's choice in the app). Service messages still go.
+model MarketingOptOut {
+  userId    String   @map("user_id") @db.Uuid
+  channel   String // PUSH | SMS
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@id([userId, channel])
+  @@map("marketing_opt_out")
+}
+
+/// HTTP Idempotency-Key results (POST /api/notifications/campaigns), purged after 24 h.
+model IdempotencyKey {
+  userId      String   @map("user_id") @db.Uuid
+  key         String
+  requestHash Bytes    @map("request_hash")
+  status      String   @default("IN_PROGRESS")
+  statusCode  Int?     @map("status_code")
+  response    Json?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@id([userId, key])
+  @@map("idempotency_key")
+}
+
+/// Transactional outbox (Database.md §8): audit.recorded for staff campaign actions.
+model Outbox {
+  id          String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  topic       String
+  key         String
+  payload     Json
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  publishedAt DateTime? @map("published_at") @db.Timestamptz
+
+  @@map("outbox")
+}

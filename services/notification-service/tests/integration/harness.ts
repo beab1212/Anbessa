@@ -72,9 +72,12 @@ export async function createHarness() {
     OTP_FALLBACK_SECONDS: "20",
   });
   const store = memoryOtpStore(() => clock.now);
+  // phone numbers auth-service would give for SMS campaigns
+  const phones = new Map<string, string>();
   const c: Container = createContainer(config, pino({ level: "silent" }), {
     store, telegram: telegram.gw, push, now,
     sms: { send: async (to, body) => (smsSent.push({ to, body }), {}) },
+    contacts: { phoneOf: async (userId) => phones.get(userId) ?? null },
   });
 
   // tokens signed by a local key pair stand in for auth-service's JWTs
@@ -84,6 +87,10 @@ export async function createHarness() {
   const appToken = (sub: string) =>
     new SignJWT({ roles: [{ r: "RIDER" }], pv: 0, amr: ["otp"] })
       .setProtectedHeader({ alg: "ES256", kid: "test" }).setSubject(sub).setIssuer(ISSUER).setAudience("ride-app")
+      .setIssuedAt().setExpirationTime("15m").sign(privateKey);
+  const staffToken = (sub: string, roles: object[]) =>
+    new SignJWT({ roles, pv: 0, amr: ["pwd", "otp"] })
+      .setProtectedHeader({ alg: "ES256", kid: "test" }).setSubject(sub).setIssuer(ISSUER).setAudience("ride-admin")
       .setIssuedAt().setExpirationTime("15m").sign(privateKey);
 
   const app: FastifyInstance = await buildApp({ ...c, verifyAccessToken });
@@ -103,7 +110,7 @@ export async function createHarness() {
   };
 
   return {
-    app, c, clock, store, telegram, smsSent, pushes, pushState, internal, report, appToken,
+    app, c, clock, store, telegram, smsSent, pushes, pushState, internal, report, appToken, staffToken, phones,
     close: async () => { await app.close(); await c.close(); },
   };
 }

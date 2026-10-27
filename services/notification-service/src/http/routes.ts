@@ -2,6 +2,8 @@ import { timingSafeEqual } from "node:crypto";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { bearerToken, type VerifyAccessToken } from "@ride-app/shared-authz";
+import { registerCampaignRoutes } from "../campaigns/routes.js";
+import type { CampaignService } from "../campaigns/service.js";
 import type { Db } from "../db.js";
 import { unauthorized } from "../lib/errors.js";
 import type { OtpService } from "../otp/otp-service.js";
@@ -12,6 +14,7 @@ const MAX_DEVICES_PER_USER = 10;
 export interface RouteDeps {
   db: Db;
   otp: OtpService;
+  campaigns: CampaignService;
   internalToken: string;
   verifyAccessToken: VerifyAccessToken;
   /** undefined when Telegram isn't configured: the webhook then doesn't exist */
@@ -110,4 +113,7 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
     await deps.db.deviceToken.deleteMany({ where: { token, userId } });
     return reply.status(204).send();
   });
+
+  // ── campaigns (staff) and marketing opt-outs (app users) ────────────────────
+  await registerCampaignRoutes(app, deps);
 }

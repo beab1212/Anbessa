@@ -233,6 +233,60 @@ describe("devices and event notifications", () => {
     expect(h.pushes[before]!.message.data).toEqual({ type: "payment.action_required", tripId: "t1", checkoutUrl: "http://pay/x" });
   });
 
+  it("scheduled rides, reassignment and SOS: the right people, once each, the presser only for SOS", async () => {
+    const rider = "0192f7a8-0000-7000-8000-0000000000b1";
+    const booker = "0192f7a8-0000-7000-8000-0000000000b2";
+    const oldDriver = "0192f7a8-0000-7000-8000-0000000000b3";
+    const newDriver = "0192f7a8-0000-7000-8000-0000000000b4";
+    const tokens: Record<string, string> = {};
+    for (const user of [rider, booker, oldDriver, newDriver]) {
+      tokens[user] = `dev-${user}`.padEnd(48, "z");
+      await h.c.db.deviceToken.upsert({ where: { token: tokens[user]! }, create: { token: tokens[user]!, platform: "android", userId: user }, update: {} });
+    }
+    const env = () => ({ eventId: crypto.randomUUID(), version: 1, at: new Date().toISOString() });
+    const to = (from: number) => h.pushes.slice(from).map((p) => [Object.keys(tokens).find((u) => tokens[u] === p.token), p.message.title]);
+    const scheduledFor = "2026-11-03T11:30:00.000Z"; // 14:30 in Addis
+
+    // a coordinator books for the rider: both hear; a redelivery sends nothing new
+    let before = h.pushes.length;
+    const booked = { ...env(), scheduledTripId: "s1", riderId: rider, bookedById: booker, cityId: "addis-ababa", scheduledFor, matchAt: scheduledFor };
+    await h.c.handlers["trip.scheduled"]!(booked);
+    await h.c.handlers["trip.scheduled"]!(booked);
+    expect(to(before)).toEqual([[rider, "Ride booked"], [booker, "Ride booked"]]);
+    expect(h.pushes[before]!.message).toMatchObject({ body: "A ride has been booked for you for Tue 3 Nov, 14:30. We'll find your driver shortly before.", data: { type: "trip.scheduled", scheduledTripId: "s1" } });
+    // booked for oneself: one push
+    before = h.pushes.length;
+    await h.c.handlers["trip.scheduled"]!({ ...booked, ...env(), bookedById: rider, updated: true });
+    expect(to(before)).toEqual([[rider, "Scheduled ride updated"]]);
+
+    // the booker cancels: only the rider is told
+    before = h.pushes.length;
+    await h.c.handlers["trip.schedule_cancelled"]!({ ...env(), scheduledTripId: "s1", riderId: rider, bookedById: booker, by: "BOOKER", byUserId: booker, scheduledFor });
+    await h.c.handlers["trip.schedule_failed"]!({ ...env(), scheduledTripId: "s2", riderId: rider, bookedById: booker, reason: "RIDER_HAS_ACTIVE_TRIP", scheduledFor });
+    await h.c.handlers["trip.dispatch_escalated"]!({ ...env(), tripId: "t9", scheduledTripId: "s3", riderId: rider, scheduledFor });
+    expect(to(before)).toEqual([
+      [rider, "Scheduled ride cancelled"],
+      [rider, "Your scheduled ride couldn't start"], [booker, "Your scheduled ride couldn't start"],
+      [rider, "Still finding your driver"],
+    ]);
+
+    // reassignment: rider and the old driver (not the new one: trip.matched covers them)
+    before = h.pushes.length;
+    await h.c.handlers["trip.reassigned"]!({ ...env(), tripId: "t1", riderId: rider, fromDriverId: oldDriver, toDriverId: newDriver, byUserId: booker });
+    await h.c.handlers["trip.reassigned"]!({ ...env(), tripId: "t2", riderId: rider, fromDriverId: oldDriver, byUserId: booker });
+    expect(to(before)).toEqual([[rider, "Your driver changed"], [oldDriver, "Trip reassigned"], [rider, "Finding you a new driver"], [oldDriver, "Trip reassigned"]]);
+
+    // SOS: only whoever pressed it, never the other party; SYSTEM alerts aren't announced
+    before = h.pushes.length;
+    const sos = { alertId: "a1", tripId: "t1", userId: rider, riderUserId: rider, driverUserId: newDriver };
+    await h.c.handlers["sos.triggered"]!({ ...env(), ...sos, role: "RIDER", source: "APP" });
+    await h.c.handlers["sos.triggered"]!({ ...env(), ...sos, alertId: "a2", role: "RIDER", source: "SYSTEM" });
+    await h.c.handlers["sos.acknowledged"]!({ ...env(), ...sos, byUserId: booker });
+    await h.c.handlers["sos.resolved"]!({ ...env(), ...sos, outcome: "ASSISTED", byUserId: booker });
+    expect(to(before)).toEqual([[rider, "SOS received"], [rider, "Safety team responding"], [rider, "SOS alert closed"]]);
+    expect(h.pushes[before]!.message.body).toContain("call 991");
+  });
+
   it("a failing push is retried through redelivery, then recorded as FAILED", async () => {
     await h.c.db.deviceToken.upsert({ where: { token: "retry-token".padEnd(40, "r") }, create: { token: "retry-token".padEnd(40, "r"), platform: "ios", userId }, update: {} });
     h.pushState.fail = true;

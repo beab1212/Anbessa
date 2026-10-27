@@ -41,11 +41,14 @@ export function approvePaymentPush(amountMinor: number, provider: string, purpos
   };
 }
 
-/** trip.settled → push to the rider: the receipt (every payment method). */
-export function receiptPush(fareMinor: number, method: string, purpose: string, tripId: string): PushMessage {
+/** trip.settled → push to the rider: the receipt (every payment method). fareMinor is the full fare;
+ *  a promo discount comes off what the rider paid. */
+export function receiptPush(fareMinor: number, method: string, purpose: string, tripId: string, promoDiscountMinor = 0): PushMessage {
+  const discount = Math.min(Math.max(promoDiscountMinor, 0), fareMinor);
+  const promo = discount > 0 ? ` (${etb(discount)} off with a promo code)` : "";
   return {
     title: purpose === "CANCELLATION_FEE" ? "Cancellation fee" : "Trip receipt",
-    body: `${etb(fareMinor)} paid by ${METHOD[method] ?? method.toLowerCase()}. Thanks for riding with Anbessa.`,
+    body: `${etb(fareMinor - discount)} paid by ${METHOD[method] ?? method.toLowerCase()}${promo}. Thanks for riding with Anbessa.`,
     data: { type: "trip.receipt", tripId },
   };
 }
@@ -94,4 +97,89 @@ export function payoutPush(sent: boolean, amountMinor: number, provider: string)
 /** refund.succeeded → push to the rider. */
 export function refundPush(amountMinor: number): PushMessage {
   return { title: "Refund sent", body: `${etb(amountMinor)} is on its way back to you.`, data: { type: "refund.succeeded" } };
+}
+
+// ── scheduled rides (workflow 12) ─────────────────────────────────────────────
+
+/** "Tue 3 Nov, 14:30" in Addis Ababa time. */
+export function addisTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "your booked time";
+  const day = d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "Africa/Addis_Ababa" });
+  const time = d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: "Africa/Addis_Ababa" });
+  return `${day}, ${time}`;
+}
+
+/** trip.scheduled → push to the rider and, when someone else booked it, the booker. */
+export function scheduledPush(scheduledTripId: string, scheduledFor: string, opts: { updated: boolean; for: "self" | "rider" | "booker" }): PushMessage {
+  const when = addisTime(scheduledFor);
+  const body = opts.for === "booker"
+    ? `The ride you booked is ${opts.updated ? "now " : ""}set for ${when}. We'll find a driver shortly before.`
+    : opts.updated
+      ? `Your ride is now booked for ${when}.`
+      : opts.for === "rider"
+        ? `A ride has been booked for you for ${when}. We'll find your driver shortly before.`
+        : `Your ride is booked for ${when}. We'll find your driver shortly before.`;
+  return { title: opts.updated ? "Scheduled ride updated" : "Ride booked", body, data: { type: "trip.scheduled", scheduledTripId } };
+}
+
+/** trip.schedule_cancelled → push to the rider and booker who didn't cancel it themselves. */
+export function scheduleCancelledPush(scheduledTripId: string, scheduledFor: string, by: string): PushMessage {
+  const who = by === "STAFF" ? " by Anbessa support" : "";
+  return { title: "Scheduled ride cancelled", body: `Your ride for ${addisTime(scheduledFor)} was cancelled${who}. You haven't been charged.`, data: { type: "trip.schedule_cancelled", scheduledTripId } };
+}
+
+/** trip.schedule_failed → push to the rider and booker: the trip couldn't be created by the pickup time. */
+export function scheduleFailedPush(scheduledTripId: string, scheduledFor: string, reason: string): PushMessage {
+  const why = reason === "RIDER_HAS_ACTIVE_TRIP" ? " because you were still on another trip" : "";
+  return {
+    title: "Your scheduled ride couldn't start",
+    body: `Your ride for ${addisTime(scheduledFor)} couldn't start${why}. Request a ride now if you still need one.`,
+    data: { type: "trip.schedule_failed", scheduledTripId },
+  };
+}
+
+/** trip.dispatch_escalated → push to the rider: the scheduled trip is still unmatched near pickup. */
+export function dispatchEscalatedPush(tripId: string, scheduledFor: string): PushMessage {
+  return {
+    title: "Still finding your driver",
+    body: `Drivers are busy near your pickup for your ${addisTime(scheduledFor)} ride. Our dispatch team is on it.`,
+    data: { type: "trip.dispatch_escalated", tripId },
+  };
+}
+
+// ── reassignment (trip:reassign) ──────────────────────────────────────────────
+
+/** trip.reassigned → push to the rider. */
+export function reassignedRiderPush(tripId: string, newDriver: boolean): PushMessage {
+  return newDriver
+    ? { title: "Your driver changed", body: "A new driver is on the way. Check the app for their car and arrival time.", data: { type: "trip.reassigned", tripId } }
+    : { title: "Finding you a new driver", body: "Your driver can no longer make it. We're finding you another one.", data: { type: "trip.reassigned", tripId } };
+}
+
+/** trip.reassigned → push to the driver the trip was taken from. */
+export function reassignedDriverPush(tripId: string): PushMessage {
+  return { title: "Trip reassigned", body: "Dispatch moved this trip to another driver. You can take new requests.", data: { type: "trip.reassigned_away", tripId } };
+}
+
+// ── SOS (workflow 14) ─────────────────────────────────────────────────────────
+// Only the person who pressed SOS is told: never the other party on the trip (it could put them
+// at risk). SMS to emergency contacts needs a contact store that doesn't exist yet.
+
+/** sos.triggered → push to whoever pressed SOS (not for SYSTEM alerts). */
+export function sosTriggeredPush(alertId: string, tripId: string): PushMessage {
+  return { title: "SOS received", body: "Our safety team has your alert and location. If you are in danger, call 991 now.", data: { type: "sos.triggered", alertId, tripId } };
+}
+
+/** sos.acknowledged → push to whoever pressed SOS. */
+export function sosAcknowledgedPush(alertId: string, tripId: string): PushMessage {
+  return { title: "Safety team responding", body: "An Anbessa safety agent is handling your alert and may call you. Call 991 if you are in danger.", data: { type: "sos.acknowledged", alertId, tripId } };
+}
+
+/** sos.resolved → push to whoever pressed SOS. */
+export function sosResolvedPush(alertId: string, tripId: string, outcome: string): PushMessage {
+  const body = outcome === "ESCALATED"
+    ? "Your alert was passed to our safety investigations team. We'll follow up with you."
+    : "Your alert is closed. If you still need help, contact support in the app or call 991.";
+  return { title: "SOS alert closed", body, data: { type: "sos.resolved", alertId, tripId } };
 }

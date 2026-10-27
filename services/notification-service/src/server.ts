@@ -2,6 +2,8 @@ import { createAuthzSync, fetchAuthzSnapshotFrom } from "@ride-app/shared-authz"
 import { buildApp } from "./app.js";
 import { loadConfig } from "./config/index.js";
 import { createContainer } from "./container.js";
+import { purgeIdempotencyKeys } from "./campaigns/idempotency.js";
+import { createOutboxRelay } from "./campaigns/relay.js";
 import { createEventConsumer } from "./notify/consumer.js";
 import { serviceLogger } from "./utils/logger.js";
 
@@ -18,7 +20,22 @@ async function main() {
 
   // SMS fallback schedule (Redis) and 30-day retention of delivery rows
   const fallbackTimer = setInterval(() => void c.otp.pollFallbacks().catch((err) => logger.error({ err }, "fallback poll failed")), 1000);
-  const purgeTimer = setInterval(() => void c.otp.purgeOld().catch((err) => logger.error({ err }, "purge failed")), 60 * 60 * 1000);
+  const purgeTimer = setInterval(() => {
+    void c.otp.purgeOld().catch((err) => logger.error({ err }, "purge failed"));
+    void purgeIdempotencyKeys(c.db, new Date()).catch((err) => logger.error({ err }, "idempotency purge failed"));
+  }, 60 * 60 * 1000);
+
+  // campaigns: start the due ones and send one rate-limited batch per second
+  let ticking = false;
+  const campaignTimer = setInterval(() => {
+    if (ticking) return;
+    ticking = true;
+    void c.campaigns.tick(1000).catch((err) => logger.error({ err }, "campaign tick failed")).finally(() => (ticking = false));
+  }, 1000);
+
+  // audit.recorded for staff campaign actions
+  const relay = config.KAFKA_BROKERS ? createOutboxRelay(c.db, config.KAFKA_BROKERS, logger) : undefined;
+  relay?.start();
 
   const consumer = config.KAFKA_BROKERS
     ? createEventConsumer({ brokers: config.KAFKA_BROKERS, handlers: c.handlers, logger, createTopics: config.NODE_ENV !== "production" })
@@ -47,8 +64,10 @@ async function main() {
       await c.settingsClient.stop();
       clearInterval(fallbackTimer);
       clearInterval(purgeTimer);
+      clearInterval(campaignTimer);
       await app.close();
       await consumer?.stop();
+      await relay?.stop();
       await c.close();
       process.exit(0);
     });

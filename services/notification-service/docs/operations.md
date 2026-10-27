@@ -78,3 +78,10 @@ Codes are not logged except by the console SMS provider. Phone numbers are maske
 ## Key rotation
 
 From [docs/production/README.md](../../../docs/production/README.md): rotating `PHONE_HASH_KEY` only breaks the resend lookup for codes in flight; rotating `OTP_ENCRYPTION_KEY` drops codes in flight (they read as absent, `getCode` returns null). Both follow from `src/lib/crypto.ts` and `src/otp/otp-store.ts`.
+
+## Campaigns (workflow 15, added)
+
+- `make db-migrate` applies `20261101100000_campaigns`.
+- `pnpm test:integration` now also runs `tests/integration/campaigns.test.ts` (audience from events, scoping, idempotency, opt-outs, quiet hours, push and SMS sending, rate-limited batches, retries → FAILED, cancel). No Redis needed.
+- Watch: `SELECT status, count(*) FROM campaign_delivery GROUP BY 1`; a SENDING campaign that doesn't move during the day means the sender is failing (`campaign tick failed` in the logs).
+- SMS recipients without a phone number on file (auth-service `GET /internal/users/:id/contact` answers null or 404) are SKIPPED `no_phone`.

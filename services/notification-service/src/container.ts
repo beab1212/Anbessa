@@ -9,6 +9,9 @@ import { createDb, type Db } from "./db.js";
 import { consolePush, fcmPush, type PushSender } from "./channels/push.js";
 import { consoleSms, twilioSms, type SmsSender } from "./channels/sms.js";
 import { phoneHasher, sealer } from "./lib/crypto.js";
+import { createAudienceHandlers } from "./campaigns/audience.js";
+import { authContacts, type ContactLookup } from "./campaigns/contacts.js";
+import { createCampaignService } from "./campaigns/service.js";
 import { createHandlers } from "./notify/handlers.js";
 import { createNotifier } from "./notify/notifier.js";
 import { createOtpService } from "./otp/otp-service.js";
@@ -22,6 +25,8 @@ export interface ContainerOptions {
   telegram?: TelegramGateway;
   sms?: SmsSender;
   push?: PushSender;
+  /** phone numbers for SMS campaigns (auth-service) */
+  contacts?: ContactLookup;
   now?: () => Date;
 }
 
@@ -69,10 +74,16 @@ export function createContainer(config: Config, logger: Logger, opts: ContainerO
   });
 
   const notifier = createNotifier({ db, sms, push, logger });
-  const handlers = createHandlers(notifier);
+  const campaigns = createCampaignService({
+    db, push, sms, logger, now: opts.now ?? (() => new Date()),
+    contacts: opts.contacts ?? authContacts(config.AUTH_INTERNAL_URL, config.INTERNAL_SERVICE_TOKEN),
+    sendPerSecond: config.CAMPAIGN_SEND_PER_SECOND, quietHours: config.CAMPAIGN_QUIET_HOURS,
+  });
+  // event notifications, plus the campaign audience directory (distinct topics)
+  const handlers = { ...createHandlers(notifier), ...createAudienceHandlers(campaigns) };
 
   return {
-    config, db, redis, store, otp, notifier, handlers, settingsClient,
+    config, db, redis, store, otp, notifier, handlers, settingsClient, campaigns,
     internalToken: config.INTERNAL_SERVICE_TOKEN,
     verifyAccessToken: createTokenVerifier({ issuer: config.AUTH_ISSUER, jwksUrl: config.AUTH_JWKS_URL }),
     verifyTelegramReport: config.TELEGRAM_GATEWAY_TOKEN ? reportVerifier(config.TELEGRAM_GATEWAY_TOKEN) : undefined,

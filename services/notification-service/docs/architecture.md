@@ -153,7 +153,7 @@ Every Telegram response with `remaining_balance` updates an in-memory `lastBalan
 
 ### Templates and localisation
 
-`src/notify/templates.ts`: plain functions, **English only**. Amounts are minor units formatted as `ETB` with `en-US` number formatting. `paymentDuePush` prints the weekday in `Africa/Addis_Ababa`. Push messages carry a `data.type` (and `tripId`/`checkoutUrl` where relevant) for the app to route taps. No per-user language, no stored templates.
+`src/notify/templates.ts`: plain functions, **English only**. Amounts are minor units formatted as `ETB` with `en-US` number formatting. `paymentDuePush` prints the weekday in `Africa/Addis_Ababa`. Scheduled-ride pushes print the pickup as `addisTime` ("Tue 3 Nov, 14:30", Addis time, 24-hour). SOS pushes go only to the person who pressed SOS and always point to 991. Push messages carry a `data.type` (and `tripId`/`checkoutUrl` where relevant) for the app to route taps. No per-user language, no stored templates.
 
 ## Device tokens
 
@@ -179,3 +179,25 @@ Every Telegram response with `remaining_balance` updates an in-memory `lastBalan
 - FCM OAuth access token: cached in memory until 60 s before expiry (`src/channels/push.ts`).
 - Settings and permission snapshots: in memory, refreshed as above.
 - No HTTP response caching.
+
+## Campaigns (workflow 15, added)
+
+`src/campaigns/`: `service.ts` (CRUD, scheduling, the sender), `audience.ts` (Kafka handlers), `routes.ts`, `contacts.ts` (phone lookup), `outbox.ts` + `relay.ts` (audit events), `idempotency.ts`.
+
+**Audience directory.** `campaign_audience (user, role, city, last_active_at)` is kept from events the consumer now also subscribes to: `trip.requested` (rider), `trip.completed` (rider and driver, at `completedAt`), `driver.online` (driver). Each upsert keeps the latest time, so redelivery is harmless. A segment is city + role + optional "active in the last N days", minus `marketing_opt_out` for the channel. People who never rode or drove since this was deployed aren't in it (no backfill).
+
+**States.** `DRAFT → SCHEDULED → SENDING → SENT`, and `CANCELLED` from any of the first three.
+
+**Sender** (`tick()`, every second in `server.ts`, one at a time per process):
+
+1. SCHEDULED campaigns whose time came → SENDING; the recipients are fixed into `campaign_delivery` (one row per user, `INSERT … SELECT … ON CONFLICT DO NOTHING`), `targeted` = rows.
+2. `IN_FLIGHT` rows older than 5 min (a crashed sender) → PENDING.
+3. Outside quiet hours (`CAMPAIGN_QUIET_HOURS`, default 21:00–08:00 Addis Ababa, UTC+3): claim `CAMPAIGN_SEND_PER_SECOND × interval` PENDING rows of SENDING campaigns (`FOR UPDATE SKIP LOCKED`, oldest campaign first; replicas share the work) → IN_FLIGHT, attempts + 1, then send each:
+   - PUSH: every device token of the user (`{ title, body, data: { type: "campaign", campaignId } }`); no device → SKIPPED `no_device`; dead tokens deleted.
+   - SMS: phone number from auth-service (`contacts.ts`, `GET /internal/users/:id/contact`); none → SKIPPED `no_phone`; body `Anbessa: <message>`.
+   - Error → back to PENDING; after 3 attempts FAILED with the error.
+4. SENDING campaigns with no PENDING/IN_FLIGHT rows → SENT.
+
+Delivery is at least once per recipient (a crash between the provider accepting and the row update resends after 5 min). Bodies are stored on the campaign, never per delivery; phone numbers are never stored.
+
+**Security.** Staff routes verify the `ride-admin` token with JWKS (like the device routes, without the Redis deny-list check: this service's verifier has none) and check `campaign:send` per city with the live matrix.

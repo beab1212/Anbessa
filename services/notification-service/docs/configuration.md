@@ -60,3 +60,20 @@ Resolution: stored global value → this service's env value (`OTP_CHANNELS`, `O
 | 5 s timeout for Telegram, Twilio, FCM, Google OAuth | `src/otp/telegram-gateway.ts`, `src/channels/*.ts` |
 | ±300 s report timestamp window | `src/otp/telegram-gateway.ts` |
 | 300 req/min rate limit, 16 KiB body | `src/app.ts` |
+
+## Campaign variables (workflow 15, added)
+
+| Variable | Meaning | Default |
+|---|---|---|
+| `CAMPAIGN_SEND_PER_SECOND` | campaign recipients sent per second, all campaigns together (1–1000) | `20` |
+| `CAMPAIGN_QUIET_HOURS` | `from-to` local hours (Africa/Addis_Ababa) when nothing is sent; `0-0` = none | `21-8` |
+
+`AUTH_INTERNAL_URL` is now also used for SMS campaign phone numbers (`GET /internal/users/:id/contact`, 2.5 s). `KAFKA_BROKERS` also feeds the outbox relay (audit events).
+
+| Constant | Value | Where |
+|---|---|---|
+| Delivery attempts | 3 | `src/campaigns/service.ts` |
+| Stale IN_FLIGHT reset | 5 min | same |
+| Furthest schedule | 90 days | same |
+| SMS length | 300 characters | same |
+| Sender tick | 1 s | `src/server.ts` |

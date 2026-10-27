@@ -97,3 +97,18 @@ Redis is required (`REDIS_URL`). Client: ioredis, `maxRetriesPerRequest: 2` (`sr
 | `authz:changed` | pub/sub channel (subscribe) | n/a | auth-service | Triggers a permission-matrix reload (`libs/shared-authz`) |
 
 This service does not read the `deny:{userId}` or `pv:{userId}` keys that other services use for token checks.
+
+## Campaign tables (workflow 15, added)
+
+Migration `20261101100000_campaigns`.
+
+| Table | Columns | Notes |
+|---|---|---|
+| `campaign_audience` | `user_id`, `role` (RIDER/DRIVER), `city_id`, `last_active_at` | PK `(user_id, role, city_id)`; index `(city_id, role, last_active_at desc)`; from trip/driver events |
+| `campaign` | `id`, `city_id`, `audience`, `last_active_days` (1–365 or null), `channel` (PUSH/SMS), `title`, `body`, `status`, `scheduled_at`, `started_at`, `finished_at`, `targeted`, `created_by`, `updated_by`, timestamps | CHECKs on enums; SCHEDULED needs `scheduled_at` |
+| `campaign_delivery` | `campaign_id`, `user_id`, `status` (PENDING/IN_FLIGHT/SENT/SKIPPED/FAILED), `attempts`, `error`, `sent_at`, `updated_at` | PK `(campaign_id, user_id)`; cascade on campaign delete; partial index on PENDING/IN_FLIGHT |
+| `marketing_opt_out` | `user_id`, `channel` | PK `(user_id, channel)` |
+| `idempotency_key` | as in support-service | purged hourly after 24 h |
+| `outbox` | `topic`, `key`, `payload`, `published_at` | `audit.recorded` only; partial index on unpublished |
+
+Nothing purges `campaign_delivery` or `campaign_audience` yet.

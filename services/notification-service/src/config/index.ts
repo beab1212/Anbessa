@@ -55,6 +55,18 @@ export const envSchema = z
     FCM_CLIENT_EMAIL: z.string().email().optional(),
     // service-account private key (PEM); "\n" escapes are accepted
     FCM_PRIVATE_KEY: z.string().optional(),
+
+    // Campaigns (workflow 15): recipients per second across all campaigns, and the quiet hours
+    // ("21-8" = nothing sent from 21:00 to 08:00 Addis Ababa time; "0-0" = none)
+    CAMPAIGN_SEND_PER_SECOND: z.coerce.number().int().min(1).max(1000).default(20),
+    CAMPAIGN_QUIET_HOURS: z
+      .string()
+      .regex(/^\d{1,2}-\d{1,2}$/, "from-to in whole hours, e.g. 21-8")
+      .default("21-8")
+      .transform((v) => {
+        const [from, to] = v.split("-").map(Number) as [number, number];
+        return { from: from % 24, to: to % 24 };
+      }),
   })
   .superRefine((env, ctx) => {
     const fail = (path: string, message: string) => ctx.addIssue({ code: "custom", path: [path], message });

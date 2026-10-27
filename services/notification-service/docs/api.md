@@ -170,3 +170,23 @@ Errors: 401 without/with an invalid token, 400 `validation_error`.
 Remove a push token on sign-out.
 
 Request: `{ "token": "<1–4096 chars>" }`. Response `204`, also when nothing matched. Only a token owned by the caller is deleted.
+
+## Campaign routes (workflow 15, added)
+
+Source: `src/campaigns/routes.ts` (registered from `src/http/routes.ts`). Kong already routes `/api/notifications` (`notification-device-routes`). Staff routes need a `ride-admin` token and `campaign:send` (MARKETING, CITY scope) **in the campaign's city**; a campaign of another city answers `404`. A `ride-app` token on a staff route is `401` (wrong audience).
+
+| Method and path | Who | Success |
+|---|---|---|
+| `GET /api/notifications/campaigns?cityId=&status=&limit=` | `campaign:send` | `200 { campaigns: Campaign[], quietHours: { from, to } }`; without `cityId`, the caller's cities |
+| `GET /api/notifications/campaigns/audience?cityId=&audience=&channel=&lastActiveDays=` | `campaign:send` in `cityId` | `200 { count }`: people the segment reaches now, opt-outs excluded |
+| `POST /api/notifications/campaigns` `{ cityId, audience: RIDER \| DRIVER, channel: PUSH \| SMS, lastActiveDays? (1–365), title? (≤ 80, required for PUSH), body (≤ 500; ≤ 300 for SMS) }` | `campaign:send` in `cityId`; `Idempotency-Key` honoured | `201 { campaign }` (DRAFT) |
+| `GET /api/notifications/campaigns/:id` | `campaign:send` in its city | `200 { campaign }` plus `audienceEstimate` (DRAFT/SCHEDULED) and `quietNow` |
+| `PUT /api/notifications/campaigns/:id` | same; drafts only (`409 not_draft`) | `200 { campaign }` |
+| `POST /api/notifications/campaigns/:id/schedule` `{ at? }` | same; DRAFT only | `200 { campaign }` (SCHEDULED; without `at`, now). `at` in the past → `400 in_past`; > 90 days → `400 too_far` |
+| `POST /api/notifications/campaigns/:id/cancel` | same; DRAFT, SCHEDULED or SENDING | `200 { campaign }` (CANCELLED; unsent deliveries → SKIPPED `cancelled`) |
+| `GET /api/notifications/me/marketing` | `ride-app` token | `200 { push: boolean, sms: boolean }` (true = receives marketing) |
+| `PUT /api/notifications/me/marketing` `{ push?, sms? }` | `ride-app` token | `200 { push, sms }` |
+
+`Campaign`: `{ id, cityId, audience, lastActiveDays, channel, title, body, status: DRAFT | SCHEDULED | SENDING | SENT | CANCELLED, scheduledAt, startedAt, finishedAt, targeted, counts: { pending, sent, skipped, failed }, createdBy, updatedBy, createdAt, updatedAt }`.
+
+Errors: `400 title_required`, `400 body_too_long`, `409 invalid_transition`, `409 invalid_state` (concurrent change), `422 idempotency_mismatch`, `409 request_in_progress`, plus the common ones above. Every staff change writes `audit.recorded` (service `notification-service`) through the new outbox.
