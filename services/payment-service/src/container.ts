@@ -10,12 +10,18 @@ import { createGateways } from "./gateways/index.js";
 import { httpDeliver, simStore, type Deliver, type SimStore } from "./gateways/simulator.js";
 import { noRealtime, socketEmitter, type Realtime } from "./lib/realtime.js";
 import { createEarnings } from "./money/earnings.js";
+import { createReports } from "./money/reports.js";
 import { createBalanceService } from "./money/balance-service.js";
 import { createPayments } from "./money/payments.js";
 import { createPayouts } from "./money/payouts.js";
 import { createRuleChanges } from "./money/rule-changes.js";
 import { createTopUps } from "./money/topups.js";
 import { createWebhooks } from "./money/webhooks.js";
+import { createAdjustments } from "./money/adjustments.js";
+import { createIncentives } from "./money/incentives.js";
+import { createInvoices } from "./money/invoices.js";
+import { createPolicyOverrides } from "./money/policy-overrides.js";
+import { createWriteOffs } from "./money/write-offs.js";
 
 export interface ContainerOptions {
   db?: Db;
@@ -61,7 +67,14 @@ export function createContainer(config: Config, logger: Logger, opts: ContainerO
   const ruleChanges = createRuleChanges({ db, now });
   const balances = createBalanceService({ db, gateways, now });
   const earnings = createEarnings({ db, now });
+  const reports = createReports({ db, now });
   const webhooks = createWebhooks({ db, gateways, payments, topUps, payouts, logger, now });
+  // money controls: adjustments, write-offs, policy overrides, incentives, corporate invoices
+  const adjustments = createAdjustments({ db, now });
+  const writeOffs = createWriteOffs({ db, afterDays: config.WRITE_OFF_AFTER_DAYS, now });
+  const policyOverrides = createPolicyOverrides({ db, now });
+  const incentives = createIncentives({ db, logger, now });
+  const invoices = createInvoices({ db, now });
 
   // tokens of suspended users, and tokens older than a role change, are refused (Auth.md §9.5)
   const verifyAccessToken =
@@ -81,7 +94,8 @@ export function createContainer(config: Config, logger: Logger, opts: ContainerO
     });
 
   return {
-    config, db, redis, settings, settingsClient, gateways, payments, topUps, payouts, ruleChanges, balances, earnings, webhooks, verifyAccessToken, now,
+    config, db, redis, settings, settingsClient, gateways, payments, topUps, payouts, ruleChanges, balances, earnings, reports, webhooks, verifyAccessToken, now,
+    adjustments, writeOffs, policyOverrides, incentives, invoices,
     internalToken: config.INTERNAL_SERVICE_TOKEN,
     async close() {
       gateways.simulator.stop();

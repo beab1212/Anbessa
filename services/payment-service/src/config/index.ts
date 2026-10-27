@@ -56,6 +56,8 @@ export const envSchema = z
     RECONCILE_AFTER_SECONDS: z.coerce.number().int().min(10).default(300),
     // "weekly" settles every Monday 00:00 Addis Ababa time; "off" leaves it to finance's "run now"
     SETTLEMENT_SCHEDULE: z.enum(["weekly", "off"]).default("weekly"),
+    // A negative balance can be written off once its payment due has been overdue this many days (Payment.md Q8)
+    WRITE_OFF_AFTER_DAYS: z.coerce.number().int().min(0).max(3650).default(90),
   })
   .superRefine((env, ctx) => {
     const fail = (path: string, message: string) => ctx.addIssue({ code: "custom", path: [path], message });

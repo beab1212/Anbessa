@@ -11,6 +11,8 @@ import { checkoutPage } from "../gateways/checkout-page.js";
 import { withIdempotency } from "../lib/idempotency.js";
 import { badRequest, notFound, unauthorized } from "../lib/errors.js";
 import { assertFinanceView } from "../money/access.js";
+import { financeReportCsv } from "../money/reports.js";
+import { registerControlRoutes, type ControlDeps } from "./control-routes.js";
 
 /** A query flag: "true"/"1" is on; anything else, "false" included, is off (z.coerce.boolean() reads "false" as true). */
 const queryFlag = z.enum(["true", "false", "1", "0"]).default("false").transform((v) => v === "true" || v === "1");
@@ -22,8 +24,8 @@ const money = z.number().int().positive().max(100_000_000);
 const reason = z.string().trim().min(5).max(500);
 
 export type RouteDeps = Pick<Container,
-  "db" | "gateways" | "payments" | "topUps" | "payouts" | "ruleChanges" | "balances" | "earnings" | "webhooks" | "settings" | "config" | "internalToken"
-> & { verifyAccessToken: VerifyAccessToken };
+  "db" | "gateways" | "payments" | "topUps" | "payouts" | "ruleChanges" | "balances" | "earnings" | "reports" | "webhooks" | "settings" | "config" | "internalToken"
+> & ControlDeps & { verifyAccessToken: VerifyAccessToken };
 
 export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
   const { payments, topUps, payouts, ruleChanges, balances, webhooks, gateways, db } = deps;
@@ -60,6 +62,40 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
     const p = await principal(req);
     const q = z.object({ period: z.enum(["today", "week", "month", "custom"]).default("today"), from: z.string().optional(), to: z.string().optional() }).parse(req.query);
     return deps.earnings.mine(p, q.period, { from: q.from, to: q.to });
+  });
+
+  // ── fleet owners: what the fleet's cars made ────────────────────────────────
+  app.get("/api/payments/earnings/org/:orgId", async (req) => {
+    const p = await principal(req);
+    const { orgId } = z.object({ orgId: uuid }).parse(req.params);
+    const q = z.object({ period: z.enum(["today", "week", "month", "custom"]).default("today"), from: z.string().optional(), to: z.string().optional() }).parse(req.query);
+    return deps.earnings.org(p, orgId, q.period, { from: q.from, to: q.to });
+  });
+
+  // ── company accounts: what corporate trips cost ─────────────────────────────
+  app.get("/api/payments/org/:orgId/payments", async (req) => {
+    const p = await principal(req);
+    const { orgId } = z.object({ orgId: uuid }).parse(req.params);
+    const q = z.object({ before: z.string().max(80).optional(), limit: z.coerce.number().int().min(1).max(100).default(50) }).parse(req.query);
+    return deps.reports.orgCharges(p, orgId, q);
+  });
+
+  // ── finance: the daily report ───────────────────────────────────────────────
+  const reportQuery = z.object({ cityId: cityId.optional(), from: z.string().max(10).optional(), to: z.string().max(10).optional() });
+  app.get("/api/payments/reports/daily", async (req) => {
+    const p = await principal(req);
+    const { cityId: city, ...range } = reportQuery.parse(req.query);
+    return deps.reports.daily(p, city, range);
+  });
+  app.get("/api/payments/reports/daily.csv", async (req, reply) => {
+    const p = await principal(req);
+    const { cityId: city, ...range } = reportQuery.parse(req.query);
+    const r = await deps.reports.daily(p, city, range);
+    return reply
+      .header("content-type", "text/csv; charset=utf-8")
+      .header("content-disposition", `attachment; filename="payments-${city ?? "all"}-${r.from}-${r.to}.csv"`)
+      .header("cache-control", "no-store")
+      .send(financeReportCsv(r));
   });
 
   // ── drivers and fleet owners: the balance ───────────────────────────────────
@@ -128,7 +164,7 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
   app.get("/api/payments/payments", async (req) => {
     const p = await principal(req);
     const q = z.object({
-      status: z.string().max(30).optional(), provider: z.string().max(30).optional(), tripId: uuid.optional(),
+      status: z.string().max(30).optional(), provider: z.string().max(30).optional(), tripId: uuid.optional(), cityId: cityId.optional(),
       before: z.coerce.date().optional(), limit: z.coerce.number().int().min(1).max(100).default(50),
     }).parse(req.query);
     return payments.list(p, q);
@@ -165,7 +201,7 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
   });
   app.get("/api/payments/top-ups", async (req) => {
     const p = await principal(req);
-    const q = z.object({ status: z.string().max(30).optional(), channel: z.string().max(30).optional() }).parse(req.query);
+    const q = z.object({ status: z.string().max(30).optional(), channel: z.string().max(30).optional(), cityId: cityId.optional() }).parse(req.query);
     return { topUps: await topUps.list(p, q) };
   });
   app.post("/api/payments/top-ups/:id/:decision", async (req) => {
@@ -218,6 +254,9 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
     const { id, decision } = z.object({ id: uuid, decision: z.enum(["approve", "reject", "cancel"]) }).parse(req.params);
     return ruleChanges.decide(p, id, decision, z.object({ reason: z.string().trim().max(500).optional() }).parse(req.body ?? {}).reason);
   });
+
+  // adjustments, write-offs, policy overrides, incentives, corporate invoices
+  await registerControlRoutes(app, deps, { principal, idempotent });
 
   // providers: what's connected and the latest callbacks
   app.get("/api/payments/gateways", async (req) => {

@@ -12,7 +12,7 @@ Every event this service produces carries `eventId` (UUIDv7), `version` (`1`) an
 
 | Topic | Producer | Key | What payment-service does |
 |---|---|---|---|
-| `trip.completed` | trip-service | `tripId` | `payments.onTripCompleted`: cash and company-account trips settle at once; mobile money and card trips with `fareMinor > 0` create a `payment` and start the charge after commit |
+| `trip.completed` | trip-service | `tripId` | `payments.onTripCompleted`: cash and company-account trips settle at once; mobile money and card trips with something left to pay (`fareMinor − promoDiscountMinor > 0`) create a `payment` for that amount and start the charge after commit; a digital trip fully covered by a promo settles at once with nothing charged |
 | `trip.cancelled` | trip-service | `tripId` | `payments.onTripCancelled`: nothing if `feeMinor ≤ 0`; a digital fee creates a `CANCELLATION_FEE` payment; a cash fee becomes a rider receivable; corporate with `billingOrgId` a company receivable. The beneficiary gets `driverCompensationMinor` (capped at the fee) at once |
 
 Validated fields (zod, `schemas` in `src/events/consumer.ts`):
@@ -29,7 +29,9 @@ Validated fields (zod, `schemas` in `src/events/consumer.ts`):
 | `paymentMethod` | `CASH`, `MOBILE_MONEY`, `CARD`, `CORPORATE` |
 | `billingType` | `PERSONAL`, `CORPORATE` |
 | `billingOrgId` | uuid, optional; **required** when `paymentMethod` is `CORPORATE` (zod `refine`) |
-| `fareMinor`, `waitingFeeMinor` | int ≥ 0 (`fareMinor` already includes the waiting fee; `waitingFeeMinor` is not used) |
+| `fareMinor`, `waitingFeeMinor` | int ≥ 0 (`fareMinor` already includes the waiting fee; `waitingFeeMinor` is not used). `fareMinor` is the full fare: commission, VAT and earnings are computed on it |
+| `quoteId` | string ≤ 100, optional (not used here; pricing-service uses it) |
+| `promoDiscountMinor` | int ≥ 0, optional (absent = 0); clamped to `fareMinor`. The rider pays `fareMinor − promoDiscountMinor`; the discount is booked to `PROMO_EXPENSE:{cityId}` (see [architecture.md](architecture.md#settlement)) |
 | `currency` | 3 chars |
 | `distanceMeters`, `durationSeconds` | number (not used) |
 | `completedAt` | string; the commission rule and policy valid at this time apply |
@@ -47,6 +49,7 @@ Validated fields (zod, `schemas` in `src/events/consumer.ts`):
 | `beneficiary` | optional |
 | `currency` | 3 chars |
 | `billingOrgId` | uuid, optional; **required** when `paymentMethod` is `CORPORATE` |
+| `quoteId` | string ≤ 100, optional (not used here) |
 
 **Deduplication.** The handler's transaction starts with `INSERT INTO inbox (event_id, topic) … ON CONFLICT DO NOTHING`; a redelivered `eventId` does nothing. Settlement is also guarded by `trip_settlement (trip_id, purpose)` and the journal idempotency key, and `payment` is unique per `(trip_id, purpose)`.
 
@@ -77,21 +80,30 @@ All through the transactional outbox: `writeOutbox(tx, …)` inserts rows in `ou
 | `payout.failed` | beneficiary owner id | `BalanceMoneyEvent` (+ `provider`, `failure`) | a payout failed and was reversed | `payouts.ts` `failLine` |
 | `refund.succeeded` | `riderId` | `RefundOutcomeEvent` | the provider confirmed a refund | `payments.ts` `refundDone` |
 | `refund.failed` | `riderId` | `RefundOutcomeEvent` | the provider refused a refund | `payments.ts` `refundDone` |
+| `balance.adjusted` | beneficiary owner id | `BalanceAdjustedEvent` | an adjustment was approved and posted | `adjustments.ts` `decide` |
+| `balance.written_off` | beneficiary owner id | `BalanceWrittenOffEvent` | a write-off was approved and posted | `write-offs.ts` `decide` |
+| `incentive.awarded` | beneficiary owner id | `IncentiveAwardedEvent` | a driver reached an incentive's target and was credited at period close | `incentives.ts` `close` |
+| `invoice.issued` | `orgId` | `InvoiceEvent` | finance issued a company's monthly invoice | `invoices.ts` `issue` |
+| `invoice.paid` | `orgId` | `InvoiceEvent` (+ `paidAt`) | the last bank payment made an invoice fully paid | `invoices.ts` `recordPayment` |
 | `audit.recorded` | actor user id, or `system` | `AuditPayload` (`src/outbox/outbox.ts`) | a staff or owner action (list below) | modules |
 
 Payload fields:
 
 | Type | Fields |
 |---|---|
-| `TripSettledEvent` | `tripId`, `riderId`, `driverId?`, `beneficiary?`, `purpose` (`TRIP_FARE` \| `CANCELLATION_FEE`), `paymentMethod`, `fareMinor` (the fee for cancellations), `commissionMinor`, `vatMinor` (0 for fees), `earningsMinor` (what the balance moved by; negative on cash trips), `currency` |
+| `TripSettledEvent` | `tripId`, `riderId`, `driverId?`, `beneficiary?`, `purpose` (`TRIP_FARE` \| `CANCELLATION_FEE`), `paymentMethod`, `fareMinor` (the fee for cancellations), `commissionMinor`, `vatMinor` (0 for fees), `earningsMinor` (what the balance moved by; negative on cash trips), `promoDiscountMinor?` (present when > 0: the promo discount booked to `PROMO_EXPENSE`; the rider paid `fareMinor −` it), `currency` |
 | `PaymentActionRequiredEvent` | `paymentId`, `tripId`, `riderId`, `purpose`, `provider`, `amountMinor`, `currency`, `checkoutUrl` |
 | `PaymentOutcomeEvent` | `paymentId`, `tripId`, `riderId`, `purpose`, `provider`, `method`, `amountMinor`, `currency`, `final?`, `nextAttemptAt?` |
 | `BalanceStateChangedEvent` | `accountId`, `beneficiary`, `cityId`, `state`, `previousState`, `cashAllowed`, `balanceMinor` |
 | `BalanceMoneyEvent` | `accountId`, `beneficiary`, `amountMinor`, `balanceMinor` (after the movement), `currency` (`ETB`), `channel?`, `provider?`, `minimumMinor?`, `dueAt?`, `failure?` |
 | `RefundOutcomeEvent` | `refundId`, `paymentId`, `tripId`, `riderId`, `amountMinor`, `currency` |
+| `BalanceAdjustedEvent` | `adjustmentId`, `accountId`, `beneficiary`, `direction` (`CREDIT` \| `DEBIT`), `amountMinor` (positive), `category`, `balanceMinor` (after), `currency`, `tripId?`, `ticketId?` |
+| `BalanceWrittenOffEvent` | `writeOffId`, `accountId`, `beneficiary`, `amountMinor`, `balanceMinor` (after, normally 0), `currency` |
+| `IncentiveAwardedEvent` | `awardId`, `programId`, `programName`, `cityId`, `driverId` (who drove), `accountId`, `beneficiary` (who is paid: the driver, or their fleet), `trips`, `amountMinor`, `balanceMinor`, `currency` |
+| `InvoiceEvent` | `invoiceId`, `orgId`, `number`, `period` (YYYY-MM), `totalMinor`, `paidMinor`, `currency`, `dueAt`, `paidAt?` |
 | `AuditPayload` | `actorId` (null for the scheduled run), `action`, `resource: { type, id }`, `outcome` (`EXECUTED` in every current call), `reason?`, `service: "payment-service"` |
 
-`audit.recorded` actions: `payout_method:set`, `refund:request`, `refund:approve`, `refund:reject`, `topup:record_cash`, `topup:approve_cash`, `topup:reject_cash`, `payout:prepare`, `payout:approve`, `payout:reject`, `commission_rule:propose`, `commission_rule:approve`, `balance_policy:propose`, `balance_policy:approve`, `rule_change:reject`, `rule_change:cancel`.
+`audit.recorded` actions: `payout_method:set`, `refund:request`, `refund:approve`, `refund:reject`, `topup:record_cash`, `topup:approve_cash`, `topup:reject_cash`, `payout:prepare`, `payout:approve`, `payout:reject`, `commission_rule:propose`, `commission_rule:approve`, `balance_policy:propose`, `balance_policy:approve`, `rule_change:reject`, `rule_change:cancel`, `adjustment:request`, `adjustment:approve`, `adjustment:reject`, `adjustment:cancel`, `writeoff:request`, `writeoff:approve`, `writeoff:reject`, `writeoff:cancel`, `policy_override:request`, `policy_override:approve`, `policy_override:reject`, `policy_override:cancel`, `policy_override:revoke`, `incentive:propose`, `incentive:approve`, `incentive:reject`, `incentive:cancel`, `incentive:close` (actor null), `invoice:issue`, `invoice:record_payment`.
 
 ### Who consumes them
 
@@ -107,6 +119,7 @@ Found by searching `services/` for the topic names:
 | `balance.topped_up`, `balance.payment_due`, `payout.sent`, `payout.failed` | notification-service | pushes to the owner |
 | `audit.recorded` | audit-service (`audit-service`) | stores the audit log |
 | `payment.captured`, `refund.failed` | none found in code | |
+| `balance.adjusted`, `balance.written_off`, `incentive.awarded`, `invoice.issued`, `invoice.paid` | none yet (added 2026-11; notification-service could tell the owner / the company's billing contact) | |
 
 ### The outbox relay
 

@@ -42,7 +42,7 @@ Indexes: `ledger_account_code_key` (unique `code`), `ledger_account_kind_idx` (`
 | Column | Type | Null | Notes |
 |---|---|---|---|
 | `id` | uuid | no | PK |
-| `kind` | text | no | `TRIP_SETTLEMENT`, `CANCELLATION_FEE`, `TOP_UP`, `PAYOUT`, `PAYOUT_REVERSAL`, `REFUND`, `RECEIVABLE_COLLECTION` (no CHECK) |
+| `kind` | text | no | `TRIP_SETTLEMENT`, `CANCELLATION_FEE`, `TOP_UP`, `PAYOUT`, `PAYOUT_REVERSAL`, `REFUND`, `RECEIVABLE_COLLECTION`, `ADJUSTMENT`, `WRITE_OFF`, `INCENTIVE`, `INVOICE_PAYMENT` (no CHECK) |
 | `reference_type` | text | no | `trip`, `payment`, `top_up`, `payout_line`, `refund` |
 | `reference_id` | text | no | |
 | `idempotency_key` | text | no | unique |
@@ -168,11 +168,11 @@ Index `(status, created_at)`.
 | `next_attempt_at` | timestamptz | yes | | |
 | `last_error` | text | yes | | |
 | `refunded_minor` | bigint | no | 0 | |
-| `settlement` | jsonb | no | | facts needed to settle later: `driverId`, `beneficiary`, `vehicleType`, `paymentMethod`, `completedAt`, `compensationMinor` |
+| `settlement` | jsonb | no | | facts needed to settle later: `driverId`, `beneficiary`, `vehicleType`, `paymentMethod`, `completedAt`, `compensationMinor`, and for a trip with a promo `fareMinor` (full fare) and `promoDiscountMinor` (the payment's `amount_minor` is then `fareMinor − promoDiscountMinor`) |
 | `settled_as_receivable` | bool | no | false | |
 | `created_at`, `updated_at`, `completed_at` | timestamptz | | | `updated_at` maintained by Prisma (`@updatedAt`) |
 
-Indexes: unique `(trip_id, purpose)`, unique `provider_ref`, unique `provider_txn_id`, `(status, updated_at)`, `(rider_id, created_at DESC)`.
+Indexes: unique `(trip_id, purpose)`, unique `provider_ref`, unique `provider_txn_id`, `(status, updated_at)`, `(rider_id, created_at DESC)`, `ix_payment_completed` (`completed_at`, daily report collections).
 
 ### `trip_settlement` (`TripSettlement`)
 
@@ -191,10 +191,11 @@ The commission snapshot of a settled trip or fee.
 | `fare_minor`, `commission_minor`, `vat_minor` | bigint | no | for fees: fee, platform share, 0 |
 | `commission_rule_id` | uuid | yes | null = built-in default rule (or a fee) |
 | `earnings_minor` | bigint | no | what the beneficiary's balance moved by |
+| `promo_discount_minor` | bigint | no (default 0) | rider promo discount booked to `PROMO_EXPENSE`; the rider paid `fare_minor −` it. CHECK `ck_trip_settlement_promo`: 0 ≤ discount ≤ fare (migration `20261102100000_trip_settlement_promo`) |
 | `journal_entry_id` | uuid | no | |
 | `settled_at` | timestamptz | no | |
 
-PK `(trip_id, purpose)`. Indexes: `(beneficiary_account_id, settled_at DESC)`, `trip_settlement_driver_id_settled_at_idx` (`driver_id, settled_at DESC`, added by the second migration for the earnings summary).
+PK `(trip_id, purpose)`. Indexes: `(beneficiary_account_id, settled_at DESC)` (also a fleet's earnings, `earnings/org/:orgId`), `trip_settlement_driver_id_settled_at_idx` (`driver_id, settled_at DESC`, added by the second migration for the earnings summary), `ix_trip_settlement_day` (`settled_at`) and `ix_trip_settlement_city_day` (`city_id, settled_at`) for the daily report (third migration).
 
 ### `payer_preference` (`PayerPreference`)
 
@@ -222,7 +223,7 @@ PK `(trip_id, purpose)`. Indexes: `(beneficiary_account_id, settled_at DESC)`, `
 | `journal_entry_id` | uuid | yes | | |
 | `created_at`, `decided_at`, `completed_at` | timestamptz | | | |
 
-Index `(status, created_at)`.
+Indexes: `(status, created_at)`, `ix_refund_completed` (`status, completed_at`, daily report).
 
 ## Top-ups, dues and payouts
 
@@ -245,7 +246,7 @@ Index `(status, created_at)`.
 | `journal_entry_id` | uuid | yes | | |
 | `created_at`, `updated_at`, `completed_at` | timestamptz | | | |
 
-Indexes: `(beneficiary_account_id, created_at DESC)`, `(status, updated_at)`, unique `provider_ref`, unique `provider_txn_id`.
+Indexes: `(beneficiary_account_id, created_at DESC)`, `(status, updated_at)`, `ix_top_up_completed` (`status, completed_at`, daily report), unique `provider_ref`, unique `provider_txn_id`.
 
 ### `payment_due` (`PaymentDue`)
 
@@ -346,6 +347,71 @@ Indexes: unique `(provider, event_key)`, `received_at DESC`.
 
 Index `ix_outbox_unpublished` on `created_at` (a plain index, not partial on `published_at IS NULL`).
 
+## Money controls
+
+Migration `20261101100000_money_controls`. Maker–checker rows: the CHECK `ck_*_checker` makes the decider differ from the requester for every decided status (`decided_by` is set when a decider claims the row; a withdrawal leaves `CANCELLED` with the requester as `decided_by`, allowed).
+
+### `balance_adjustment` (`BalanceAdjustment`)
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | uuid PK | `uuidv7()` |
+| `beneficiary_account_id` | uuid | the balance |
+| `city_id` | text | the balance's city (authorization scope) |
+| `direction` | text | `CREDIT` \| `DEBIT` |
+| `amount_minor` | bigint | > 0 |
+| `category` | text | `GOODWILL` \| `FEE_REVERSAL` \| `CORRECTION` \| `LOST_ITEM_RETURN` \| `OTHER` |
+| `reason` | text | |
+| `ticket_id`, `trip_id` | text, uuid | optional evidence |
+| `status` | text | `PENDING_APPROVAL` → `EXECUTED` \| `REJECTED` \| `CANCELLED` \| `EXPIRED` |
+| `requested_by`, `decided_by` | uuid | |
+| `decision_reason` | text | |
+| `journal_entry_id` | uuid | set exactly when `EXECUTED` (`ck_balance_adjustment_executed`) |
+| `created_at`, `decided_at`, `expires_at` | timestamptz | `expires_at` = created + 7 days |
+
+Indexes: `(status, created_at)`, `(beneficiary_account_id, created_at DESC)`.
+
+### `write_off` (`WriteOff`)
+
+Same shape without direction/category/ticket/trip: `amount_minor` is the whole debt at request time. Partial unique index `ux_write_off_pending (beneficiary_account_id) WHERE status = 'PENDING_APPROVAL'`. `journal_entry_id` set exactly when `EXECUTED`.
+
+### `policy_override` (`PolicyOverride`)
+
+| Column | Type | Notes |
+|---|---|---|
+| `beneficiary_account_id`, `city_id` | uuid, text | |
+| `mode` | text | `POSTPAID` \| `PREPAID` \| null |
+| `warning_minor`, `cash_limit_minor`, `hard_limit_minor` | bigint | ≤ 0 or null (null = the city's) |
+| `prepaid_minimum_minor` | bigint | ≥ 0 or null |
+| `valid_from`, `valid_until` | timestamptz | `valid_until > valid_from` |
+| `status` | text | `PENDING_APPROVAL` → `APPROVED` → `REVOKED`; or `REJECTED` \| `CANCELLED` \| `EXPIRED` |
+| `requested_by`, `decided_by`, `revoked_by` | uuid | |
+| `decision_reason`, `revoked_at`, `created_at`, `decided_at`, `expires_at` | | |
+
+CHECKs: at least one field set; limit signs; window; status; checker. Exclusion constraint `ex_policy_override_no_overlap EXCLUDE USING gist (beneficiary_account_id WITH =, tstzrange(valid_from, valid_until) WITH &&) WHERE (status = 'APPROVED')`. Indexes: `(status, created_at)`, `(beneficiary_account_id, valid_from)`.
+
+### `incentive_program` (`IncentiveProgram`) and `incentive_award` (`IncentiveAward`)
+
+| Column | Notes |
+|---|---|
+| `city_id`, `name`, `vehicle_type` (null = any) | |
+| `target_trips` (≥ 1), `reward_minor` (> 0), `budget_minor` (≥ reward) | `ck_incentive_program_amounts` |
+| `starts_at`, `ends_at` | `ends_at > starts_at` |
+| `status` | `PENDING_APPROVAL` → `APPROVED` → `CLOSED`; or `REJECTED` \| `CANCELLED` \| `EXPIRED` |
+| `proposed_by`, `decided_by`, `decision_reason`, `created_at`, `decided_at`, `expires_at`, `closed_at` | |
+| `qualified_count`, `awards_count`, `spent_minor` | set at close; `0 ≤ spent_minor ≤ budget_minor` |
+
+`incentive_award`: `program_id` (FK), `driver_id`, `beneficiary_account_id`, `trips`, `amount_minor`, `journal_entry_id`, `created_at`; **unique `(program_id, driver_id, beneficiary_account_id)`** (credited once); append-only (`trg_incentive_award_append_only`). Indexes: program `(status, ends_at)`, `(city_id, starts_at)`; award `(beneficiary_account_id, created_at DESC)`.
+
+### `invoice` (`Invoice`), `invoice_line` (`InvoiceLine`), `invoice_payment` (`InvoicePayment`), `invoice_counter` (`InvoiceCounter`)
+
+| Table | Columns | Constraints |
+|---|---|---|
+| `invoice` | `org_id`, `period` (YYYY-MM), `number` (unique, `INV-YYYYMM-NNNNN`), `period_start`, `period_end`, `currency`, `total_minor`, `line_count`, `paid_minor`, `status` (`ISSUED` \| `PAID`), `issued_by`, `issued_at`, `due_at`, `paid_at` | unique `(org_id, period)`; `total_minor > 0`, `line_count > 0`, `0 ≤ paid_minor ≤ total_minor`, `PAID` ⇔ fully paid; trigger `trg_invoice_immutable` (`refuse_invoice_change()`): only `paid_minor`, `status`, `paid_at` may change; no delete. Index `(status, due_at)` |
+| `invoice_line` | `invoice_id` (FK), `posting_id` (**unique**: a posting is invoiced once), `journal_entry_id`, `kind`, `trip_id`, `purpose`, `rider_id`, `city_id`, `vehicle_type`, `at`, `amount_minor` (owed; a credit is negative) | append-only; index `(invoice_id, at)` |
+| `invoice_payment` | `invoice_id` (FK), `amount_minor` (> 0), `bank_reference` (**unique**), `recorded_by`, `journal_entry_id`, `created_at` | append-only; index `(invoice_id)` |
+| `invoice_counter` | `period` PK, `last` | the last number used in a month |
+
 ## Retention
 
 Nothing in the service deletes rows except `idempotency_key` (24 h). `outbox` (published rows), `inbox`, `webhook_event`, the ledger and all business tables grow without bound. `posting` is not partitioned.
@@ -358,6 +424,9 @@ Nothing in the service deletes rows except `idempotency_key` (24 h). `outbox` (p
 |---|---|---|
 | 1 | `20261028100000_init` | Creates every table, unique index, index and the five foreign keys above. Then, by hand: `CREATE EXTENSION btree_gist`; CHECK constraints on `ledger_account`, `posting`, `beneficiary`, `commission_rule`, `balance_policy`, `rule_change`, `payment`, `refund`, `top_up`, `payment_due`, `payout_batch`, `payout_line`; functions `assert_entry_balanced()` and `refuse_ledger_change()`; triggers `trg_posting_balanced` (deferred), `trg_posting_append_only`, `trg_journal_entry_append_only`; exclusion constraint `ex_commission_rule_no_overlap` |
 | 2 | `20261029100000_driver_earnings_index` | `CREATE INDEX trip_settlement_driver_id_settled_at_idx ON trip_settlement (driver_id, settled_at DESC)` for `GET /api/payments/earnings/me` |
+| 3 | `20261031100000_report_indexes` | `ix_trip_settlement_day`, `ix_trip_settlement_city_day`, `ix_payment_completed`, `ix_refund_completed`, `ix_top_up_completed` for `GET /api/payments/reports/daily` (all also `@@index` entries in `schema.prisma`). The corporate charges list uses the existing `ix_posting_account` |
+
+| 4 | `20261101100000_money_controls` | Tables `balance_adjustment`, `write_off`, `policy_override`, `incentive_program`, `incentive_award`, `invoice`, `invoice_line`, `invoice_payment`, `invoice_counter` with their indexes and three foreign keys. By hand: CHECK constraints (maker ≠ checker, statuses, amounts, windows), `ux_write_off_pending`, exclusion constraint `ex_policy_override_no_overlap`, function `refuse_invoice_change()` and triggers `trg_invoice_immutable`, `trg_invoice_line_append_only`, `trg_invoice_payment_append_only`, `trg_incentive_award_append_only` (the last three reuse `refuse_ledger_change()`) |
 
 To add a migration: `pnpm exec prisma migrate dev --create-only` in the service folder (comment in the root `Makefile`), then add any hand-written SQL to the generated file.
 

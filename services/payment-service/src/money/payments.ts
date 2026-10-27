@@ -34,6 +34,9 @@ interface SettlementFacts {
   paymentMethod: PaymentMethod;
   completedAt: string | null;
   compensationMinor: number;
+  /** trip fares with a promo: the full fare (the payment is for fare − discount); absent on older payments */
+  fareMinor?: number;
+  promoDiscountMinor?: number;
 }
 
 export interface PaymentsDeps {
@@ -118,7 +121,9 @@ export function createPayments(deps: PaymentsDeps) {
     if (pay.purpose === "TRIP_FARE") {
       return settleTripFare(tx, {
         tripId: pay.tripId, riderId: pay.riderId, driverId: f.driverId!, beneficiary: f.beneficiary!, cityId: pay.cityId,
-        vehicleType: f.vehicleType ?? "economy", paymentMethod: f.paymentMethod, fareMinor: Number(pay.amountMinor), currency: pay.currency,
+        vehicleType: f.vehicleType ?? "economy", paymentMethod: f.paymentMethod,
+        // the payment is what the rider owed (fare − promo discount); the driver earns on the full fare
+        fareMinor: f.fareMinor ?? Number(pay.amountMinor), promoDiscountMinor: f.promoDiscountMinor ?? 0, currency: pay.currency,
         at: f.completedAt ? new Date(f.completedAt) : pay.createdAt, source,
       }, now());
     }
@@ -268,21 +273,27 @@ export function createPayments(deps: PaymentsDeps) {
     async onTripCompleted(e: TripCompletedEvent): Promise<string | null> {
       const created = await db.$transaction(async (tx) => {
         if (!(await once(tx, e.eventId, "trip.completed"))) return null;
+        // a promo discount: the rider pays fare − discount (never below 0); the driver earns on the full fare
+        const discount = Math.min(Math.max(e.promoDiscountMinor ?? 0, 0), e.fareMinor);
+        const payable = e.fareMinor - discount;
         const facts: SettlementFacts = {
           driverId: e.driverId, beneficiary: e.beneficiary, vehicleType: e.vehicleType, paymentMethod: e.paymentMethod,
-          completedAt: e.completedAt, compensationMinor: 0,
+          completedAt: e.completedAt, compensationMinor: 0, ...(discount > 0 ? { fareMinor: e.fareMinor, promoDiscountMinor: discount } : {}),
         };
-        if (DIGITAL.includes(e.paymentMethod) && e.fareMinor > 0) {
+        const digital = DIGITAL.includes(e.paymentMethod);
+        if (digital && payable > 0) {
           const p = await createPayment(tx, {
             purpose: "TRIP_FARE", tripId: e.tripId, riderId: e.riderId, cityId: e.cityId, method: e.paymentMethod as "MOBILE_MONEY" | "CARD",
-            amountMinor: e.fareMinor, currency: e.currency, facts,
+            amountMinor: payable, currency: e.currency, facts,
           });
           return p.id;
         }
-        const source: Source = e.paymentMethod === "CORPORATE" && e.billingOrgId ? { type: "CORPORATE", orgId: e.billingOrgId } : { type: "CASH" };
+        const source: Source = e.paymentMethod === "CORPORATE" && e.billingOrgId ? { type: "CORPORATE", orgId: e.billingOrgId }
+          : digital && discount > 0 ? { type: "PROMO" } // nothing left to charge
+          : { type: "CASH" };
         await settleTripFare(tx, {
           tripId: e.tripId, riderId: e.riderId, driverId: e.driverId, beneficiary: e.beneficiary, cityId: e.cityId, vehicleType: e.vehicleType,
-          paymentMethod: e.paymentMethod, fareMinor: e.fareMinor, currency: e.currency, at: new Date(e.completedAt), source,
+          paymentMethod: e.paymentMethod, fareMinor: e.fareMinor, promoDiscountMinor: discount, currency: e.currency, at: new Date(e.completedAt), source,
         }, now());
         return null;
       });
@@ -400,7 +411,7 @@ export function createPayments(deps: PaymentsDeps) {
         // commission and the driver's earnings are for staff and the driver side, not the rider
         settlements: settlements.filter((s) => staff || s.driverId === p.userId).map((s) => ({
           purpose: s.purpose, paymentMethod: s.paymentMethod, fareMinor: Number(s.fareMinor), commissionMinor: Number(s.commissionMinor),
-          vatMinor: Number(s.vatMinor), earningsMinor: Number(s.earningsMinor), commissionRuleId: s.commissionRuleId, settledAt: s.settledAt,
+          vatMinor: Number(s.vatMinor), earningsMinor: Number(s.earningsMinor), promoDiscountMinor: Number(s.promoDiscountMinor), commissionRuleId: s.commissionRuleId, settledAt: s.settledAt,
           beneficiaryAccountId: s.beneficiaryAccountId,
         })),
       };
@@ -432,11 +443,14 @@ export function createPayments(deps: PaymentsDeps) {
     },
 
     // ── finance ───────────────────────────────────────────────────────────────
-    async list(p: Principal, q: { status?: string; provider?: string; tripId?: string; before?: Date; limit: number }) {
+    async list(p: Principal, q: { status?: string; provider?: string; tripId?: string; cityId?: string; before?: Date; limit: number }) {
+      const allowed = cityFilter(p);
+      // one city, if asked and allowed (a city outside the person's reach is refused, not emptied)
+      if (q.cityId && allowed.cityId && !allowed.cityId.in.includes(q.cityId)) throw forbidden("missing permission balance:read");
       const where: Prisma.PaymentWhereInput = {
         ...(q.status ? { status: q.status } : {}), ...(q.provider ? { provider: q.provider } : {}), ...(q.tripId ? { tripId: q.tripId } : {}),
         ...(q.before ? { createdAt: { lt: q.before } } : {}),
-        ...cityFilter(p),
+        ...(q.cityId ? { cityId: q.cityId } : allowed),
       };
       const rows = await db.payment.findMany({ where, orderBy: { createdAt: "desc" }, take: q.limit });
       return { payments: rows.map(paymentView), next: rows.length === q.limit ? rows.at(-1)!.createdAt.toISOString() : null };

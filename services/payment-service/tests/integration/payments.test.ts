@@ -88,6 +88,79 @@ describe("settling trips (workflow 08)", () => {
   });
 });
 
+describe("promo discounts (workflow 15, Payment.md §6.4)", () => {
+  // 400 ETB fare, 100 ETB promo: the rider pays 300, the platform 100 (PROMO_EXPENSE), the driver
+  // still earns on 400 (commission 60, VAT 9). Each test uses its own city so the promo account is its own.
+  const city = () => `promo-${uuid().slice(0, 8)}`;
+  const settlement = (tripId: string) => h.c.db.tripSettlement.findUniqueOrThrow({ where: { tripId_purpose: { tripId, purpose: "TRIP_FARE" } } });
+  const postingsSum = async (tripId: string) => {
+    const entry = await h.c.db.journalEntry.findFirstOrThrow({ where: { referenceId: tripId, kind: "TRIP_SETTLEMENT" } });
+    const lines = await h.c.db.posting.findMany({ where: { journalEntryId: entry.id } });
+    return lines.reduce((s, l) => s + Number(l.amountMinor), 0);
+  };
+
+  it("cash: the driver collected fare − discount, so the platform owes them the discount; earnings stay on the full fare", async () => {
+    const d = uuid();
+    const cityId = city();
+    const e = { ...h.completed({ driverId: d, fareMinor: 40_000, cityId }), quoteId: "q_promo_cash", promoDiscountMinor: 10_000 };
+    await h.c.payments.onTripCompleted(e);
+    await h.c.payments.onTripCompleted(e);
+    expect(await h.balanceOf("INDIVIDUAL", d)).toMatchObject({ balance: 10_000 - 6900 });
+    expect(await h.accountBalance(`PROMO_EXPENSE:${cityId}`)).toBe(-10_000);
+    expect(await h.accountBalance(`COMMISSION_REVENUE:${cityId}`)).toBe(6000);
+    expect(await postingsSum(e.tripId)).toBe(0);
+    expect(await settlement(e.tripId)).toMatchObject({ fareMinor: 40_000n, commissionMinor: 6000n, vatMinor: 900n, earningsMinor: 3100n, promoDiscountMinor: 10_000n });
+    const settled = (await h.outbox("trip.settled")).find((o) => (o.payload as { tripId: string }).tripId === e.tripId);
+    expect(settled?.payload).toMatchObject({ fareMinor: 40_000, earningsMinor: 3100, promoDiscountMinor: 10_000 });
+
+    // the earnings summary: gross and net on the full fare, cash in hand is what the rider paid
+    const driver = await h.person([{ r: "DRIVER" }, { r: "RIDER" }], d);
+    const mine = await h.ok<{ grossMinor: number; netMinor: number; cashCollectedMinor: number; balanceChangeMinor: number }>(h.req("GET", "/api/payments/earnings/me?period=today", driver));
+    expect(mine).toMatchObject({ grossMinor: 40_000, netMinor: 33_100, cashCollectedMinor: 30_000, balanceChangeMinor: 3100 });
+  });
+
+  it("card: the rider is charged fare − discount; the driver is credited as without a promo", async () => {
+    const d = uuid();
+    const cityId = city();
+    const e = { ...h.completed({ driverId: d, fareMinor: 40_000, paymentMethod: "CARD", cityId }), promoDiscountMinor: 10_000 };
+    const paymentId = await h.c.payments.onTripCompleted(e);
+    const pay = await h.c.db.payment.findUniqueOrThrow({ where: { id: paymentId! } });
+    expect(Number(pay.amountMinor)).toBe(30_000);
+    const path = new URL(pay.checkoutUrl!).pathname;
+    expect((await h.app.inject({ method: "GET", url: path })).body).toContain("300.00 ETB");
+    await h.app.inject({ method: "POST", url: path, payload: "secret=4242&decision=approve", headers: { "content-type": "application/x-www-form-urlencoded" } });
+    expect(await h.c.db.payment.findUniqueOrThrow({ where: { id: pay.id } })).toMatchObject({ status: "SUCCEEDED" });
+    expect(await h.balanceOf("INDIVIDUAL", d)).toMatchObject({ balance: 33_100 });
+    expect(await h.accountBalance(`PROMO_EXPENSE:${cityId}`)).toBe(-10_000);
+    expect(await settlement(e.tripId)).toMatchObject({ fareMinor: 40_000n, earningsMinor: 33_100n, promoDiscountMinor: 10_000n });
+    expect(await postingsSum(e.tripId)).toBe(0);
+    const fm = await h.financeManager();
+    const staffView = await h.ok<{ settlements: unknown[] }>(h.req("GET", `/api/payments/trips/${e.tripId}`, fm));
+    expect(staffView.settlements[0]).toMatchObject({ fareMinor: 40_000, promoDiscountMinor: 10_000, earningsMinor: 33_100 });
+  });
+
+  it("a promo covering the whole fare: nothing is charged, the trip settles at once", async () => {
+    const d = uuid();
+    const cityId = city();
+    const e = { ...h.completed({ driverId: d, fareMinor: 40_000, paymentMethod: "MOBILE_MONEY", cityId }), promoDiscountMinor: 55_000 };
+    expect(await h.c.payments.onTripCompleted(e)).toBeNull();
+    expect(await h.c.db.payment.count({ where: { tripId: e.tripId } })).toBe(0);
+    expect(await h.balanceOf("INDIVIDUAL", d)).toMatchObject({ balance: 33_100 });
+    expect(await h.accountBalance(`PROMO_EXPENSE:${cityId}`)).toBe(-40_000);
+    expect(await settlement(e.tripId)).toMatchObject({ promoDiscountMinor: 40_000n });
+  });
+
+  it("corporate: the company is billed fare − discount", async () => {
+    const d = uuid();
+    const org = uuid();
+    const cityId = city();
+    await h.c.payments.onTripCompleted({ ...h.completed({ driverId: d, fareMinor: 40_000, paymentMethod: "CORPORATE", billingOrgId: org, cityId }), promoDiscountMinor: 10_000 });
+    expect(await h.accountBalance(`CORPORATE_RECEIVABLE:${org}`)).toBe(-30_000);
+    expect(await h.accountBalance(`PROMO_EXPENSE:${cityId}`)).toBe(-10_000);
+    expect(await h.balanceOf("INDIVIDUAL", d)).toMatchObject({ balance: 33_100 });
+  });
+});
+
 describe("the driver's earnings summary", () => {
   it("adds up today's settlements by day; only the driver themself may read it", async () => {
     const d = uuid();
@@ -214,7 +287,29 @@ describe("top-ups (workflow 09 B–C)", () => {
 
     expect(await h.ok(h.req("POST", `/api/payments/top-ups/${t.id}/approve`, manager))).toMatchObject({ status: "SUCCEEDED" });
     expect(await h.balanceOf("INDIVIDUAL", d)).toMatchObject({ balance: 13_100 });
+
+    // listing: city support agents see their city's top-ups only; a city filter narrows finance's view
+    const ids = (r: { topUps: { id: string }[] }) => r.topUps.map((x) => x.id);
+    const here = await h.staff([{ r: "SUPPORT_AGENT", city: CITY }]);
+    expect(ids(await h.ok(h.req("GET", "/api/payments/top-ups", here)))).toContain(t.id);
+    expect(ids(await h.ok(h.req("GET", "/api/payments/top-ups", await h.staff([{ r: "SUPPORT_AGENT", city: "hawassa" }]))))).not.toContain(t.id);
+    expect((await h.req("GET", "/api/payments/top-ups?cityId=hawassa", here)).statusCode).toBe(403);
+    expect(ids(await h.ok(h.req("GET", `/api/payments/top-ups?cityId=${CITY}`, manager)))).toContain(t.id);
+    expect(ids(await h.ok(h.req("GET", "/api/payments/top-ups?cityId=hawassa", manager)))).not.toContain(t.id);
     expect(await h.accountBalance(`CASH_RECEIPTS:${CITY}`)).toBeLessThanOrEqual(-20_000);
+  });
+});
+
+describe("rider payments list", () => {
+  it("a city filter narrows the list; a city outside the person's reach is refused", async () => {
+    await h.c.payments.onTripCompleted(h.completed({ driverId: uuid(), paymentMethod: "MOBILE_MONEY", fareMinor: 30_000 }));
+    const manager = await h.financeManager();
+    const all = await h.ok<{ payments: { cityId: string }[] }>(h.req("GET", `/api/payments/payments?cityId=${CITY}`, manager));
+    expect(all.payments.length).toBeGreaterThan(0);
+    expect(all.payments.every((x) => x.cityId === CITY)).toBe(true);
+    expect((await h.ok<{ payments: unknown[] }>(h.req("GET", "/api/payments/payments?cityId=hawassa", manager))).payments).toEqual([]);
+    const hawassa = await h.staff([{ r: "SUPPORT_AGENT", city: "hawassa" }]);
+    expect((await h.req("GET", `/api/payments/payments?cityId=${CITY}`, hawassa)).statusCode).toBe(403);
   });
 });
 

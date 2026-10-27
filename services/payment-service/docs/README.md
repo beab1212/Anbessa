@@ -18,6 +18,11 @@ Port **3005**, database **`payment_service`**, Kong prefix **`/api/payments`**.
 | Refunds | Requested by one person, approved by another, sent to the provider, charged to the driver or to platform goodwill | `src/money/payments.ts` |
 | Provider adapters and simulator | telebirr, CBE Birr, Chapa: callback parsing and signature checks, plus an in-process simulator that plays each provider | `src/gateways/` |
 | Provider webhooks and reconciliation | Signed callbacks, stored and deduplicated in `webhook_event`; providers are asked again about operations whose callback never came | `src/money/webhooks.ts`, `src/jobs.ts` |
+| Balance adjustments | Manual credits and debits (goodwill, fee reversals, corrections), maker–checker with limits re-checked on approval | `src/money/adjustments.ts` |
+| Write-offs | Uncollectable debt overdue 90+ days written off as bad debt, maker–checker; dues close as `WRITTEN_OFF` | `src/money/write-offs.ts` |
+| Policy overrides | Per-balance exceptions to the city's limits for a time window, maker–checker, never overlapping | `src/money/policy-overrides.ts`, `effectivePolicyAt` in `src/money/balances.ts` |
+| Driver incentives | "N trips in a window earns Y": proposed, approved, evaluated over `trip_settlement` at period close and credited once within the budget | `src/money/incentives.ts` |
+| Corporate invoices | Monthly, per company, from its `CORPORATE_RECEIVABLE` postings; numbered, immutable, paid by bank transfer; company admins see their own | `src/money/invoices.ts` |
 | Driver earnings summary | Totals over a driver's trip settlements for today, this week, this month or a custom range | `src/money/earnings.ts` |
 | Events out | Ledger-driven events through a transactional outbox | `src/outbox/` |
 
@@ -86,6 +91,7 @@ In one screen:
 4. Owners top up by mobile money; finance records office cash and bank transfers and a second person approves.
 5. Each Monday (Addis Ababa time) a settlement batch is prepared: payout lines for positive balances and payment dues for negative ones. A different person approves the batch, and payouts go to the provider. Dues not paid to the minimum by their deadline block the balance.
 6. Background jobs retry charges, reconcile lost callbacks, mark overdue dues, expire proposals and check ledger integrity.
+7. Money controls (maker–checker): balance adjustments, write-offs of overdue debt, per-balance policy overrides for a window, driver incentives paid at period close, and corporate invoices issued monthly from each company's receivable and marked paid by bank transfer ([architecture.md](architecture.md#money-controls-adjustments-write-offs-overrides-incentives-invoices)).
 
 ## Index
 

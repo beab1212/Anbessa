@@ -5,9 +5,10 @@
 
 import { randomBytes } from "node:crypto";
 import type { Beneficiary, BalanceState } from "@ride-app/shared-types";
-import { Prisma, type Beneficiary as BeneficiaryRow, type BalancePolicy, type CommissionRule } from "../generated/prisma/client.js";
+import { Prisma, type Beneficiary as BeneficiaryRow, type BalancePolicy, type CommissionRule, type PolicyOverride } from "../generated/prisma/client.js";
 import { accountId, accounts } from "../ledger/ledger.js";
 import { writeOutbox } from "../outbox/outbox.js";
+import { applyOverride, type OverrideFields } from "./controls.js";
 import {
   balanceState, cashAllowed, DEFAULT_POLICY, DEFAULT_RULE, dueStatus, suggestedTopUp,
   type CommissionModel, type CommissionRuleLike, type PolicyLike,
@@ -31,6 +32,27 @@ export const ruleFromRow = (r: CommissionRule): CommissionRuleLike => ({
 export async function policyAt(tx: Tx, cityId: string, at: Date): Promise<PolicyLike & { validFrom: Date | null }> {
   const row = await tx.balancePolicy.findFirst({ where: { cityId, validFrom: { lte: at } }, orderBy: { validFrom: "desc" } });
   return row ? { ...policyFromRow(row), validFrom: row.validFrom } : { ...DEFAULT_POLICY, validFrom: null };
+}
+
+export const overrideFields = (o: PolicyOverride): OverrideFields => ({
+  mode: (o.mode as OverrideFields["mode"]) ?? null,
+  warningMinor: o.warningMinor === null ? null : Number(o.warningMinor),
+  cashLimitMinor: o.cashLimitMinor === null ? null : Number(o.cashLimitMinor),
+  hardLimitMinor: o.hardLimitMinor === null ? null : Number(o.hardLimitMinor),
+  prepaidMinimumMinor: o.prepaidMinimumMinor === null ? null : Number(o.prepaidMinimumMinor),
+});
+
+/**
+ * The limits a balance is held to at a time: its city's policy, with the balance's approved
+ * override in force at that time (Payment.md §13 beneficiary_policy_override) on top.
+ */
+export async function effectivePolicyAt(tx: Tx, b: { accountId: string; cityId: string }, at: Date) {
+  const city = await policyAt(tx, b.cityId, at);
+  const o = await tx.policyOverride.findFirst({
+    where: { beneficiaryAccountId: b.accountId, status: "APPROVED", validFrom: { lte: at }, validUntil: { gt: at } },
+    orderBy: { validFrom: "desc" },
+  });
+  return { ...applyOverride(city, o ? overrideFields(o) : null), override: o ? { id: o.id, validFrom: o.validFrom, validUntil: o.validUntil } : null };
 }
 
 /** The most specific commission rule valid at a time (Payment.md §7): beneficiary contract → city + vehicle type → city → default. */
@@ -99,7 +121,7 @@ export async function afterPosting(tx: Tx, beneficiaryAccountId: string, opts: {
   if (balance >= 0) await tx.paymentDue.updateMany({ where: { beneficiaryAccountId, status: { in: ["OPEN", "OVERDUE", "MIN_PAID"] } }, data: { status: "PAID" } });
 
   const overdue = (await tx.paymentDue.count({ where: { beneficiaryAccountId, status: "OVERDUE" } })) > 0;
-  const policy = await policyAt(tx, b.cityId, opts.now);
+  const policy = await effectivePolicyAt(tx, b, opts.now);
   const state = balanceState(balance, policy, overdue);
   const data: Prisma.BeneficiaryUpdateInput = {};
   if (!overdue && b.overdueSince) data.overdueSince = null;
@@ -123,7 +145,7 @@ export const maskDestination = (d: string | null) => (d ? `•••${d.replace(
 /** What an owner or finance sees about one balance. */
 export async function balanceView(tx: Tx, accountIdValue: string, now: Date) {
   const b = await tx.beneficiary.findUniqueOrThrow({ where: { accountId: accountIdValue }, include: { account: true } });
-  const policy = await policyAt(tx, b.cityId, now);
+  const policy = await effectivePolicyAt(tx, b, now);
   const dues = await tx.paymentDue.findMany({ where: { beneficiaryAccountId: b.accountId }, orderBy: { cycleEnd: "desc" }, take: 5 });
   const balance = Number(b.account.balanceMinor);
   return {
@@ -143,6 +165,8 @@ export async function balanceView(tx: Tx, accountIdValue: string, now: Date) {
       mode: policy.mode, warningMinor: policy.warningMinor, cashLimitMinor: policy.cashLimitMinor, hardLimitMinor: policy.hardLimitMinor,
       prepaidMinimumMinor: policy.prepaidMinimumMinor, minPayoutMinor: policy.minPayoutMinor, dueDays: policy.dueDays,
       builtIn: policy.validFrom === null,
+      /** an approved per-balance exception in force now */
+      override: policy.override,
     },
     dues: dues.map((d) => ({
       id: d.id, cycleEnd: d.cycleEnd.toISOString().slice(0, 10), amountMinor: Number(d.amountMinor), minimumMinor: Number(d.minimumMinor),
@@ -152,3 +176,19 @@ export async function balanceView(tx: Tx, accountIdValue: string, now: Date) {
 }
 
 export type BalanceView = Awaited<ReturnType<typeof balanceView>>;
+
+/** Who owns each balance and what it holds now, for lists of requests about balances. */
+export async function beneficiariesOf(db: { beneficiary: Tx["beneficiary"] }, accountIds: string[]) {
+  const rows = await db.beneficiary.findMany({ where: { accountId: { in: [...new Set(accountIds)] } }, include: { account: { select: { balanceMinor: true } } } });
+  return new Map(rows.map((b) => [b.accountId, {
+    beneficiary: beneficiaryOf(b), referenceCode: b.referenceCode, state: b.state as BalanceState, balanceMinor: Number(b.account.balanceMinor),
+  }]));
+}
+export type BeneficiarySummary = NonNullable<ReturnType<Awaited<ReturnType<typeof beneficiariesOf>>["get"]>>;
+
+/** The balance a request names: by account id, or by the reference code the owner quotes (ANB-…). */
+export function findBeneficiary(db: { beneficiary: Tx["beneficiary"] }, ref: { accountId?: string | undefined; referenceCode?: string | undefined }) {
+  if (ref.accountId) return db.beneficiary.findUnique({ where: { accountId: ref.accountId } });
+  if (ref.referenceCode) return db.beneficiary.findUnique({ where: { referenceCode: ref.referenceCode.trim().toUpperCase() } });
+  return Promise.resolve(null);
+}

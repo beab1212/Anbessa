@@ -1,8 +1,8 @@
 // What a driver made over a period (GET /api/payments/earnings/me): sums over their trip
-// settlements, by Addis day. Drivers see their own; fleet owners read the fleet's balance pages
-// instead (settlements there are per beneficiary, not per driver).
+// settlements, by Addis day. Drivers see their own; fleet owners see the fleet's
+// (GET /api/payments/earnings/org/:orgId: settlements where the fleet is the beneficiary).
 
-import { authorize, type Principal } from "@ride-app/shared-authz";
+import { authorize, AuthorizationError, can, type Principal } from "@ride-app/shared-authz";
 import type { Db } from "../db.js";
 import { badRequest } from "../lib/errors.js";
 
@@ -36,7 +36,7 @@ function addisDayStart(t: Date): Date {
 }
 
 /** YYYY-MM-DD in Addis time. */
-function addisDay(t: Date): string {
+export function addisDay(t: Date): string {
   return new Date(t.getTime() + ADDIS_OFFSET_MS).toISOString().slice(0, 10);
 }
 
@@ -68,6 +68,52 @@ export function periodRange(period: EarningsPeriod, now: Date, custom?: { from?:
   }
 }
 
+type SettlementRow = { purpose: string; paymentMethod: string; fareMinor: bigint; commissionMinor: bigint; vatMinor: bigint; earningsMinor: bigint; promoDiscountMinor: bigint; settledAt: Date; driverId: string | null };
+const ROW_SELECT = { purpose: true, paymentMethod: true, fareMinor: true, commissionMinor: true, vatMinor: true, earningsMinor: true, promoDiscountMinor: true, settledAt: true, driverId: true } as const;
+
+export interface DriverEarnings { driverId: string; trips: number; grossMinor: number; netMinor: number }
+
+/** Totals and per-day sums over settlements (the same arithmetic for a driver and a fleet). */
+function summarize(rows: SettlementRow[], from: Date, to: Date): EarningsSummary & { byDriver: DriverEarnings[] } {
+  const out: EarningsSummary = { from: from.toISOString(), to: to.toISOString(), trips: 0, cancellations: 0, grossMinor: 0, commissionMinor: 0, vatMinor: 0, netMinor: 0, balanceChangeMinor: 0, cashCollectedMinor: 0, byDay: [] };
+  const days = new Map<string, { trips: number; grossMinor: number; netMinor: number }>();
+  const drivers = new Map<string, DriverEarnings>();
+  for (const r of rows) {
+    const fare = Number(r.fareMinor);
+    const balanceChange = Number(r.earningsMinor);
+    // a cash trip's settlement records the debt (−commission −VAT), not what the driver made
+    const net = r.purpose === "TRIP_FARE" ? fare - Number(r.commissionMinor) - Number(r.vatMinor) : balanceChange;
+    const day = days.get(addisDay(r.settledAt)) ?? { trips: 0, grossMinor: 0, netMinor: 0 };
+    const driver = r.driverId ? (drivers.get(r.driverId) ?? { driverId: r.driverId, trips: 0, grossMinor: 0, netMinor: 0 }) : null;
+    if (r.purpose === "TRIP_FARE") {
+      out.trips++;
+      out.grossMinor += fare;
+      // a promo discount was paid by the platform, not handed over in cash
+      if (r.paymentMethod === "CASH") out.cashCollectedMinor += fare - Number(r.promoDiscountMinor);
+      day.trips++;
+      day.grossMinor += fare;
+      if (driver) {
+        driver.trips++;
+        driver.grossMinor += fare;
+      }
+    } else {
+      out.cancellations++;
+    }
+    out.commissionMinor += Number(r.commissionMinor);
+    out.vatMinor += Number(r.vatMinor);
+    out.netMinor += net;
+    out.balanceChangeMinor += balanceChange;
+    day.netMinor += net;
+    days.set(addisDay(r.settledAt), day);
+    if (driver) {
+      driver.netMinor += net;
+      drivers.set(driver.driverId, driver);
+    }
+  }
+  out.byDay = [...days.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([day, v]) => ({ day, ...v }));
+  return { ...out, byDriver: [...drivers.values()].sort((a, b) => b.grossMinor - a.grossMinor || a.driverId.localeCompare(b.driverId)) };
+}
+
 export function createEarnings(deps: { db: Db; now: () => Date }) {
   const { db } = deps;
   return {
@@ -76,35 +122,30 @@ export function createEarnings(deps: { db: Db; now: () => Date }) {
       const { from, to } = periodRange(period, deps.now(), custom);
       const rows = await db.tripSettlement.findMany({
         where: { driverId: p.userId, settledAt: { gte: from, lt: to } },
-        select: { purpose: true, paymentMethod: true, fareMinor: true, commissionMinor: true, vatMinor: true, earningsMinor: true, settledAt: true },
+        select: ROW_SELECT,
         orderBy: { settledAt: "asc" },
       });
-      const out: EarningsSummary = { from: from.toISOString(), to: to.toISOString(), trips: 0, cancellations: 0, grossMinor: 0, commissionMinor: 0, vatMinor: 0, netMinor: 0, balanceChangeMinor: 0, cashCollectedMinor: 0, byDay: [] };
-      const days = new Map<string, { trips: number; grossMinor: number; netMinor: number }>();
-      for (const r of rows) {
-        const fare = Number(r.fareMinor);
-        const balanceChange = Number(r.earningsMinor);
-        // a cash trip's settlement records the debt (−commission −VAT), not what the driver made
-        const net = r.purpose === "TRIP_FARE" ? fare - Number(r.commissionMinor) - Number(r.vatMinor) : balanceChange;
-        const day = days.get(addisDay(r.settledAt)) ?? { trips: 0, grossMinor: 0, netMinor: 0 };
-        if (r.purpose === "TRIP_FARE") {
-          out.trips++;
-          out.grossMinor += fare;
-          if (r.paymentMethod === "CASH") out.cashCollectedMinor += fare;
-          day.trips++;
-          day.grossMinor += fare;
-        } else {
-          out.cancellations++;
-        }
-        out.commissionMinor += Number(r.commissionMinor);
-        out.vatMinor += Number(r.vatMinor);
-        out.netMinor += net;
-        out.balanceChangeMinor += balanceChange;
-        day.netMinor += net;
-        days.set(addisDay(r.settledAt), day);
-      }
-      out.byDay = [...days.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([day, v]) => ({ day, ...v }));
-      return out;
+      const { byDriver: _byDriver, ...summary } = summarize(rows, from, to);
+      return summary;
+    },
+
+    /**
+     * A fleet's earnings: settlements where the fleet organisation is the beneficiary (its cars,
+     * whoever drove them), with a per-driver split. Fleet owners (earnings:read @ ORG) and finance
+     * (report:read_finance); anyone else 403.
+     */
+    async org(p: Principal, orgId: string, period: EarningsPeriod, custom?: { from?: string; to?: string }) {
+      if (!can(p, "earnings:read", { orgId }) && !can(p, "report:read_finance")) throw new AuthorizationError("earnings:read");
+      const { from, to } = periodRange(period, deps.now(), custom);
+      const b = await db.beneficiary.findUnique({ where: { type_ownerId: { type: "ORGANIZATION", ownerId: orgId } }, select: { accountId: true } });
+      const rows = b
+        ? await db.tripSettlement.findMany({
+          where: { beneficiaryAccountId: b.accountId, settledAt: { gte: from, lt: to } },
+          select: ROW_SELECT,
+          orderBy: { settledAt: "asc" },
+        })
+        : [];
+      return { orgId, ...summarize(rows, from, to) };
     },
   };
 }

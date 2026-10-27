@@ -17,6 +17,13 @@ describe("event schemas", () => {
     expect(schemas["trip.completed"].safeParse(completed({ paymentMethod: "CASH", billingType: "PERSONAL" })).success).toBe(true);
   });
 
+  it("trip.completed carries the promo discount and quote (optional; older events have neither)", () => {
+    const cash = { paymentMethod: "CASH", billingType: "PERSONAL" };
+    expect(schemas["trip.completed"].parse(completed({ ...cash, quoteId: "q_1", promoDiscountMinor: 2000 }))).toMatchObject({ quoteId: "q_1", promoDiscountMinor: 2000 });
+    expect(schemas["trip.completed"].safeParse(completed({ ...cash, promoDiscountMinor: -1 })).success).toBe(false);
+    expect(schemas["trip.completed"].safeParse(completed({ ...cash, promoDiscountMinor: 1.5 })).success).toBe(false);
+  });
+
   it("the same for a cancellation fee", () => {
     const base = { eventId: "e2", version: 1, at: new Date().toISOString(), tripId: id(), riderId: id(), cityId: "addis-ababa", by: "RIDER", reason: "CHANGED_PLANS", feeMinor: 3000, driverCompensationMinor: 2000, currency: "ETB" };
     expect(schemas["trip.cancelled"].safeParse({ ...base, paymentMethod: "CORPORATE" }).success).toBe(false);

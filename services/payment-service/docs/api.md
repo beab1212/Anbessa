@@ -39,7 +39,7 @@ Every route is registered in `src/app.ts` (health) and `src/http/routes.ts` (eve
 
 ### Idempotency
 
-Four POST routes accept an `Idempotency-Key` header (`src/lib/idempotency.ts`): `POST balances/:accountId/top-ups`, `POST payments/:id/pay`, `POST payments/:id/refunds`, `POST top-ups/manual`.
+These POST routes accept an `Idempotency-Key` header (`src/lib/idempotency.ts`): `POST balances/:accountId/top-ups`, `POST payments/:id/pay`, `POST payments/:id/refunds`, `POST top-ups/manual`, and the money controls' `POST adjustments`, `POST write-offs`, `POST policy-overrides`, `POST incentives`, `POST invoices`, `POST invoices/:id/payments`.
 
 - The key must match `^[A-Za-z0-9_-]{8,100}$` (else 400 `bad_request`). It is scoped per user (`idempotency_key` PK `(user_id, key)`).
 - The request hash is SHA-256 of `{ url, body }`.
@@ -168,6 +168,18 @@ The driver's earnings summary (`src/money/earnings.ts`). Permission `earnings:re
 
 200 `{ from, to (ISO), trips, cancellations, grossMinor, commissionMinor, vatMinor, netMinor, balanceChangeMinor, cashCollectedMinor, byDay: [{ day, trips, grossMinor, netMinor }] }`. See [architecture.md](architecture.md#driver-earnings-summary) for how each total is computed.
 
+### GET /api/payments/earnings/org/:orgId
+
+A fleet's earnings: settlements whose beneficiary is the fleet organisation (its cars, whoever drove them). `earnings` module in `src/money/earnings.ts`, same arithmetic as `earnings/me` (on cash trips `netMinor` is fare − commission − VAT, not the balance debt).
+
+| | |
+|---|---|
+| Who | `earnings:read` covering `{ orgId }` (FLEET_OWNER of that org), or `report:read_finance` (finance, auditor). Anyone else (another org, FLEET_DRIVER, CORPORATE_ADMIN, drivers, city staff) → 403 `forbidden` |
+| Params | `orgId`: uuid |
+| Query | `period`, `from`, `to` as for `earnings/me` |
+
+200 `{ orgId, from, to, trips, cancellations, grossMinor, commissionMinor, vatMinor, netMinor, balanceChangeMinor, cashCollectedMinor, byDay: [{ day, trips, grossMinor, netMinor }], byDriver: [{ driverId, trips, grossMinor, netMinor }] }`. `byDriver` is sorted by gross, largest first. A fleet with no balance account yet answers zeros. 400 `invalid_range` as for `earnings/me`.
+
 ### GET /api/payments/balances/me
 
 The caller's own (`INDIVIDUAL`) balance.
@@ -244,7 +256,7 @@ One top-up. Permission `balance:read` on its balance. 200 `TopUpView`; 404.
 
 Payments and settlements of a trip.
 
-200 `{ payments: PaymentView[], settlements: [{ purpose, paymentMethod, fareMinor, commissionMinor, vatMinor, earningsMinor, commissionRuleId, settledAt, beneficiaryAccountId }] }`.
+200 `{ payments: PaymentView[], settlements: [{ purpose, paymentMethod, fareMinor, commissionMinor, vatMinor, earningsMinor, promoDiscountMinor, commissionRuleId, settledAt, beneficiaryAccountId }] }` (`fareMinor` is the full fare; `promoDiscountMinor` is the rider's promo discount paid by the platform, 0 = none; the TRIP_FARE payment's `amountMinor` is `fareMinor − promoDiscountMinor`).
 
 - `payments` are filtered by `canSeePayment`: a `ride-app` caller sees only payments where they are the rider (`payment:read` @ SELF); staff see them with `balance:read`, `trip:read`, `refund:request` or `refund:approve` in the payment's city.
 - `settlements` are returned to `ride-admin` callers, and to the driver of the trip; riders get none.
@@ -270,6 +282,21 @@ Pay now instead of waiting for the next retry, or pay a payment that ended as a 
 ### PUT /api/payments/me/preferences
 
 Body `{ mobileMoneyProvider: string 1–30 }`; must be an enabled `MOBILE_MONEY` provider (400 `unknown_provider`). 200 `{ mobileMoneyProvider }`. Any signed-in user.
+
+### GET /api/payments/org/:orgId/payments
+
+What corporate-billed trips and cancellation fees cost a company: the postings on its `CORPORATE_RECEIVABLE:{orgId}` account (`src/money/reports.ts`), newest first.
+
+| | |
+|---|---|
+| Who | `payment:read` covering `{ orgId }` (CORPORATE_ADMIN of that org), or `report:read_finance`. Others (another org, coordinators, employees, riders, city staff) → 403 |
+| Query | `before`: the `next` cursor of a previous page (else 400 `invalid_cursor`); `limit` int 1–100, default 50 |
+
+200 `{ orgId, owedMinor, charges: OrgCharge[], next }`:
+
+- `owedMinor`: what the company owes now (minus the receivable's balance; 0 for a company never billed, which has no account).
+- `OrgCharge`: `{ id (posting id), at, kind (journal entry kind: TRIP_SETTLEMENT, CANCELLATION_FEE, …), memo, tripId | null, purpose (TRIP_FARE | CANCELLATION_FEE | null), amountMinor (positive = charged to the company), riderId, cityId, vehicleType }` (the last three from `trip_settlement`, null if there is none).
+- `next`: `<created_at in microseconds>_<posting id>` when the page is full, else null. Paging is on `(created_at, id)`, so postings in the same millisecond are neither skipped nor repeated.
 
 ---
 
@@ -310,6 +337,38 @@ Finance list, most negative first.
 
 Permission: `balance:read` in some city or everywhere; results limited to those cities; a `cityId` outside them → 403. 200 `{ total, balances: [{ accountId, beneficiary, cityId, balanceMinor, state, cashAllowed, referenceCode, overdueSince, payoutReady }] }`.
 
+### GET /api/payments/reports/daily
+
+Finance's money per Addis Ababa day (`src/money/reports.ts`, SQL aggregates).
+
+| Query | Type | Default |
+|---|---|---|
+| `cityId` | `cityId`, optional | every city |
+| `from`, `to` | `YYYY-MM-DD`, inclusive, 1–92 days (else 400 `invalid_range`) | `to` = today (Addis), `from` = `to` − 6 days |
+
+Permission `report:read_finance` (FINANCE_OFFICER, FINANCE_MANAGER, AUDITOR; `G`), else 403.
+
+200 `{ cityId | null, from, to, days: FinanceDay[], totals }`, every day present (zero-filled), oldest first. `FinanceDay`:
+
+| Field | Source and day |
+|---|---|
+| `date` | `YYYY-MM-DD` |
+| `trips`, `fareMinor`, `vatMinor` | `TRIP_FARE` settlements, by `settled_at` |
+| `commissionMinor` | trip commission **plus** the platform's share of cancellation fees |
+| `earningsMinor` | Σ `earnings_minor` of all settlements (what beneficiaries' balances moved by) |
+| `byMethod` | `{ CASH|MOBILE_MONEY|CARD|CORPORATE: { trips, fareMinor, commissionMinor, vatMinor } }` (trip fares only) |
+| `cancellationFees` | `{ count, feeMinor, commissionMinor }` from `CANCELLATION_FEE` settlements |
+| `collections` | `{ MOBILE_MONEY|CARD: { count, amountMinor } }`: rider payments captured by a provider (status `SUCCEEDED`, `PARTIALLY_REFUNDED`, `REFUNDED`), by `completed_at` |
+| `refunds` | `{ count, amountMinor }`: `SUCCEEDED` refunds by `completed_at`; city = the payment's |
+| `payouts` | `{ count, amountMinor }`: `SUCCEEDED` payout lines by `updated_at`; city = the beneficiary's |
+| `topUps` | `{ MOBILE_MONEY|OFFICE_CASH|BANK_TRANSFER: { count, amountMinor } }`: `SUCCEEDED` top-ups by `completed_at`; city = the beneficiary's |
+
+`totals` has the same fields without `date`.
+
+### GET /api/payments/reports/daily.csv
+
+Same query, permission and data. 200 `text/csv; charset=utf-8`, `content-disposition: attachment; filename="payments-<cityId|all>-<from>-<to>.csv"`, `cache-control: no-store`. CRLF lines: header, one row per day, a `total` row. Columns: `date, trips, fare_minor, commission_minor, vat_minor, earnings_minor`, `<method>_trips/_fare_minor/_commission_minor` (cash, mobile_money, card, corporate), `cancellation_fees, cancellation_fee_minor, cancellation_commission_minor`, `collected_<method>_count/_minor` (mobile_money, card), `refunds, refund_minor, payouts, payout_minor`, `topup_<channel>_count/_minor` (mobile_money, office_cash, bank_transfer). Methods or channels outside these lists get their own columns when they occur.
+
 ---
 
 ## Finance and support: payments and refunds
@@ -323,10 +382,11 @@ Staff list routes use `cityFilter`: the union of cities where the caller has `ba
 | `status` | string ≤ 30 | — |
 | `provider` | string ≤ 30 | — |
 | `tripId` | uuid | — |
+| `cityId` | city id | — |
 | `before` | date | — |
 | `limit` | int 1–100 | 50 |
 
-200 `{ payments: PaymentView[], next: ISO | null }` (newest first; `next` is the last `createdAt`).
+200 `{ payments: PaymentView[], next: ISO | null }` (newest first; `next` is the last `createdAt`). With `cityId`, only that city; it must be one of the caller's `cityFilter` cities (or the caller holds a permission everywhere), else 403 `forbidden` (`missing permission balance:read`): a city outside reach is refused, not emptied.
 
 ### GET /api/payments/payments/:id
 
@@ -387,7 +447,7 @@ Record a top-up (maker). Idempotent with `Idempotency-Key`. Permission `topup:re
 
 ### GET /api/payments/top-ups
 
-Query `status`, `channel` (strings ≤ 30). Permission: `topup:record_cash` or `topup:approve_cash`, else `balance:read`, all with no scope. 200 `{ topUps: TopUpView[] }`, newest 100. Not filtered by city.
+Query `status`, `channel` (strings ≤ 30), `cityId` (optional). Visible cities: the union of cities where the caller holds `topup:record_cash`, `topup:approve_cash` or `balance:read` (any of them everywhere → no filter; none → 403). A top-up has no city of its own: it belongs to the city of the balance it credits (`beneficiary.city_id` of its `beneficiaryAccountId`). `cityId` narrows to one city and must be within reach, else 403 `forbidden`. 200 `{ topUps: TopUpView[] }`, newest 100. Code: `list()` in `src/money/topups.ts`.
 
 ### POST /api/payments/top-ups/:id/approve and /reject
 
@@ -512,3 +572,101 @@ platform-service system page. 200 `{ pending: int, oldestAt: ISO | null }` for u
 ### GET /internal/ops/integrations
 
 platform-service system page. 200 `{ mode, providers: [{ provider, label, methods, openCharges, callbacks24h, rejected24h }], unprocessedCallbacks }`. `openCharges` counts payments in `ACTION_REQUIRED`, `RETRY_SCHEDULED` or `PENDING`.
+
+## Money controls (adjustments, write-offs, overrides, incentives)
+
+Maker–checker requests (see [architecture.md](architecture.md#money-controls-adjustments-write-offs-overrides-incentives-invoices)). Common rules:
+
+- Request routes accept `Idempotency-Key` and answer `201` with the request (`status: "PENDING_APPROVAL"`, `expiresAt` = +7 days).
+- A request names the balance by `accountId` **or** `referenceCode` (`ANB-…`, any case), never both (`400 validation_error`); an unknown balance is `404 not_found`.
+- `POST …/:id/approve | reject | cancel` with optional `{ reason }` (≤ 500 chars). `reject` needs a reason (`400 reason_required`). `cancel` is the requester's own withdrawal (anyone else `403`). The requester can't approve or reject (`403 maker_checker`). Not pending → `409 invalid_state`; past `expiresAt` → `409 expired`; raced by another decider → `409 invalid_state`. The answer is the updated request.
+- Lists return the newest 100 in the cities the caller may see (`?cityId=` outside them → `403`); `?status=` filters.
+- Rows about a balance carry `beneficiary { type, id }`, `referenceCode`, the current `balanceMinor` and `state`.
+
+### GET /api/payments/approvals/pending
+
+Any token. `{ adjustments, writeOffs, overrides, incentives }`: what waits in the cities where the caller requests or decides each kind (empty arrays otherwise). Used by the Money approvals inbox.
+
+### POST /api/payments/adjustments
+
+`adjustment:request` @ the balance's city. Body `{ accountId | referenceCode, direction: "CREDIT" | "DEBIT", amountMinor (1–100,000,000), category: "GOODWILL" | "FEE_REVERSAL" | "CORRECTION" | "LOST_ITEM_RETURN" | "OTHER", reason (5–500), ticketId?, tripId? }`. `400 limit_exceeded`: over 50,000 ETB, over 1,000 ETB for a city-only grant (support agents), or credits to this balance over 30 days above 10,000 ETB.
+
+### GET /api/payments/adjustments, GET /api/payments/adjustments/:id
+
+Lists for `adjustment:request`, `adjustment:approve` or `balance:read` (by city); `?status=&accountId=&cityId=`. One adjustment: the same, or the requester; else `404`.
+
+### POST /api/payments/adjustments/:id/approve | reject | cancel
+
+Approve: `adjustment:approve` @ city. Limits re-checked (`409 limit_exceeded`, the request stays pending). Posts the `ADJUSTMENT` entry, recomputes the state, emits `balance.adjusted`. Answer: the adjustment with `status: "EXECUTED"`, `journalEntryId`.
+
+### GET /api/payments/write-offs/candidates
+
+`writeoff:request`, `writeoff:approve` or `balance:read` (by city); `?cityId=`. `{ afterDays, candidates: [{ accountId, beneficiary, cityId, referenceCode, state, balanceMinor, overdueSince, overdueDays }] }`: balances below zero overdue at least `afterDays` (`WRITE_OFF_AFTER_DAYS`), without an open request, oldest first (200).
+
+### POST /api/payments/write-offs
+
+`writeoff:request` @ city. Body `{ accountId | referenceCode, reason }`. The amount is the whole debt now. `400 not_eligible` (not below zero, no overdue due, or overdue fewer days than required); `409 already_requested` (one open request per balance).
+
+### GET /api/payments/write-offs, GET /api/payments/write-offs/:id
+
+As for adjustments, with `writeoff:*` / `balance:read`.
+
+### POST /api/payments/write-offs/:id/approve | reject | cancel
+
+Approve: `writeoff:approve` @ city. `409 not_eligible` if no longer eligible; `409 balance_changed` if the balance isn't exactly `−amountMinor` any more (reject and ask again). Posts `WRITE_OFF`, marks open dues `WRITTEN_OFF`, recomputes the state, emits `balance.written_off`.
+
+### POST /api/payments/policy-overrides
+
+`policy_override:request` @ city. Body `{ accountId | referenceCode, mode?: "POSTPAID" | "PREPAID" | null, warningMinor?, cashLimitMinor?, hardLimitMinor? (each ≤ 0 or null), prepaidMinimumMinor? (≥ 0 or null), validFrom?: ISO | null (default now), validUntil: ISO, reason }`. Null fields keep the city's value. `400 invalid_override` (nothing set; merged limits out of order; hard limit below −10,000 ETB; window over or longer than 90 days); `409 overlap` (an approved override of the balance overlaps the window).
+
+### GET /api/payments/policy-overrides, GET /api/payments/policy-overrides/:id
+
+As for adjustments, with `policy_override:*` / `balance:read`. Each row also has `inForce` (approved and the window covers now).
+
+### POST /api/payments/policy-overrides/:id/approve | reject | cancel | revoke
+
+Approve: `policy_override:approve` @ city; limits re-checked against the city's current policy (`409 invalid_override`), overlap re-checked (`409 overlap`, also from the exclusion constraint). The state is recomputed at once when the window has started. `revoke` (`policy_override:approve`, body `{ reason }` required, 5–500): an `APPROVED` override ends now (`REVOKED`), the state is recomputed; otherwise `409 invalid_state`.
+
+### POST /api/payments/incentives
+
+`incentive:propose` @ `cityId`. Body `{ cityId, name (3–80), vehicleType?: string | null, targetTrips (1–1000), rewardMinor, budgetMinor, startsAt: ISO, endsAt: ISO, reason }`. `400 invalid_incentive`: reward over 10,000 ETB, budget below the reward or over 1,000,000 ETB, window over or longer than 31 days.
+
+### GET /api/payments/incentives, GET /api/payments/incentives/:id
+
+Lists for `incentive:propose`, `incentive:approve` or `report:read_finance` (by city); `?status=&cityId=`. One program adds `progress` (top 100 `{ driverId, beneficiaryAccountId, trips, reachedAt, reached }` for approved or closed programs) and `awards` (`{ id, driverId, accountId, trips, amountMinor, journalEntryId, createdAt }`).
+
+### POST /api/payments/incentives/:id/approve | reject | cancel
+
+Approve: `incentive:approve` @ city; terms re-checked (`409 invalid_incentive`, e.g. the window is over). Status `APPROVED`; paid by the job when `endsAt` passes (`CLOSED`, `qualifiedCount`, `awardsCount`, `spentMinor`).
+
+### GET /api/payments/incentives/me
+
+Drivers (`earnings:read` @ SELF). `?cityId=` (default `addis-ababa`). `{ incentives: [{ id, name, cityId, vehicleType, targetTrips, rewardMinor, startsAt, endsAt, status, trips, awardedMinor }] }`: approved and closed programs of the city running now, starting within 7 days, or ended within 30 days, with the caller's settled trips in the window and what they were paid.
+
+## Corporate invoices
+
+### GET /api/payments/invoices/uninvoiced?period=YYYY-MM
+
+Finance (`invoice:issue` or `report:read_finance`, unscoped). `{ period, periodStart, periodEnd, open, companies: [{ orgId, lines, totalMinor, firstAt, lastAt }] }`: companies with receivable postings in the month that aren't on an invoice yet (`open`: the month isn't over).
+
+### POST /api/payments/invoices
+
+`invoice:issue`. `Idempotency-Key` accepted. Body `{ orgId, period: "YYYY-MM" }`. `201` with the invoice and its `lines` and `payments`. `400 period_open` (the Addis Ababa month isn't over); `409 nothing_to_invoice`; `409 already_issued` (one per company per month).
+
+Invoice object: `{ id, orgId, period, number ("INV-YYYYMM-NNNNN"), periodStart, periodEnd, currency, totalMinor, lineCount, paidMinor, outstandingMinor, status: "ISSUED" | "PAID", overdue, issuedBy, issuedAt, dueAt, paidAt }`. Detail adds `lines: [{ id, at, kind, tripId, purpose, riderId, cityId, vehicleType, amountMinor }]` and `payments: [{ id, amountMinor, bankReference, createdAt, recordedBy (finance only) }]`.
+
+### GET /api/payments/invoices, GET /api/payments/invoices/:id, GET /api/payments/invoices/:id/csv
+
+Finance: `?status=ISSUED|PAID&orgId=&period=&overdue=true` (200 newest). One invoice: finance, or that company's `corporate:read_invoices` @ ORG; anyone else `404`. CSV (`text/csv`, attachment `INV-….csv`): `invoice_number,period,at,kind,trip_id,purpose,rider_id,city,vehicle_type,amount_etb` per line, then a `TOTAL` row.
+
+### POST /api/payments/invoices/:id/payments
+
+`invoice:issue`. `Idempotency-Key` accepted. Body `{ amountMinor, bankReference (3–60, [A-Za-z0-9/_.-]) }`. `201` with the invoice detail. `400 amount_exceeds_outstanding`; `409 duplicate_reference` (that bank transaction is already applied, compared upper-case); `409 invalid_state` (already paid). The last payment makes it `PAID` and emits `invoice.paid`.
+
+### GET /api/payments/org/:orgId/invoices
+
+Company account admins (`corporate:read_invoices` @ ORG) or finance; others `403`. `{ orgId, owedMinor (the receivable now, including charges not invoiced yet), invoices: [...] }` (60 newest months).
+
+### GET /api/payments/org/:orgId/invoices/:id, GET /api/payments/org/:orgId/invoices/:id/csv
+
+The same reader check; an invoice of another company is `404`.

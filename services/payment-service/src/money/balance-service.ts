@@ -24,7 +24,7 @@ export function createBalanceService(deps: { db: Db; gateways: Gateways; now?: (
     return {
       accountId: null, beneficiary: b, cityId, balanceMinor: 0, currency: "ETB", state: "OK" as BalanceState, cashAllowed: true,
       stateChangedAt: null, overdueSince: null, referenceCode: null, payoutMethod: null, suggestedTopUpMinor: suggestedTopUp(0, policy),
-      policy: { mode: policy.mode, warningMinor: policy.warningMinor, cashLimitMinor: policy.cashLimitMinor, hardLimitMinor: policy.hardLimitMinor, prepaidMinimumMinor: policy.prepaidMinimumMinor, minPayoutMinor: policy.minPayoutMinor, dueDays: policy.dueDays, builtIn: policy.validFrom === null },
+      policy: { mode: policy.mode, warningMinor: policy.warningMinor, cashLimitMinor: policy.cashLimitMinor, hardLimitMinor: policy.hardLimitMinor, prepaidMinimumMinor: policy.prepaidMinimumMinor, minPayoutMinor: policy.minPayoutMinor, dueDays: policy.dueDays, builtIn: policy.validFrom === null, override: null },
       dues: [],
     };
   }

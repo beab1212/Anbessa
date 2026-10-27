@@ -2,7 +2,7 @@
 // provider's callback credits the balance); cash at an office and bank transfers are recorded by a
 // finance officer and credited once a finance manager approves (maker–checker).
 
-import { authorize, can, type Principal } from "@ride-app/shared-authz";
+import { authorize, citiesWith, type Principal } from "@ride-app/shared-authz";
 import type { Logger } from "@ride-app/shared-utils";
 import { Prisma, type TopUp } from "../generated/prisma/client.js";
 import type { Db } from "../db.js";
@@ -167,9 +167,25 @@ export function createTopUps(deps: { db: Db; gateways: Gateways; realtime: Realt
       return topUpView(await db.topUp.findUniqueOrThrow({ where: { id } }));
     },
 
-    async list(p: Principal, q: { status?: string; channel?: string }) {
-      if (!(["topup:record_cash", "topup:approve_cash"] as const).some((perm) => can(p, perm))) authorize(p, "balance:read");
-      const rows = await db.topUp.findMany({ where: { ...(q.status ? { status: q.status } : {}), ...(q.channel ? { channel: q.channel } : {}) }, orderBy: { createdAt: "desc" }, take: 100 });
+    async list(p: Principal, q: { status?: string; channel?: string; cityId?: string }) {
+      // the cities whose top-ups this person may see: finance's cash roles and balance readers
+      const reach = new Set<string>();
+      let everywhere = false;
+      for (const perm of ["topup:record_cash", "topup:approve_cash", "balance:read"] as const) {
+        const c = citiesWith(p, perm);
+        if (c === "*") everywhere = true;
+        else c.forEach((x) => reach.add(x));
+      }
+      if (!everywhere && reach.size === 0) authorize(p, "balance:read"); // throws the usual 403
+      if (q.cityId && !everywhere && !reach.has(q.cityId)) throw forbidden("missing permission balance:read");
+      const cities = q.cityId ? [q.cityId] : everywhere ? null : [...reach];
+      // a top-up has no city of its own: it's the city of the balance it credits
+      const accountIds = cities ? (await db.beneficiary.findMany({ where: { cityId: { in: cities } }, select: { accountId: true } })).map((b) => b.accountId) : null;
+      const rows = await db.topUp.findMany({
+        where: { ...(q.status ? { status: q.status } : {}), ...(q.channel ? { channel: q.channel } : {}), ...(accountIds ? { beneficiaryAccountId: { in: accountIds } } : {}) },
+        orderBy: { createdAt: "desc" },
+        take: 100,
+      });
       return rows.map(topUpView);
     },
 

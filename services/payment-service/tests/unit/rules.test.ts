@@ -21,8 +21,23 @@ describe("settlement amounts (Payment.md §6)", () => {
   const noVat = { ...DEFAULT_POLICY, vatRateBp: 0 };
 
   it("card: the beneficiary is owed fare − commission; cash: owes the commission", () => {
-    expect(tripMoney(40_000, false, DEFAULT_RULE, noVat)).toEqual({ fareMinor: 40_000, commissionMinor: 6000, vatMinor: 0, earningsMinor: 34_000 });
-    expect(tripMoney(40_000, true, DEFAULT_RULE, noVat)).toEqual({ fareMinor: 40_000, commissionMinor: 6000, vatMinor: 0, earningsMinor: -6000 });
+    expect(tripMoney(40_000, false, DEFAULT_RULE, noVat)).toEqual({ fareMinor: 40_000, commissionMinor: 6000, vatMinor: 0, earningsMinor: 34_000, promoDiscountMinor: 0, riderPaysMinor: 40_000 });
+    expect(tripMoney(40_000, true, DEFAULT_RULE, noVat)).toEqual({ fareMinor: 40_000, commissionMinor: 6000, vatMinor: 0, earningsMinor: -6000, promoDiscountMinor: 0, riderPaysMinor: 40_000 });
+  });
+
+  it("promo: commission and earnings stay on the full fare; the rider pays fare − discount; cash drivers get the discount back", () => {
+    // card: the beneficiary is owed the same as without a promo
+    expect(tripMoney(40_000, false, DEFAULT_RULE, DEFAULT_POLICY, 10_000)).toEqual({
+      fareMinor: 40_000, commissionMinor: 6000, vatMinor: 900, earningsMinor: 33_100, promoDiscountMinor: 10_000, riderPaysMinor: 30_000,
+    });
+    // cash: the driver collected 300 ETB, so −(60 + 9) + 100 = +31 ETB
+    expect(tripMoney(40_000, true, DEFAULT_RULE, DEFAULT_POLICY, 10_000)).toMatchObject({ earningsMinor: 3100, riderPaysMinor: 30_000 });
+    // the discount is kept within 0 … fare: the rider never pays below 0
+    expect(tripMoney(40_000, false, DEFAULT_RULE, noVat, 50_000)).toMatchObject({ promoDiscountMinor: 40_000, riderPaysMinor: 0, earningsMinor: 34_000 });
+    expect(tripMoney(40_000, false, DEFAULT_RULE, noVat, -5)).toMatchObject({ promoDiscountMinor: 0, riderPaysMinor: 40_000 });
+    // the sides balance: rider + platform promo = earnings + commission + VAT (non-cash)
+    const m = tripMoney(40_000, false, DEFAULT_RULE, DEFAULT_POLICY, 7_500);
+    expect(m.riderPaysMinor + m.promoDiscountMinor).toBe(m.earningsMinor + m.commissionMinor + m.vatMinor);
   });
 
   it("VAT on the commission by default (15% of 60 = 9 ETB), or on the whole fare", () => {

@@ -26,12 +26,13 @@ export const schemas = {
     tripId: id, riderId: id, driverId: id, cityId: z.string().min(1).max(40), vehicleType: z.string().min(1).max(30), vehicleId: z.string().min(1),
     beneficiary, paymentMethod: method, billingType: z.enum(["PERSONAL", "CORPORATE"]), billingOrgId: id.optional(),
     fareMinor: minor, waitingFeeMinor: minor, currency: z.string().length(3), distanceMeters: z.number(), durationSeconds: z.number(), completedAt: z.string(),
+    quoteId: z.string().max(100).optional(), promoDiscountMinor: minor.optional(),
   }).refine(...corporateNamesOrg),
   "trip.cancelled": z.object({
     eventId: z.string().min(1), version: z.number(), at: z.string(),
     tripId: id, riderId: id, driverId: id.optional(), cityId: z.string().min(1).max(40), by: z.enum(["RIDER", "DRIVER", "SYSTEM", "STAFF"]),
     reason: z.string(), paymentMethod: method, feeMinor: minor, driverCompensationMinor: minor, beneficiary: beneficiary.optional(),
-    currency: z.string().length(3), billingOrgId: id.optional(),
+    currency: z.string().length(3), billingOrgId: id.optional(), quoteId: z.string().max(100).optional(),
   }).refine(...corporateNamesOrg),
 };
 

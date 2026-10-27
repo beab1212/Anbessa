@@ -55,6 +55,7 @@ Because `GATEWAY_MODE` has no value other than `simulated`, and `simulated` is r
 | `PAYMENT_RETRY_SECONDS` | `60,600,3600` | same | comma-separated numbers, each finite and ≥ 1 | delay before each retry of a declined charge; the list length is the number of retries. After the last one the trip is settled through a rider receivable |
 | `RECONCILE_AFTER_SECONDS` | `300` | `120` | integer ≥ 10 | open charges, top-ups, refunds and payouts older than this are queried at the provider by the 1-minute reconcile job |
 | `SETTLEMENT_SCHEDULE` | `weekly` | `weekly` | `weekly` \| `off` | `weekly`: the settlement batch is prepared on Mondays (Addis Ababa date); `off`: only `POST /api/payments/settlements/run` |
+| `WRITE_OFF_AFTER_DAYS` | `90` | `90` | integer 0–3650 | A balance below zero can be written off once its payment due has been overdue this many days (`beneficiary.overdue_since`; Payment.md Q8). Read by `src/money/write-offs.ts` |
 
 ### Production checks
 
@@ -106,3 +107,19 @@ Commission rules and balance policies are not environment variables or platform 
 | Outbox relay | every 500 ms, batches of 100 | `src/outbox/relay.ts` |
 | Simulator redelivery | 1 s, 5 s, 15 s | `src/gateways/simulator.ts` |
 | Simulator state TTL | 7 days | `src/gateways/simulator.ts` |
+
+### Money controls (constants)
+
+In `src/money/controls.ts`, checked when a request is made and again when it is approved:
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `DECISION_TTL_MS` | 7 days | an undecided adjustment, write-off, override or incentive expires |
+| `ADJUSTMENT_LIMITS.maxMinor` | 5,000,000 (50,000 ETB) | one adjustment |
+| `ADJUSTMENT_LIMITS.cityStaffMaxMinor` | 100,000 (1,000 ETB) | asked by someone whose `adjustment:request` is city-scoped only (support agents) |
+| `ADJUSTMENT_LIMITS.creditPer30DaysMinor` | 1,000,000 (10,000 ETB) | executed credits to one balance over 30 days |
+| `OVERRIDE_LIMITS.hardLimitFloorMinor` | −1,000,000 (−10,000 ETB) | no override sets the hard limit lower |
+| `OVERRIDE_LIMITS.maxDays` | 90 | longest override window |
+| `INCENTIVE_LIMITS.maxRewardMinor` / `maxBudgetMinor` | 1,000,000 / 100,000,000 | per driver / per program |
+| `INCENTIVE_LIMITS.maxDays` / `maxTarget` | 31 / 1000 | window length / trips |
+| `INVOICE_TERMS_DAYS` | 30 | invoice due date after issue |

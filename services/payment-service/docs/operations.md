@@ -44,7 +44,9 @@ The `seed:dev` script in `package.json` points at `src/dev/seed.ts`, which does 
 | `tests/unit/consumer.test.ts` | event schemas: a `CORPORATE` `trip.completed` or `trip.cancelled` without `billingOrgId` is invalid (never settled as cash); with it, or a cash trip, passes |
 | `tests/unit/gateways.test.ts` | reference round trip (with attempts), each provider's callback format read back by its adapter, tampered or wrongly signed callbacks refused, simulator auto-approval, payout delay and the `0000` failure |
 
-**Integration** (`tests/integration/payments.test.ts`): `global-setup.ts` drops and recreates `payment_service_test` (refuses a database name not ending in `_test`) and runs `prisma migrate deploy`. `harness.ts` builds the real app and container with a test clock, the in-process simulator whose callbacks are injected into the app's webhook route (signatures included), static settings, a local ES256 key set for tokens, and recorded realtime pushes. Kafka is not used: tests call `onTripCompleted` / `onTripCancelled` directly. Needs Postgres reachable at `TEST_DATABASE_URL`.
+**Integration** (`tests/integration/payments.test.ts`, `tests/integration/reports.test.ts`): `global-setup.ts` drops and recreates `payment_service_test` (refuses a database name not ending in `_test`) and runs `prisma migrate deploy`. `harness.ts` builds the real app and container with a test clock, the in-process simulator whose callbacks are injected into the app's webhook route (signatures included), static settings, a local ES256 key set for tokens, and recorded realtime pushes. Kafka is not used: tests call `onTripCompleted` / `onTripCancelled` directly. Needs Postgres reachable at `TEST_DATABASE_URL`.
+
+`reports.test.ts` covers a fleet's earnings (totals, per day and per driver, cash-trip net, other org / fleet driver / corporate admin / city staff 403, finance allowed), a company's corporate charges (`owedMinor`, newest first, keyset paging, permissions) and the finance daily report and CSV (settlements by method, fees, collections, refunds, payouts, top-ups per Addis day, city filter, `report:read_finance` only, default 7-day range). Each test uses its own city or org ids, since the database is shared by the files.
 
 | Area | Tests |
 |---|---|
@@ -121,6 +123,7 @@ No metrics endpoint or metrics library in the code (not found in code). Operatio
 | 1 min | `reconcile` | providers queried for operations open longer than `RECONCILE_AFTER_SECONDS` (50 per kind per run) |
 | 5 min | `dues-and-rules` | overdue dues (200 per run), proposal expiry, policy start recompute |
 | 10 min | `weekly-settlement` | Mondays (Addis date) with `SETTLEMENT_SCHEDULE=weekly` |
+| 5 min | `money-controls` | expire undecided adjustments / write-offs / overrides / incentives; recompute balances whose override window opened or closed; close and pay incentive programs whose window ended (20 per run) |
 | 1 h | `ledger-integrity` | |
 | 24 h | idempotency purge | first run 24 h after start |
 | 30 s | settings and authz poll | plus Redis pub/sub |
@@ -164,4 +167,23 @@ WHERE status IN ('PENDING','ACTION_REQUIRED','RETRY_SCHEDULED') ORDER BY updated
 SELECT a.code, a.balance_minor, b.state FROM beneficiary b JOIN ledger_account a ON a.id = b.account_id WHERE b.owner_id = '<uuid>';
 SELECT p.created_at, p.amount_minor, e.kind, e.memo FROM posting p JOIN journal_entry e ON e.id = p.journal_entry_id
 WHERE p.account_id = '<account uuid>' ORDER BY p.created_at DESC LIMIT 20;
+```
+
+### Money controls
+
+| Symptom | Where to look |
+|---|---|
+| An approval answers `409 limit_exceeded` / `invalid_override` / `invalid_incentive` | the limits are re-checked on approval (`src/money/controls.ts`); the request stays pending, reject it with the message as the reason |
+| A write-off approval answers `409 balance_changed` | money moved on the balance since the request; reject and ask again for the new amount |
+| A driver's state didn't change when an override started or ended | the `money-controls` job recomputes within 5 minutes; check `policy_override` (`status = 'APPROVED'`, the window) and `SELECT state FROM beneficiary WHERE account_id = …` |
+| An incentive stays `APPROVED` after its end | the job logs `incentive could not be closed`; it retries every 5 minutes. Awards are unique, so a rerun never pays twice |
+| A company says its invoice is wrong | issued invoices never change (trigger). Correct with an adjustment or a credit on the next month's receivable; `invoice_line.posting_id` shows which postings it covered |
+
+```sql
+-- what each control posted, by kind
+SELECT kind, count(*), sum(p.amount_minor) FILTER (WHERE a.kind = 'BENEFICIARY_BALANCE') AS to_balances
+FROM journal_entry je JOIN posting p ON p.journal_entry_id = je.id JOIN ledger_account a ON a.id = p.account_id
+WHERE je.kind IN ('ADJUSTMENT','WRITE_OFF','INCENTIVE','INVOICE_PAYMENT') GROUP BY kind;
+-- unpaid invoices past due
+SELECT number, org_id, total_minor - paid_minor AS outstanding, due_at FROM invoice WHERE status = 'ISSUED' AND due_at < now() ORDER BY due_at;
 ```

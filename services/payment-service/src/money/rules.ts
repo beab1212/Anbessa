@@ -60,23 +60,33 @@ export function vatOn(fareMinor: number, commissionMinor: number, policy: Pick<P
 }
 
 export interface TripMoney {
+  /** the full fare: commission and VAT are computed on it, promo or not */
   fareMinor: number;
   commissionMinor: number;
   vatMinor: number;
   /** what the beneficiary's balance moves by */
   earningsMinor: number;
+  /** the rider's promo discount, a platform cost (PROMO_EXPENSE); 0 = none */
+  promoDiscountMinor: number;
+  /** what the rider pays: fare − discount */
+  riderPaysMinor: number;
 }
 
 /**
  * The beneficiary's side of a trip. Digital and corporate fares reach the platform, so the
  * beneficiary is owed fare − commission − VAT; on cash trips the driver holds the fare and owes
  * commission + VAT.
+ *
+ * A promo discount (workflow 15, Payment.md §6.4) doesn't change what the driver earns: the
+ * commission is on the full fare and the platform pays the discount. On a cash trip the driver
+ * collected only fare − discount, so the platform owes them the discount on top.
  */
-export function tripMoney(fareMinor: number, cash: boolean, rule: CommissionRuleLike, policy: PolicyLike): TripMoney {
+export function tripMoney(fareMinor: number, cash: boolean, rule: CommissionRuleLike, policy: PolicyLike, discountMinor = 0): TripMoney {
+  const promoDiscountMinor = Math.min(Math.max(Math.trunc(discountMinor), 0), fareMinor);
   const commissionMinor = commissionOn(fareMinor, rule);
   const vatMinor = vatOn(fareMinor, commissionMinor, policy);
-  const earningsMinor = cash ? -(commissionMinor + vatMinor) : fareMinor - commissionMinor - vatMinor;
-  return { fareMinor, commissionMinor, vatMinor, earningsMinor };
+  const earningsMinor = cash ? promoDiscountMinor - (commissionMinor + vatMinor) : fareMinor - commissionMinor - vatMinor;
+  return { fareMinor, commissionMinor, vatMinor, earningsMinor, promoDiscountMinor, riderPaysMinor: fareMinor - promoDiscountMinor };
 }
 
 /** The balance state (Payment.md §8): overdue blocks everything; then the limits. */

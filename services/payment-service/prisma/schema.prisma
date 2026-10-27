@@ -200,6 +200,7 @@ model Payment {
   @@unique([tripId, purpose])
   @@index([status, updatedAt])
   @@index([riderId, createdAt(sort: Desc)])
+  @@index([completedAt], map: "ix_payment_completed")
   @@map("payment")
 }
 
@@ -220,12 +221,16 @@ model TripSettlement {
   commissionRuleId     String?  @map("commission_rule_id") @db.Uuid
   /// what the beneficiary's balance moved by
   earningsMinor        BigInt   @map("earnings_minor")
+  /// rider promo discount booked to PROMO_EXPENSE (0 = none); the rider paid fare − this
+  promoDiscountMinor   BigInt   @default(0) @map("promo_discount_minor")
   journalEntryId       String   @map("journal_entry_id") @db.Uuid
   settledAt            DateTime @default(now()) @map("settled_at") @db.Timestamptz
 
   @@id([tripId, purpose])
   @@index([beneficiaryAccountId, settledAt(sort: Desc)])
   @@index([driverId, settledAt(sort: Desc)], map: "trip_settlement_driver_id_settled_at_idx")
+  @@index([settledAt], map: "ix_trip_settlement_day")
+  @@index([cityId, settledAt], map: "ix_trip_settlement_city_day")
   @@map("trip_settlement")
 }
 
@@ -259,6 +264,7 @@ model Refund {
   completedAt    DateTime? @map("completed_at") @db.Timestamptz
 
   @@index([status, createdAt])
+  @@index([status, completedAt], map: "ix_refund_completed")
   @@map("refund")
 }
 
@@ -289,6 +295,7 @@ model TopUp {
 
   @@index([beneficiaryAccountId, createdAt(sort: Desc)])
   @@index([status, updatedAt])
+  @@index([status, completedAt], map: "ix_top_up_completed")
   @@map("top_up")
 }
 
@@ -406,4 +413,218 @@ model Outbox {
 
   @@index([createdAt], map: "ix_outbox_unpublished")
   @@map("outbox")
+}
+
+// ── controls: adjustments, write-offs, policy overrides, incentives, invoices ─────
+// Maker–checker requests (Payment.md §15, Role.md §11): the requester can never decide their own
+// (CHECK constraints in 20261101100000_money_controls); pending requests expire after 7 days.
+
+/// A manual credit or debit to a balance (goodwill, reversing a fee, a correction).
+model BalanceAdjustment {
+  id                   String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  beneficiaryAccountId String    @map("beneficiary_account_id") @db.Uuid
+  cityId               String    @map("city_id")
+  /// CREDIT (the balance goes up, the platform pays) | DEBIT (the balance goes down)
+  direction            String
+  amountMinor          BigInt    @map("amount_minor")
+  /// GOODWILL | FEE_REVERSAL | CORRECTION | LOST_ITEM_RETURN | OTHER
+  category             String
+  reason               String
+  ticketId             String?   @map("ticket_id")
+  tripId               String?   @map("trip_id") @db.Uuid
+  /// PENDING_APPROVAL → EXECUTED | REJECTED | CANCELLED | EXPIRED
+  status               String    @default("PENDING_APPROVAL")
+  requestedBy          String    @map("requested_by") @db.Uuid
+  decidedBy            String?   @map("decided_by") @db.Uuid
+  decisionReason       String?   @map("decision_reason")
+  journalEntryId       String?   @map("journal_entry_id") @db.Uuid
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  decidedAt            DateTime? @map("decided_at") @db.Timestamptz
+  expiresAt            DateTime  @map("expires_at") @db.Timestamptz
+
+  @@index([status, createdAt])
+  @@index([beneficiaryAccountId, createdAt(sort: Desc)])
+  @@map("balance_adjustment")
+}
+
+/// Writing off the uncollectable debt of a balance that stayed overdue (Payment.md §16, workflow 09 E).
+model WriteOff {
+  id                   String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  beneficiaryAccountId String    @map("beneficiary_account_id") @db.Uuid
+  cityId               String    @map("city_id")
+  /// the whole debt when requested; approval refuses if the balance moved since
+  amountMinor          BigInt    @map("amount_minor")
+  reason               String
+  /// PENDING_APPROVAL → EXECUTED | REJECTED | CANCELLED | EXPIRED
+  status               String    @default("PENDING_APPROVAL")
+  requestedBy          String    @map("requested_by") @db.Uuid
+  decidedBy            String?   @map("decided_by") @db.Uuid
+  decisionReason       String?   @map("decision_reason")
+  journalEntryId       String?   @map("journal_entry_id") @db.Uuid
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  decidedAt            DateTime? @map("decided_at") @db.Timestamptz
+  expiresAt            DateTime  @map("expires_at") @db.Timestamptz
+
+  @@index([status, createdAt])
+  @@index([beneficiaryAccountId, createdAt(sort: Desc)])
+  @@map("write_off")
+}
+
+/// A per-beneficiary exception to the city's balance limits for a time window (Payment.md §13).
+/// Approved overrides of one balance never overlap (exclusion constraint).
+model PolicyOverride {
+  id                   String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  beneficiaryAccountId String    @map("beneficiary_account_id") @db.Uuid
+  cityId               String    @map("city_id")
+  /// null = the city's value
+  mode                 String?
+  warningMinor         BigInt?   @map("warning_minor")
+  cashLimitMinor       BigInt?   @map("cash_limit_minor")
+  hardLimitMinor       BigInt?   @map("hard_limit_minor")
+  prepaidMinimumMinor  BigInt?   @map("prepaid_minimum_minor")
+  validFrom            DateTime  @map("valid_from") @db.Timestamptz
+  validUntil           DateTime  @map("valid_until") @db.Timestamptz
+  reason               String
+  /// PENDING_APPROVAL → APPROVED → REVOKED; or REJECTED | CANCELLED | EXPIRED
+  status               String    @default("PENDING_APPROVAL")
+  requestedBy          String    @map("requested_by") @db.Uuid
+  decidedBy            String?   @map("decided_by") @db.Uuid
+  decisionReason       String?   @map("decision_reason")
+  revokedBy            String?   @map("revoked_by") @db.Uuid
+  revokedAt            DateTime? @map("revoked_at") @db.Timestamptz
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  decidedAt            DateTime? @map("decided_at") @db.Timestamptz
+  expiresAt            DateTime  @map("expires_at") @db.Timestamptz
+
+  @@index([status, createdAt])
+  @@index([beneficiaryAccountId, validFrom])
+  @@map("policy_override")
+}
+
+/// A driver incentive ("N trips in city X between two dates earns Y"), proposed and approved
+/// (workflow 15 E). Evaluated once its window closes; each qualifying driver is credited once.
+model IncentiveProgram {
+  id             String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  cityId         String    @map("city_id")
+  name           String
+  /// null = any vehicle type
+  vehicleType    String?   @map("vehicle_type")
+  targetTrips    Int       @map("target_trips")
+  rewardMinor    BigInt    @map("reward_minor")
+  /// the most the program may pay in total
+  budgetMinor    BigInt    @map("budget_minor")
+  startsAt       DateTime  @map("starts_at") @db.Timestamptz
+  endsAt         DateTime  @map("ends_at") @db.Timestamptz
+  reason         String
+  /// PENDING_APPROVAL → APPROVED → CLOSED; or REJECTED | CANCELLED | EXPIRED
+  status         String    @default("PENDING_APPROVAL")
+  proposedBy     String    @map("proposed_by") @db.Uuid
+  decidedBy      String?   @map("decided_by") @db.Uuid
+  decisionReason String?   @map("decision_reason")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  decidedAt      DateTime? @map("decided_at") @db.Timestamptz
+  expiresAt      DateTime  @map("expires_at") @db.Timestamptz
+  closedAt       DateTime? @map("closed_at") @db.Timestamptz
+  /// drivers who reached the target (some may be over budget)
+  qualifiedCount Int       @default(0) @map("qualified_count")
+  awardsCount    Int       @default(0) @map("awards_count")
+  spentMinor     BigInt    @default(0) @map("spent_minor")
+
+  awards IncentiveAward[]
+
+  @@index([status, endsAt])
+  @@index([cityId, startsAt])
+  @@map("incentive_program")
+}
+
+model IncentiveAward {
+  id                   String           @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  programId            String           @map("program_id") @db.Uuid
+  program              IncentiveProgram @relation(fields: [programId], references: [id])
+  driverId             String           @map("driver_id") @db.Uuid
+  /// the balance the driver's trips went to (theirs, or their fleet's)
+  beneficiaryAccountId String           @map("beneficiary_account_id") @db.Uuid
+  trips                Int
+  amountMinor          BigInt           @map("amount_minor")
+  journalEntryId       String           @map("journal_entry_id") @db.Uuid
+  createdAt            DateTime         @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([programId, driverId, beneficiaryAccountId])
+  @@index([beneficiaryAccountId, createdAt(sort: Desc)])
+  @@map("incentive_award")
+}
+
+/// A company's monthly invoice from its CORPORATE_RECEIVABLE account (workflow 11 D). Immutable
+/// once issued (trigger); only the payment columns move.
+model Invoice {
+  id          String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  orgId       String    @map("org_id") @db.Uuid
+  /// YYYY-MM, an Addis Ababa calendar month
+  period      String
+  /// INV-YYYYMM-NNNNN, gapless within a month
+  number      String    @unique
+  periodStart DateTime  @map("period_start") @db.Timestamptz
+  periodEnd   DateTime  @map("period_end") @db.Timestamptz
+  currency    String    @default("ETB") @db.Char(3)
+  totalMinor  BigInt    @map("total_minor")
+  lineCount   Int       @map("line_count")
+  paidMinor   BigInt    @default(0) @map("paid_minor")
+  /// ISSUED → PAID
+  status      String    @default("ISSUED")
+  issuedBy    String    @map("issued_by") @db.Uuid
+  issuedAt    DateTime  @default(now()) @map("issued_at") @db.Timestamptz
+  dueAt       DateTime  @map("due_at") @db.Timestamptz
+  paidAt      DateTime? @map("paid_at") @db.Timestamptz
+
+  lines    InvoiceLine[]
+  payments InvoicePayment[]
+
+  @@unique([orgId, period])
+  @@index([status, dueAt])
+  @@map("invoice")
+}
+
+/// One posting on the company's receivable; a posting is invoiced at most once.
+model InvoiceLine {
+  id             String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  invoiceId      String   @map("invoice_id") @db.Uuid
+  invoice        Invoice  @relation(fields: [invoiceId], references: [id])
+  postingId      String   @unique @map("posting_id") @db.Uuid
+  journalEntryId String   @map("journal_entry_id") @db.Uuid
+  kind           String
+  tripId         String?  @map("trip_id") @db.Uuid
+  purpose        String?
+  riderId        String?  @map("rider_id") @db.Uuid
+  cityId         String?  @map("city_id")
+  vehicleType    String?  @map("vehicle_type")
+  at             DateTime @db.Timestamptz
+  /// what the company owes for it (a credit is negative)
+  amountMinor    BigInt   @map("amount_minor")
+
+  @@index([invoiceId, at])
+  @@map("invoice_line")
+}
+
+/// A bank transfer applied to an invoice (receivable +X, bank clearing −X).
+model InvoicePayment {
+  id             String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  invoiceId      String   @map("invoice_id") @db.Uuid
+  invoice        Invoice  @relation(fields: [invoiceId], references: [id])
+  amountMinor    BigInt   @map("amount_minor")
+  /// the bank transaction: applied once
+  bankReference  String   @unique @map("bank_reference")
+  recordedBy     String   @map("recorded_by") @db.Uuid
+  journalEntryId String   @map("journal_entry_id") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([invoiceId])
+  @@map("invoice_payment")
+}
+
+/// The last invoice number used in a month (locked by the upsert, rolled back with a failed issue).
+model InvoiceCounter {
+  period String @id
+  last   Int
+
+  @@map("invoice_counter")
 }

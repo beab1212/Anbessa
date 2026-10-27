@@ -5,6 +5,9 @@
 //                a balance policy that just took effect recomputes its city's states
 //   every 10 min the weekly settlement, Monday 00:00 Addis Ababa (SETTLEMENT_SCHEDULE=weekly)
 //   every hour   ledger integrity (balance = Σ postings, all accounts sum to 0); logged loudly
+//   every 5 min  money controls: expire undecided adjustments, write-offs, overrides and incentives;
+//                recompute balances whose policy override window opened or closed; pay incentives
+//                whose window closed
 
 import type { Logger } from "@ride-app/shared-utils";
 import type { Container } from "./container.js";
@@ -14,6 +17,7 @@ import { addisDate } from "./money/rules.js";
 export function startJobs(c: Container, logger: Logger) {
   const timers: NodeJS.Timeout[] = [];
   let policyCheckedAt = c.now();
+  let overridesCheckedAt = c.now();
 
   function every(ms: number, name: string, fn: () => Promise<unknown>) {
     let running = false;
@@ -42,6 +46,17 @@ export function startJobs(c: Container, logger: Logger) {
     policyCheckedAt = c.now();
     const started = await c.db.balancePolicy.findMany({ where: { validFrom: { gt: since, lte: policyCheckedAt } }, select: { cityId: true } });
     for (const cityId of new Set(started.map((p) => p.cityId))) await c.ruleChanges.recomputeCity(cityId);
+  });
+
+  every(5 * 60_000, "money-controls", async () => {
+    const expired = (await c.adjustments.expire()) + (await c.writeOffs.expire()) + (await c.policyOverrides.expire()) + (await c.incentives.expire());
+    if (expired) logger.info({ expired }, "money requests expired without a decision");
+    const since = overridesCheckedAt;
+    overridesCheckedAt = c.now();
+    const recomputed = await c.policyOverrides.boundaries(since, overridesCheckedAt);
+    if (recomputed) logger.info({ recomputed }, "policy override windows opened or closed; balance states recomputed");
+    const closed = await c.incentives.closeDue();
+    if (closed) logger.info({ closed }, "incentive programs closed and paid");
   });
 
   if (c.config.SETTLEMENT_SCHEDULE === "weekly") {

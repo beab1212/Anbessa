@@ -34,8 +34,16 @@ Money modules:
 | `payouts.ts` | `createPayouts` | Weekly settlement run, batch approval, sending and reversing payouts, overdue sweep, reconciliation |
 | `rule-changes.ts` | `createRuleChanges` | Proposals, approvals and execution of commission rules and balance policies, expiry, recomputing a city's states |
 | `webhooks.ts` | `createWebhooks` | Receiving provider callbacks, routing a notice by our reference, webhook stats |
-| `earnings.ts` | `createEarnings` | The driver's earnings summary |
+| `earnings.ts` | `createEarnings` | The driver's earnings summary, and a fleet's (`earnings/org/:orgId`, with a per-driver split) |
+| `reports.ts` | `createReports`, `financeReportCsv` | A company's corporate charges (`org/:orgId/payments`) and finance's daily report (`reports/daily[.csv]`) |
 | `access.ts` | functions | Ownership scopes and the permission checks shared by modules |
+| `controls.ts` | pure functions | Limits and rules of the money controls (adjustments, write-offs, overrides, incentives, invoice calendar). No I/O |
+| `adjustments.ts` | `createAdjustments` | Balance adjustments: request, decide (maker–checker), list, expire |
+| `write-offs.ts` | `createWriteOffs` | Write-off candidates, requests and decisions |
+| `policy-overrides.ts` | `createPolicyOverrides` | Per-balance limit exceptions: request, decide, revoke, window boundaries |
+| `incentives.ts` | `createIncentives` | Driver incentive programs: propose, decide, close and pay, driver progress |
+| `invoices.ts` | `createInvoices` | Corporate invoices: issue, list, company view, bank payments, CSV |
+| `reach.ts` | functions | Cities a person may list requests in, for the controls |
 
 ## How a request flows
 
@@ -82,8 +90,9 @@ sequenceDiagram
 | `RIDER_RECEIVABLE` | `RIDER_RECEIVABLE:{riderId}` | — | the rider owes the platform |
 | `CORPORATE_RECEIVABLE` | `CORPORATE_RECEIVABLE:{orgId}` | — | the company owes the platform |
 | `CASH_RECEIPTS` | `CASH_RECEIPTS:{cityId}` | — | office cash received |
-| `GOODWILL_EXPENSE` | `GOODWILL_EXPENSE` | — | refunds the platform paid for |
-| `PROMO_EXPENSE`, `BAD_DEBT_EXPENSE` | — | allowed by the CHECK constraint; no code posts to them | |
+| `GOODWILL_EXPENSE` | `GOODWILL_EXPENSE` | debit adjustments (corrections recovered) | refunds the platform paid for, credit adjustments |
+| `PROMO_EXPENSE` | `PROMO_EXPENSE:{cityId}` | — | rider promo discounts (trip settlement) and driver incentives paid |
+| `BAD_DEBT_EXPENSE` | `BAD_DEBT_EXPENSE` | — | debt written off |
 
 The sum of all accounts is always 0.
 
@@ -107,6 +116,10 @@ Journal entry kinds and idempotency keys used by the code:
 | `PAYOUT` | `payout:{payoutLineId}` | `payouts.ts` `send()` |
 | `PAYOUT_REVERSAL` | `payout-reversal:{payoutLineId}` | `payouts.ts` `failLine()` |
 | `REFUND` | `refund:{refundId}` | `payments.ts` `refundDone()` |
+| `ADJUSTMENT` | `adjustment:{adjustmentId}` | `adjustments.ts` `decide()` |
+| `WRITE_OFF` | `write-off:{writeOffId}` | `write-offs.ts` `decide()` |
+| `INCENTIVE` | `incentive:{programId}:{driverId}:{accountId}` | `incentives.ts` `close()` |
+| `INVOICE_PAYMENT` | `invoice-payment:{BANKREFERENCE}` | `invoices.ts` `recordPayment()` |
 
 **Integrity** (`integrity(db)`): lists up to 50 accounts whose cached `balance_minor` differs from the sum of their postings, and checks the sum of all `balance_minor` is 0. Run hourly by the `ledger-integrity` job (logs `LEDGER INTEGRITY CHECK FAILED` at error level) and on demand by `GET /api/payments/ledger/integrity`.
 
@@ -154,14 +167,17 @@ States are also recomputed for every beneficiary of a city when a balance policy
 
 `src/money/settlement.ts`. One journal entry per trip and purpose, plus a `trip_settlement` row (the commission snapshot) and a `trip.settled` outbox event.
 
-**Trip fare** (`settleTripFare`). `tripMoney(fare, cash, rule, policy)`: commission = `commissionOn`, VAT = `vatOn`, earnings = `fare − commission − VAT` for non-cash sources, `−(commission + VAT)` for cash.
+**Trip fare** (`settleTripFare`). `tripMoney(fare, cash, rule, policy, discount)`: commission = `commissionOn`, VAT = `vatOn` (both on the full fare), earnings = `fare − commission − VAT` for non-cash sources, `discount − (commission + VAT)` for cash; the rider pays `fare − discount`.
 
 | Source (when) | Lines |
 |---|---|
-| `CASH` (on `trip.completed`) | beneficiary `−(commission + VAT)`, commission `+commission`, VAT `+VAT` |
-| `PROVIDER` (charge captured) | clearing `−fare`, beneficiary `+earnings`, commission `+`, VAT `+` |
-| `RIDER_RECEIVABLE` (last retry failed) | rider receivable `−fare`, beneficiary `+earnings`, commission `+`, VAT `+` |
-| `CORPORATE` (`paymentMethod = CORPORATE` with `billingOrgId`, on `trip.completed`) | corporate receivable `−fare`, beneficiary `+earnings`, commission `+`, VAT `+` |
+| `CASH` (on `trip.completed`) | beneficiary `discount − (commission + VAT)`, commission `+commission`, VAT `+VAT`, promo `−discount` |
+| `PROVIDER` (charge captured) | clearing `−(fare − discount)`, promo `−discount`, beneficiary `+earnings`, commission `+`, VAT `+` |
+| `RIDER_RECEIVABLE` (last retry failed) | rider receivable `−(fare − discount)`, promo `−discount`, beneficiary `+earnings`, commission `+`, VAT `+` |
+| `CORPORATE` (`paymentMethod = CORPORATE` with `billingOrgId`, on `trip.completed`) | corporate receivable `−(fare − discount)`, promo `−discount`, beneficiary `+earnings`, commission `+`, VAT `+` |
+| `PROMO` (digital trip whose promo covers the whole fare, on `trip.completed`) | promo `−fare`, beneficiary `+earnings`, commission `+`, VAT `+` (no payment is created) |
+
+**Promo discounts** (workflow 15, Payment.md §6.4). `discount` = `trip.completed.promoDiscountMinor` (absent = 0, clamped to 0 … fare); "promo" is `PROMO_EXPENSE:{cityId}`, a zero line is dropped so promo-less trips post exactly as before. The driver's earning never depends on the promo (decision D8): the digital payment is created for `fare − discount` and keeps the full fare and the discount in its settlement facts, so the capture or the receivable settles on the full fare. `trip_settlement.promo_discount_minor` records the discount; `trip.settled` carries `promoDiscountMinor` when > 0; the earnings summary counts cash collected as `fare − discount`. Partner-funded promos are booked the same way (no partner receivable). pricing-service redeems the promo from the same `trip.completed` (`promo.redeemed`, not consumed here).
 
 A `CORPORATE` event without `billingOrgId` never reaches settlement: the consumer's schema refuses it and skips it (see [events.md](events.md)). It used to be settled as cash, charging the driver commission on money they never collected (fixed 2026-10-27).
 
@@ -283,7 +299,7 @@ The simulator (`simulator.ts`) keeps operations in Redis (`sim:*` keys, 7-day TT
 
 ## Driver earnings summary
 
-`src/money/earnings.ts`, `GET /api/payments/earnings/me`. Requires `earnings:read` @ SELF. Sums `trip_settlement` rows with `driver_id = caller` and `settled_at` in the period (Addis days, UTC+3, no DST): `today`, `week` (Monday–Sunday), `month`, or `custom` (`from`/`to` as `YYYY-MM-DD`, 1–92 days). For each trip fare: `gross += fare`, `net += fare − commission − VAT`, cash trips add to `cashCollectedMinor`; cancellation fees count as `cancellations` and add their compensation to `net`. `balanceChangeMinor` sums `earnings_minor` (negative on cash trips). `byDay` groups by Addis day. A digital trip counts on the day it was settled (captured), not the day it was driven. Fleet drivers see the settlements where they were the driver, even though the money went to the fleet's balance.
+`src/money/earnings.ts`, `GET /api/payments/earnings/me`. Requires `earnings:read` @ SELF. Sums `trip_settlement` rows with `driver_id = caller` and `settled_at` in the period (Addis days, UTC+3, no DST): `today`, `week` (Monday–Sunday), `month`, or `custom` (`from`/`to` as `YYYY-MM-DD`, 1–92 days). For each trip fare: `gross += fare`, `net += fare − commission − VAT`, cash trips add `fare − promo_discount_minor` (what the rider handed over) to `cashCollectedMinor`; cancellation fees count as `cancellations` and add their compensation to `net`. `balanceChangeMinor` sums `earnings_minor` (negative on cash trips). `byDay` groups by Addis day. A digital trip counts on the day it was settled (captured), not the day it was driven. Fleet drivers see the settlements where they were the driver, even though the money went to the fleet's balance.
 
 ## Background jobs
 
@@ -359,6 +375,64 @@ With the default matrix, payment permissions are held by:
 | `report:read_finance` | FINANCE_OFFICER (G), FINANCE_MANAGER (G), AUDITOR (G) |
 | `system:read` | SUPER_ADMIN (G), AUDITOR (G) |
 
-Since `payment:read` is checked with an owner scope only, FLEET_OWNER's and CORPORATE_ADMIN's `O` grant never matches a payment in this service.
+On rider payments `payment:read` is checked with an owner scope only, so FLEET_OWNER's and CORPORATE_ADMIN's `O` grant never matches one. The `O` grant is used by `GET /api/payments/org/:orgId/payments` (a company's corporate charges); `earnings:read` @ ORG by `GET /api/payments/earnings/org/:orgId`. Both also accept `report:read_finance`.
 
 **Other protections.** `@fastify/helmet` headers; global rate limit 300 requests/min per client IP (`trustProxy: true`, so the IP comes from `X-Forwarded-For`); JSON bodies up to 32 KB, webhook bodies up to 64 KB; payout destinations are masked in every response (`•••1234`) and never put in events; internal error details never reach the client (500 `internal_error`, logged with the request id). Audit events (`audit.recorded`) are written for payout method changes, refund requests/decisions, cash records/decisions, batch preparation/decisions and rule proposals/decisions.
+
+## Money controls: adjustments, write-offs, overrides, incentives, invoices
+
+Added by migration `20261101100000_money_controls`. Pure rules (every limit below, the override merge, the incentive award order, the invoice calendar) are in `src/money/controls.ts`; one module per feature; routes in `src/http/control-routes.ts`. They follow the refunds / top-ups / rule-changes pattern: the request is a row; a different person decides; the decision claims the row with a conditional update (`WHERE status = 'PENDING_APPROVAL' AND decided_by IS NULL`, 409 if taken) and does the money movement, the state recompute, the outbox event and `audit.recorded` in one transaction. Requester ≠ decider is checked in code (`403 maker_checker`) and by a CHECK constraint. Pending requests expire after 7 days (`DECISION_TTL_MS`; deciding an expired one answers `409 expired` and marks it `EXPIRED`; the `money-controls` job expires the rest). Request routes accept `Idempotency-Key`.
+
+| Module | Request (maker) | Decision (checker) | Money movement | Journal kind, key |
+|---|---|---|---|---|
+| `adjustments.ts` | `adjustment:request` @ the balance's city (support agents C, finance officers G) | `adjustment:approve` @ city | CREDIT: `GOODWILL_EXPENSE −X`, balance `+X`; DEBIT: balance `−X`, `GOODWILL_EXPENSE +X` | `ADJUSTMENT`, `adjustment:{id}` |
+| `write-offs.ts` | `writeoff:request` @ city | `writeoff:approve` @ city | `BAD_DEBT_EXPENSE −X`, balance `+X` | `WRITE_OFF`, `write-off:{id}` |
+| `policy-overrides.ts` | `policy_override:request` @ city (onboarding officers) | `policy_override:approve` @ city; also `revoke` | none (changes the limits the balance is held to) | — |
+| `incentives.ts` | `incentive:propose` @ city (operations managers) | `incentive:approve` @ city | at period close, per qualifying driver: `PROMO_EXPENSE:{cityId} −R`, balance `+R` | `INCENTIVE`, `incentive:{programId}:{driverId}:{accountId}` |
+| `invoices.ts` | `invoice:issue` (finance officers, G), single step | — | company payment: `PROVIDER_CLEARING:bank −X`, `CORPORATE_RECEIVABLE:{orgId} +X` | `INVOICE_PAYMENT`, `invoice-payment:{BANKREF}` |
+
+New ledger accounts (`src/ledger/ledger.ts`): `PROMO_EXPENSE:{cityId}` (kind `PROMO_EXPENSE`) and `BAD_DEBT_EXPENSE`. Adjustments use the existing `GOODWILL_EXPENSE`. Every entry runs `afterPosting` on the balance (credits pay open dues first, the state is recomputed, `balance.state_changed` if it moved).
+
+### Balance adjustments
+
+- **Limits** (`ADJUSTMENT_LIMITS`), checked on the request and **again on approval**: at most 50,000 ETB per adjustment; a requester whose only grant is city-scoped (support agents) at most 1,000 ETB; executed CREDIT adjustments to one balance over the last 30 days, this one included, at most 10,000 ETB (goodwill abuse guard). A breach on request is `400 limit_exceeded`; on approval `409 limit_exceeded` and the request stays pending (reject it).
+- Categories: `GOODWILL`, `FEE_REVERSAL`, `CORRECTION`, `LOST_ITEM_RETURN`, `OTHER`; optional `ticketId` and `tripId` for support's evidence trail.
+- Approval emits `balance.adjusted` (key beneficiary owner id).
+
+### Write-offs
+
+- **Eligibility** (`writeOffProblem`): balance < 0, and `beneficiary.overdue_since` (set when a payment due became `OVERDUE`) at least `WRITE_OFF_AFTER_DAYS` (default 90, Payment.md Q8) ago. `GET /write-offs/candidates` lists eligible balances without an open request.
+- The request is for the **whole debt** at that moment (`amount_minor = −balance`). One open request per balance (partial unique index `ux_write_off_pending`).
+- **Approval re-checks** under a `FOR UPDATE` lock on the account: still eligible (`409 not_eligible`), and the balance is exactly `−amount` (`409 balance_changed` otherwise: a payment or a trip arrived; reject and ask again).
+- Then: the entry, every open due (`OPEN`, `OVERDUE`, `MIN_PAID`) becomes `WRITTEN_OFF` **before** the state is recomputed (forgiven, not paid), the state is recomputed (balance 0, no overdue due → usually `OK`), `balance.written_off`. Blocking a driver who left is the driver account's job (`driver:suspend`), not the balance state's.
+
+### Policy overrides
+
+- A row in `policy_override` sets any of `mode`, `warning_minor`, `cash_limit_minor`, `hard_limit_minor`, `prepaid_minimum_minor` (null = the city's value) for `[valid_from, valid_until)`. `valid_from` defaults to (and is never earlier than) the request time.
+- **Effective policy** (`effectivePolicyAt` in `src/money/balances.ts`): the city's policy (`policyAt`) with the balance's `APPROVED` override in force at that time on top (`applyOverride`). Used by `afterPosting` (the state) and `balanceView` (the balance shown, which now carries `policy.override: { id, validFrom, validUntil } | null`). Settlement (VAT) and payouts (`minPayout`, `dueDays`) still use the city policy; an override never changes those.
+- **Limits** (`overrideProblem`), against the city's policy on the request and **again on approval** (the city policy may have changed): at least one field; the merged limits must be ordered hard ≤ cash ≤ warning ≤ 0; the merged hard limit not below −10,000 ETB (`OVERRIDE_LIMITS.hardLimitFloorMinor`); the window ends in the future and lasts at most 90 days.
+- **No overlap**: two `APPROVED` overrides of one balance can't overlap in time (exclusion constraint `ex_policy_override_no_overlap`, `WHERE status = 'APPROVED'`); the request and the approval check it first and answer `409 overlap`.
+- The state is recomputed in the approval transaction when the window has started, on `revoke` (finance manager, reason required; status `REVOKED`), and by the `money-controls` job for windows that opened or closed since its last run (`boundaries`).
+
+### Incentives
+
+- A program: city, name, optional vehicle type, target trips, reward per driver, total budget, `[starts_at, ends_at)`. **Limits** (`incentiveProblem`), on proposal and **again on approval**: target 1–1000; reward ≤ 10,000 ETB; reward ≤ budget ≤ 1,000,000 ETB; window ≤ 31 days and not over yet.
+- **Counting**: `trip_settlement` rows with `purpose = 'TRIP_FARE'`, the program's city (and vehicle type if set), `settled_at` in the window, grouped by `(driver_id, beneficiary_account_id)`. A digital trip counts when it was settled (captured), like the earnings summary. A driver who drove both their own car and a fleet's has two counts; each is credited to the balance its trips' money went to (the fleet's for fleet cars).
+- **Closing** (`close`, run by the `money-controls` job for `APPROVED` programs whose `ends_at` passed): locks the program row (`FOR UPDATE SKIP LOCKED`), orders the drivers who reached the target by when their target-th trip settled (first come first served), pays `floor(budget / reward)` of them, records the rest as over budget (`qualified_count − awards_count`), sets `CLOSED`, `spent_minor`, `awards_count`. Each award is unique per `(program, driver, balance)` and its journal key is unique, so a rerun pays nothing twice. Emits `incentive.awarded` per award and `audit.recorded` (`incentive:close`, actor null).
+- Drivers see running and recently closed programs in their city with their own trip count and what they were paid (`GET /incentives/me`, `earnings:read` @ SELF).
+
+### Corporate invoices
+
+- **Issue** (`invoice:issue`, `POST /invoices {orgId, period}`): only once the Addis Ababa month `period` (YYYY-MM, `addisMonth`) is over (`400 period_open`). Under a `FOR UPDATE` lock on the company's `CORPORATE_RECEIVABLE:{orgId}` account, every posting on it created in the month, except `INVOICE_PAYMENT` entries and postings already on an invoice, becomes an `invoice_line` (with the trip, purpose, rider, city and vehicle type from `trip_settlement`). Total = −Σ amounts; nothing (or a non-positive total) → `409 nothing_to_invoice`. One invoice per company per month (`409 already_issued`). Number `INV-YYYYMM-NNNNN` from `invoice_counter` (upsert + `RETURNING`, row-locked, rolled back with a failed issue, so numbers are gapless within a month). Due `issued_at + 30 days` (net 30). Emits `invoice.issued`.
+- **Immutable**: trigger `trg_invoice_immutable` refuses any change except `paid_minor`, `status`, `paid_at`, and every delete; `invoice_line` and `invoice_payment` are append-only; `invoice_line.posting_id` is unique, so a charge is invoiced at most once.
+- **Paid** (`POST /invoices/:id/payments {amountMinor, bankReference}`, `invoice:issue`): the invoice row is locked; amount ≤ outstanding (`400 amount_exceeds_outstanding`); the bank reference (upper-cased) is applied once (`409 duplicate_reference`, also the journal key); `PAID` with `paid_at` when the whole total is in, which emits `invoice.paid`. A paid invoice takes no more payments (`409 invalid_state`). Overdue is computed (`ISSUED` and `due_at < now`), not stored.
+- **Who sees what**: finance (`invoice:issue` or `report:read_finance`, G) sees every invoice and the uninvoiced queue; a company account admin (`corporate:read_invoices` @ ORG) sees only `org/:orgId/invoices` of their own company; another company's invoice answers 404 (and another company's list 403).
+- A charge posted after its month's invoice was issued belongs to the month it was posted in, so it is never lost; a company can still have charges "not invoiced yet" (`owedMinor` on the company's list includes them).
+
+### Combined pending list
+
+`GET /api/payments/approvals/pending` returns `{ adjustments, writeOffs, overrides, incentives }`, each the `PENDING_APPROVAL` rows in the cities where the caller requests or decides that kind (empty arrays otherwise), for the Money approvals inbox. Adjustment, write-off and override rows carry the balance's `beneficiary`, `referenceCode`, current `balanceMinor` and `state`.
+
+### Jobs
+
+The `money-controls` job (every 5 minutes, `src/jobs.ts`): expires undecided requests of the four kinds; recomputes the state of balances whose approved override window opened or closed since the last run; closes and pays incentive programs whose window has ended (20 per run; a failing program is logged and retried next run).

@@ -6,6 +6,11 @@
 //   card / mobile    PROVIDER_CLEARING (captured by the provider)
 //   failed charge    RIDER_RECEIVABLE (the platform carries the risk, Payment.md Q6)
 //   corporate        CORPORATE_RECEIVABLE (invoiced monthly)
+//   promo            nothing from the rider: a promo covered the whole fare
+//
+// A promo discount D (workflow 15, Payment.md §6.4): the rider's source pays fare − D, the platform
+// pays D (PROMO_EXPENSE:<city> −D), and the beneficiary's earning stays on the full fare. On cash
+// the driver collected fare − D, so their balance gets D back on top of −(commission + VAT).
 
 import type { Beneficiary, PaymentMethod } from "@ride-app/shared-types";
 import type { Prisma } from "../generated/prisma/client.js";
@@ -20,7 +25,9 @@ export type Source =
   | { type: "CASH" }
   | { type: "PROVIDER"; provider: string }
   | { type: "RIDER_RECEIVABLE" }
-  | { type: "CORPORATE"; orgId: string };
+  | { type: "CORPORATE"; orgId: string }
+  /** a promo covered the whole fare: the rider paid nothing */
+  | { type: "PROMO" };
 
 export interface TripFareInput {
   tripId: string;
@@ -30,7 +37,10 @@ export interface TripFareInput {
   cityId: string;
   vehicleType: string;
   paymentMethod: PaymentMethod;
+  /** the full fare (commission, VAT and the driver's earning are computed on it) */
   fareMinor: number;
+  /** the rider's promo discount (0 = none): the rider pays fareMinor − this, PROMO_EXPENSE the rest */
+  promoDiscountMinor?: number;
   currency: string;
   /** the commission rule valid at this time applies (Payment.md §16) */
   at: Date;
@@ -40,6 +50,7 @@ export interface TripFareInput {
 function sourceLine(source: Source, riderId: string, amountMinor: number): Line[] {
   switch (source.type) {
     case "CASH":
+    case "PROMO":
       return [];
     case "PROVIDER":
       return [{ account: accounts.clearing(source.provider), amountMinor: -amountMinor }];
@@ -58,13 +69,14 @@ export async function settleTripFare(tx: Tx, input: TripFareInput, now: Date): P
   const b = await ensureBeneficiary(tx, input.beneficiary, input.cityId);
   const policy = await policyAt(tx, input.cityId, input.at);
   const rule = await ruleAt(tx, { cityId: input.cityId, vehicleType: input.vehicleType, beneficiaryOwnerId: input.beneficiary.id, at: input.at });
-  const money = tripMoney(input.fareMinor, input.source.type === "CASH", rule, policy);
+  const money = tripMoney(input.fareMinor, input.source.type === "CASH", rule, policy, input.promoDiscountMinor ?? 0);
 
   const posted = await post(tx, {
     kind: "TRIP_SETTLEMENT", referenceType: "trip", referenceId: input.tripId, idempotencyKey: `trip-settlement:${input.tripId}`,
-    memo: `${input.paymentMethod.toLowerCase().replace("_", " ")} trip`,
+    memo: `${input.paymentMethod.toLowerCase().replace("_", " ")} trip${money.promoDiscountMinor ? ", promo discount" : ""}`,
     lines: [
-      ...sourceLine(input.source, input.riderId, input.fareMinor),
+      ...sourceLine(input.source, input.riderId, money.riderPaysMinor),
+      { account: accounts.promo(input.cityId), amountMinor: -money.promoDiscountMinor },
       { account: { id: b.accountId }, amountMinor: money.earningsMinor },
       { account: accounts.commission(input.cityId), amountMinor: money.commissionMinor },
       { account: accounts.vat(), amountMinor: money.vatMinor },
@@ -77,7 +89,7 @@ export async function settleTripFare(tx: Tx, input: TripFareInput, now: Date): P
       tripId: input.tripId, purpose: "TRIP_FARE", paymentMethod: input.paymentMethod, cityId: input.cityId, vehicleType: input.vehicleType,
       driverId: input.driverId, riderId: input.riderId, beneficiaryAccountId: b.accountId, fareMinor: BigInt(money.fareMinor),
       commissionMinor: BigInt(money.commissionMinor), vatMinor: BigInt(money.vatMinor), commissionRuleId: rule.id,
-      earningsMinor: BigInt(money.earningsMinor), journalEntryId: posted.entryId, settledAt: now,
+      earningsMinor: BigInt(money.earningsMinor), promoDiscountMinor: BigInt(money.promoDiscountMinor), journalEntryId: posted.entryId, settledAt: now,
     },
   });
   await afterPosting(tx, b.accountId, { creditMinor: money.earningsMinor, now });
@@ -86,7 +98,7 @@ export async function settleTripFare(tx: Tx, input: TripFareInput, now: Date): P
     payload: {
       tripId: input.tripId, riderId: input.riderId, driverId: input.driverId, beneficiary: input.beneficiary, purpose: "TRIP_FARE",
       paymentMethod: input.paymentMethod, fareMinor: money.fareMinor, commissionMinor: money.commissionMinor, vatMinor: money.vatMinor,
-      earningsMinor: money.earningsMinor, currency: input.currency,
+      earningsMinor: money.earningsMinor, ...(money.promoDiscountMinor ? { promoDiscountMinor: money.promoDiscountMinor } : {}), currency: input.currency,
     },
   });
   return { ...money, entryId: posted.entryId };

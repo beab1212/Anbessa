@@ -32,6 +32,10 @@ export const accounts = {
   rider: (riderId: string): AccountSpec => ({ code: `RIDER_RECEIVABLE:${riderId}`, kind: "RIDER_RECEIVABLE", ownerType: "USER", ownerId: riderId, cityId: null }),
   cashReceipts: (cityId: string): AccountSpec => ({ code: `CASH_RECEIPTS:${cityId}`, kind: "CASH_RECEIPTS", ownerType: "PLATFORM", ownerId: null, cityId }),
   goodwill: (): AccountSpec => ({ code: "GOODWILL_EXPENSE", kind: "GOODWILL_EXPENSE", ownerType: "PLATFORM", ownerId: null, cityId: null }),
+  /** the platform's promotion cost, per city: rider promo discounts (settlement.ts) and driver incentives (workflow 15 D/E) */
+  promo: (cityId: string): AccountSpec => ({ code: `PROMO_EXPENSE:${cityId}`, kind: "PROMO_EXPENSE", ownerType: "PLATFORM", ownerId: null, cityId }),
+  /** approved write-offs of uncollectable debt (Payment.md §16) */
+  badDebt: (): AccountSpec => ({ code: "BAD_DEBT_EXPENSE", kind: "BAD_DEBT_EXPENSE", ownerType: "PLATFORM", ownerId: null, cityId: null }),
 };
 
 /** The account's id, creating it on first use (safe under concurrency). */
