@@ -86,6 +86,7 @@ function Counts({ c }: { c: Campaign }) {
 function CampaignDrawer({ id, onClose, onEdit }: { id: string; onClose: () => void; onEdit: (c: Campaign) => void }) {
   const name = useStaffNames();
   const qc = useQueryClient();
+  const me = useSession().staff.principal?.userId;
   const [later, setLater] = useState("");
   const q = useQuery({
     queryKey: ["campaign", id], queryFn: () => campaignsApi.get(id),
@@ -97,11 +98,14 @@ function CampaignDrawer({ id, onClose, onEdit }: { id: string; onClose: () => vo
   };
   const schedule = useMutation({ mutationFn: (at?: string) => campaignsApi.schedule(id, at), onSuccess: refresh });
   const cancel = useMutation({ mutationFn: () => campaignsApi.cancel(id), onSuccess: refresh });
+  const approve = useMutation({ mutationFn: () => campaignsApi.approve(id), onSuccess: refresh });
   const c = q.data;
+  // a large campaign needs a second person: never whoever wrote or scheduled it
+  const mine = !!c && (c.createdBy === me || c.updatedBy === me);
 
   return (
     <Drawer title={c?.title ?? "Campaign"} onClose={onClose} wide>
-      <Problem error={q.error ?? schedule.error ?? cancel.error} />
+      <Problem error={q.error ?? schedule.error ?? cancel.error ?? approve.error} />
       {c ? (
         <div className="stack" style={{ gap: "0.75rem" }}>
           <div className="row" style={{ gap: "0.5rem" }}><Pill tone={campaignTone(c.status)} pulse={c.status === "SENDING"}>{CAMPAIGN_LABEL[c.status]}</Pill><span className="small muted">{c.channel === "PUSH" ? "Push" : "SMS"}</span></div>
@@ -112,7 +116,8 @@ function CampaignDrawer({ id, onClose, onEdit }: { id: string; onClose: () => vo
             {c.scheduledAt ? <><dt>Scheduled</dt><dd>{dayAndTime(c.scheduledAt)}</dd></> : null}
             {c.startedAt ? <><dt>Started</dt><dd>{dayAndTime(c.startedAt)}</dd></> : null}
             {c.finishedAt ? <><dt>Finished</dt><dd>{dayAndTime(c.finishedAt)}</dd></> : null}
-            {c.status !== "DRAFT" && c.status !== "SCHEDULED" ? <><dt>Delivered</dt><dd><Counts c={c} /></dd></> : null}
+            {c.approvedBy ? <><dt>Approved</dt><dd>{name(c.approvedBy)}{c.approvedAt ? ` · ${dayAndTime(c.approvedAt)}` : ""}</dd></> : null}
+            {c.status !== "DRAFT" && c.status !== "SCHEDULED" && c.status !== "AWAITING_APPROVAL" ? <><dt>Delivered</dt><dd><Counts c={c} /></dd></> : null}
             <dt>Created</dt><dd>{name(c.createdBy)} · {dayAndTime(c.createdAt)}</dd>
           </dl>
           {c.quietNow && (c.status === "DRAFT" || c.status === "SCHEDULED" || c.status === "SENDING") ? <Notice>It's quiet hours: sending waits until morning.</Notice> : null}
@@ -129,7 +134,16 @@ function CampaignDrawer({ id, onClose, onEdit }: { id: string; onClose: () => vo
               </div>
             </>
           ) : null}
-          {c.status === "DRAFT" || c.status === "SCHEDULED" || c.status === "SENDING" ? (
+          {c.status === "AWAITING_APPROVAL" ? (
+            mine ? (
+              <Notice>This campaign reaches more than {c.approvalThreshold ?? 1000} people: another staff member with campaign rights in this city must approve it before it is sent.</Notice>
+            ) : (
+              <div className="row" style={{ gap: "0.5rem" }}>
+                <button className="btn" disabled={approve.isPending} onClick={() => window.confirm(`Approve sending to about ${c.audienceEstimate ?? c.targeted} people?`) && approve.mutate()}>Approve and send</button>
+              </div>
+            )
+          ) : null}
+          {c.status === "DRAFT" || c.status === "AWAITING_APPROVAL" || c.status === "SCHEDULED" || c.status === "SENDING" ? (
             <div><button className="btn ghost" disabled={cancel.isPending} onClick={() => window.confirm("Cancel this campaign? Messages not sent yet won't go out.") && cancel.mutate()}>Cancel campaign</button></div>
           ) : null}
         </div>

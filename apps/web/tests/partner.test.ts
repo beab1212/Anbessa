@@ -45,7 +45,8 @@ describe("company trips", () => {
   it("explains when a cancellation costs the company", () => {
     expect(cancelFeeNote({ status: "requested", times: times() }, "CHANGED_PLANS").free).toBe(true);
     const matched = { status: "matched" as const, times: times({ matchedAt: "2026-10-27T08:01:00Z" }) };
-    expect(cancelFeeNote(matched, "DRIVER_ASKED_TO_CANCEL").free).toBe(true);
+    // "the driver asked us" is charged like any cancel; support reviews it and refunds
+    expect(cancelFeeNote(matched, "DRIVER_ASKED_TO_CANCEL")).toMatchObject({ free: false, text: expect.stringMatching(/support reviews/) });
     expect(cancelFeeNote(matched, "CHANGED_PLANS").free).toBe(false);
     const arrived = { status: "en_route" as const, times: times({ matchedAt: "2026-10-27T08:01:00Z", arrivedAt: "2026-10-27T08:06:00Z" }) };
     expect(cancelFeeNote(arrived, "CHANGED_PLANS").text).toMatch(/waiting/);

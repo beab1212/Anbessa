@@ -42,3 +42,17 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
 }
 
 export const useClientConfig = () => useContext(Ctx);
+
+/**
+ * Announcements for staff: the public config never carries them, so the staff shell asks with
+ * its own token. Only fetched while a staff member is signed in.
+ */
+export function useStaffAnnouncements(enabled: boolean) {
+  return useQuery({
+    queryKey: ["client-config", "staff"],
+    enabled,
+    refetchInterval: 60_000,
+    retry: 1,
+    queryFn: async () => (await http.get<ClientConfig>("/api/platform/client-config?audience=staff", { surface: "staff" })).data.announcements,
+  });
+}

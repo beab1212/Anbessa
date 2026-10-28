@@ -86,11 +86,12 @@ export const BOOKER_CANCEL_REASONS: { code: string; label: string }[] = [
  */
 export function cancelFeeNote(t: Pick<Trip, "status" | "times">, reason: string): { free: boolean; text: string } {
   if (t.status === "requested" || !t.times.matchedAt) return { free: true, text: "Free: no driver has been assigned yet." };
-  if (reason === "DRIVER_ASKED_TO_CANCEL") return { free: true, text: "Free when the driver asked for it." };
+  // the booker's word alone doesn't waive the fee: support reviews the trip and refunds it
+  const review = reason === "DRIVER_ASKED_TO_CANCEL" ? " If the driver asked you to cancel, support reviews the trip and refunds the fee." : "";
   if (t.times.arrivedAt) {
-    return { free: false, text: "The driver is already at the pickup: the cancellation fee plus paid waiting so far is charged to the company account, and most of it goes to the driver." };
+    return { free: false, text: `The driver is already at the pickup: the cancellation fee plus paid waiting so far is charged to the company account, and most of it goes to the driver.${review}` };
   }
-  return { free: false, text: "Free within the first couple of minutes after a driver is assigned. After that a cancellation fee is charged to the company account, and most of it goes to the driver." };
+  return { free: false, text: `Free within the first couple of minutes after a driver is assigned. After that a cancellation fee is charged to the company account, and most of it goes to the driver.${review}` };
 }
 
 export const CANCELLED_BY: Record<string, string> = { RIDER: "the rider side", DRIVER: "the driver", SYSTEM: "Anbessa (no driver found)", STAFF: "Anbessa staff" };

@@ -226,9 +226,9 @@ export const PROMO_CODE = /^[A-Za-z0-9_-]{3,32}$/;
 
 // ── campaigns ─────────────────────────────────────────────────────────────────
 
-export type CampaignStatus = "DRAFT" | "SCHEDULED" | "SENDING" | "SENT" | "CANCELLED";
-export const CAMPAIGN_LABEL: Record<CampaignStatus, string> = { DRAFT: "draft", SCHEDULED: "scheduled", SENDING: "sending", SENT: "sent", CANCELLED: "cancelled" };
-export const campaignTone = (s: CampaignStatus): Tone => (s === "SENT" ? "green" : s === "SENDING" ? "blue" : s === "SCHEDULED" || s === "DRAFT" ? "amber" : "grey");
+export type CampaignStatus = "DRAFT" | "AWAITING_APPROVAL" | "SCHEDULED" | "SENDING" | "SENT" | "CANCELLED";
+export const CAMPAIGN_LABEL: Record<CampaignStatus, string> = { DRAFT: "draft", AWAITING_APPROVAL: "awaiting approval", SCHEDULED: "scheduled", SENDING: "sending", SENT: "sent", CANCELLED: "cancelled" };
+export const campaignTone = (s: CampaignStatus): Tone => (s === "SENT" ? "green" : s === "SENDING" ? "blue" : s === "SCHEDULED" || s === "DRAFT" || s === "AWAITING_APPROVAL" ? "amber" : "grey");
 
 export interface Campaign {
   id: string;
@@ -246,6 +246,10 @@ export interface Campaign {
   counts: { pending: number; sent: number; skipped: number; failed: number };
   createdBy: string;
   updatedBy: string;
+  /** large campaigns: who approved sending it (never its creator or scheduler) */
+  approvedBy?: string | null;
+  approvedAt?: string | null;
+  approvalThreshold?: number;
   createdAt: string;
   updatedAt: string;
   /** detail only, before sending starts */
@@ -265,6 +269,7 @@ export const campaignsApi = {
   update: (id: string, input: CampaignInput) => api<{ campaign: Campaign }>("staff", `/api/notifications/campaigns/${id}`, { method: "PUT", body: input }).then((r) => r.campaign),
   schedule: (id: string, at?: string) => api<{ campaign: Campaign }>("staff", `/api/notifications/campaigns/${id}/schedule`, { body: at ? { at } : {} }).then((r) => r.campaign),
   cancel: (id: string) => api<{ campaign: Campaign }>("staff", `/api/notifications/campaigns/${id}/cancel`, { body: {} }).then((r) => r.campaign),
+  approve: (id: string) => api<{ campaign: Campaign }>("staff", `/api/notifications/campaigns/${id}/approve`, { body: {} }).then((r) => r.campaign),
 };
 
 // ── who sees what (UI only; the services check again) ────────────────────────

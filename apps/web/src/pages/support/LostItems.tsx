@@ -109,7 +109,7 @@ function LostItemDrawer({ id, onClose }: { id: string; onClose: () => void }) {
             {d.messages.length === 0 ? <p className="small muted">No messages yet.</p> : null}
             {d.messages.map((m) => (
               <div key={m.id} className="card pad" style={m.authorKind === "STAFF" ? { background: "var(--accent-soft)" } : undefined}>
-                <div className="xs muted">{AUTHOR[m.authorKind] ?? m.authorKind} · {dayAndTime(m.createdAt)}</div>
+                <div className="xs muted">{AUTHOR[m.authorKind] ?? m.authorKind}{"internal" in m && m.internal ? " · internal note" : ""} · {dayAndTime(m.createdAt)}</div>
                 <p style={{ margin: "0.25rem 0 0", whiteSpace: "pre-wrap" }}>{m.body}</p>
               </div>
             ))}
@@ -125,7 +125,7 @@ function LostItemDrawer({ id, onClose }: { id: string; onClose: () => void }) {
           {canManage && LOST_NEXT[l.status].length ? (
             <section className="stack" style={{ gap: "0.5rem" }}>
               <h3 className="section-title">Change status</h3>
-              <TextArea label="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} rows={2} />
+              <TextArea label="Internal note (staff only)" value={note} onChange={(e) => setNote(e.target.value)} rows={2} hint="Only staff see it. To tell the rider and the driver, send a message above." />
               <div className="row" style={{ gap: "0.5rem", flexWrap: "wrap" }}>
                 {LOST_NEXT[l.status].map((s) => (
                   <button key={s} className={s === "RETURNED" ? "btn" : "btn secondary"} disabled={move.isPending} onClick={() => move.mutate(s)}>{LOST_LABEL[s]}</button>

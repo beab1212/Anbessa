@@ -2,7 +2,7 @@ import { useEffect, useState, type ComponentType, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Activity, BarChart3, CalendarClock, Gavel, Hexagon, Send, Tag, Tags, BadgePercent, CircleSlash, FileText, Gift, Scale, Banknote, Building2, CarFront, CheckCheck, CircleUser, LifeBuoy, PackageSearch, Siren, TextSearch, ClipboardCheck, CreditCard, Gauge, HandCoins, IdCard, KeyRound, Landmark, LayoutDashboard, LogOut, Map as MapIcon, MapPinned, Megaphone, Percent, Phone, PlugZap, ScrollText, Search, ShieldAlert, SlidersHorizontal, UserCog, Users, UsersRound, Wallet, type LucideProps } from "lucide-react";
 import { roleInfo, type Principal } from "@ride-app/shared-authz";
-import { useClientConfig } from "../lib/platform";
+import { useClientConfig, useStaffAnnouncements } from "../lib/platform";
 import type { Surface } from "../lib/api";
 import { useSession } from "../lib/session";
 import { Brand } from "./ui";
@@ -94,7 +94,8 @@ export function Shell({ surface, sections, principal, topbar }: { surface: Surfa
   const current = items.filter((i) => pathname === i.to || pathname.startsWith(`${i.to}/`)).sort((a, b) => b.to.length - a.to.length)[0];
   const config = useClientConfig();
   const audience = surface === "staff" ? "staff" : "partner";
-  const banners = (config?.announcements ?? []).filter((a) => a.audiences.includes(audience));
+  const staffNews = useStaffAnnouncements(surface === "staff").data;
+  const banners = (surface === "staff" ? staffNews ?? [] : config?.announcements ?? []).filter((a) => a.audiences.includes(audience));
   const paused = !!config?.maintenance.newTripsPaused;
   const flush = !!current?.to && ["/staff/board", "/staff/drivers", "/staff/phone"].includes(current.to);
 
