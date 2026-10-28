@@ -1,4 +1,5 @@
-// Sign-in (workflow 01): welcome, phone number, the 6-digit code. Plus the development-only
+// Sign-in (workflow 01) in the GoRide kit's look: welcome, phone number (sign up or sign in), the
+// 6-digit code, ride or drive. Plus the development-only
 // "Sign in as…" panel that lists the seed accounts (auth-service DEV_LOGIN=on).
 
 import 'dart:async';
@@ -8,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:ride_app_core/ride_app_core.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../core/config/env.dart';
 import '../../core/l10n/l10n.dart';
 import '../../core/network/providers.dart';
@@ -16,6 +18,9 @@ import '../../core/session/session_controller.dart';
 import '../bootstrap/gates.dart';
 import '../profile/account_screens.dart' show localeProvider;
 
+/// The kit's "Let's Get Started!" (p. 19) without the social buttons: the mark, the title, a
+/// line, "Sign up" and "Sign in" (both lead to the phone number; we sign in by phone and code),
+/// "Drive with Anbessa", and Privacy Policy · Terms of Service at the bottom.
 class WelcomeScreen extends ConsumerWidget {
   const WelcomeScreen({super.key});
   @override
@@ -30,7 +35,7 @@ class WelcomeScreen extends ConsumerWidget {
         child: Column(
           children: [
             Align(
-              alignment: Alignment.centerRight,
+              alignment: AlignmentDirectional.centerEnd,
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
                 child: PillTabs<String>(
@@ -42,41 +47,51 @@ class WelcomeScreen extends ConsumerWidget {
               ),
             ),
             Expanded(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
-                children: [
-                  const SizedBox(height: 24),
-                  const PopIn(child: Align(alignment: Alignment.centerLeft, child: AnbessaLogo(size: 72))),
-                  const SizedBox(height: 28),
-                  FadeSlideIn(delay: const Duration(milliseconds: 80), child: Text(l.welcomeTitle, style: AnbessaType.display.copyWith(color: c.text))),
-                  const SizedBox(height: 12),
-                  FadeSlideIn(delay: const Duration(milliseconds: 160), child: Text(l.welcomeLede, style: AnbessaType.body.copyWith(color: c.text2, fontSize: 16))),
-                  const SizedBox(height: 28),
-                  if (reason == SignOutReason.sessionEnded) Padding(padding: const EdgeInsets.only(bottom: 12), child: Notice(l.errorSessionEnded, tone: NoticeTone.info)),
-                  if (reason == SignOutReason.suspended) Padding(padding: const EdgeInsets.only(bottom: 12), child: Notice(l.errorSuspended, tone: NoticeTone.error)),
-                  if (Env.devLoginOn) ...[
-                    const SizedBox(height: 8),
-                    Theme(
-                      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-                      child: ExpansionTile(
-                        tilePadding: EdgeInsets.zero,
-                        title: Text(l.devSignInTitle, style: AnbessaType.body2.copyWith(color: c.muted)),
-                        children: const [DevSignInPanel()],
-                      ),
+              child: LayoutBuilder(
+                builder: (context, box) => SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(horizontal: AnbessaSpace.page),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(minHeight: box.maxHeight),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const SizedBox(height: 16),
+                        const PopIn(child: Center(child: AnbessaLogo(size: 76))),
+                        const SizedBox(height: 40),
+                        FadeSlideIn(delay: const Duration(milliseconds: 80), child: Semantics(header: true, child: Text(l.accLetsGetStarted, textAlign: TextAlign.center, style: AnbessaType.display.copyWith(color: c.text)))),
+                        const SizedBox(height: 12),
+                        FadeSlideIn(delay: const Duration(milliseconds: 160), child: Text(l.accLetsGetStartedLede, textAlign: TextAlign.center, style: AnbessaType.body.copyWith(color: c.text2, fontWeight: FontWeight.w400))),
+                        const SizedBox(height: 28),
+                        if (reason == SignOutReason.sessionEnded) Padding(padding: const EdgeInsets.only(bottom: 12), child: Notice(l.errorSessionEnded, tone: NoticeTone.info)),
+                        if (reason == SignOutReason.suspended) Padding(padding: const EdgeInsets.only(bottom: 12), child: Notice(l.errorSuspended, tone: NoticeTone.error)),
+                        if (Env.devLoginOn)
+                          Theme(
+                            data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                            child: ExpansionTile(
+                              tilePadding: EdgeInsets.zero,
+                              title: Text(l.devSignInTitle, style: AnbessaType.body2.copyWith(color: c.muted)),
+                              children: const [DevSignInPanel()],
+                            ),
+                          ),
+                      ],
                     ),
-                  ],
-                ],
+                  ),
+                ),
               ),
             ),
-            // the two ways in stay pinned to the bottom, whatever the text size
+            // the ways in stay pinned to the bottom, whatever the text size
             Padding(
-              padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
+              padding: const EdgeInsets.fromLTRB(AnbessaSpace.page, 8, AnbessaSpace.page, 8),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  FadeSlideIn(delay: const Duration(milliseconds: 240), child: PrimaryButton(label: l.signInWithPhone, icon: Icons.phone_android, onPressed: () => context.push(Routes.signIn))),
-                  const SizedBox(height: 10),
-                  FadeSlideIn(delay: const Duration(milliseconds: 300), child: OutlinedButton(onPressed: () => context.push('${Routes.signIn}?driver=1'), child: Text(l.driveWithAnbessa))),
+                  FadeSlideIn(delay: const Duration(milliseconds: 240), child: PillButton(label: l.accSignUp, onPressed: () => context.push('${Routes.signIn}?new=1'))),
+                  const SizedBox(height: 14),
+                  FadeSlideIn(delay: const Duration(milliseconds: 300), child: PillButton(label: l.accSignIn, variant: PillVariant.tonal, onPressed: () => context.push(Routes.signIn))),
+                  const SizedBox(height: 4),
+                  TextButton.icon(onPressed: () => context.push('${Routes.signIn}?driver=1'), icon: const Icon(Icons.directions_car_rounded, size: 20), label: Text(l.driveWithAnbessa)),
+                  const _LegalFooter(),
                 ],
               ),
             ),
@@ -87,9 +102,38 @@ class WelcomeScreen extends ConsumerWidget {
   }
 }
 
+/// Privacy Policy · Terms of Service, small and grey.
+class _LegalFooter extends StatelessWidget {
+  const _LegalFooter();
+  @override
+  Widget build(BuildContext context) {
+    final l = context.l10n;
+    final c = context.colors;
+    final style = AnbessaType.caption.copyWith(fontSize: 12, color: c.muted);
+    Widget link(String label, String path) => InkWell(
+          borderRadius: BorderRadius.circular(6),
+          onTap: () => openLegal(path),
+          child: Padding(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8), child: Text(label, style: style)),
+        );
+    return Wrap(
+      alignment: WrapAlignment.center,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [link(l.accPrivacyPolicy, 'privacy'), ExcludeSemantics(child: Text('·', style: style)), link(l.accTermsOfService, 'terms')],
+    );
+  }
+}
+
+/// Opens the privacy policy or the terms on the web.
+Future<void> openLegal(String path) => launchUrl(Uri.parse('https://${Env.appLinkHost}/$path'), mode: LaunchMode.externalApplication);
+
+/// The kit's sign up / sign in by phone (pp. 20–21): ← only, the big title, a line, "Phone
+/// Number" with the 🇪🇹 +251 prefix, the terms checkbox when signing up, "Already have an account?
+/// Sign in" (or the other way round), the main button pinned to the bottom.
 class PhoneScreen extends ConsumerStatefulWidget {
-  const PhoneScreen({super.key, this.driver = false});
+  const PhoneScreen({super.key, this.driver = false, this.signUp = false});
   final bool driver;
+  /// "Join Anbessa Today" with the terms; otherwise "Welcome Back!"
+  final bool signUp;
   @override
   ConsumerState<PhoneScreen> createState() => _PhoneScreenState();
 }
@@ -98,10 +142,17 @@ class _PhoneScreenState extends ConsumerState<PhoneScreen> {
   final _ctrl = TextEditingController();
   Object? _error;
   bool _busy = false;
+  bool _agreed = false;
   int _shake = 0;
 
   String get _digits => _ctrl.text.replaceAll(RegExp(r'\D'), '');
   bool get _plausible => toE164(_ctrl.text) != null || toE164('0$_digits') != null;
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
 
   Future<void> _send() async {
     final l = context.l10n;
@@ -131,70 +182,93 @@ class _PhoneScreenState extends ConsumerState<PhoneScreen> {
     }
   }
 
+  void _switch() {
+    final q = [if (!widget.signUp) 'new=1', if (widget.driver) 'driver=1'];
+    context.pushReplacement(q.isEmpty ? Routes.signIn : '${Routes.signIn}?${q.join('&')}');
+  }
+
   @override
   Widget build(BuildContext context) {
     final l = context.l10n;
     final c = context.colors;
+    final signUp = widget.signUp;
+    final linkStyle = AnbessaType.body.copyWith(color: c.accentText, fontWeight: FontWeight.w700);
     return Scaffold(
-      appBar: AppBar(),
-      body: SafeArea(
-        child: Column(
-          children: [
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
-                children: [
-                  Text(l.phoneTitle, style: AnbessaType.h1.copyWith(color: c.text)),
-                  const SizedBox(height: 8),
-                  Text(l.phoneLede, style: AnbessaType.body.copyWith(color: c.text2)),
-                  const SizedBox(height: 24),
-                  Shake(
-                    trigger: _shake == 0 ? null : _shake,
+      appBar: const AppTopBar(),
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(AnbessaSpace.page, 4, AnbessaSpace.page, 16),
+              children: [
+                Semantics(header: true, child: Text(signUp ? l.accJoinTitle : l.accWelcomeBackTitle, style: AnbessaType.display.copyWith(color: c.text))),
+                const SizedBox(height: 12),
+                Text(signUp ? l.accJoinLede : l.accWelcomeBackLede, style: AnbessaType.body.copyWith(color: c.text2, fontWeight: FontWeight.w400)),
+                const SizedBox(height: 28),
+                Shake(
+                  trigger: _shake == 0 ? null : _shake,
+                  child: FilledField.phone(
+                    label: l.phoneLabel,
+                    dialCode: '+251',
+                    flag: const ExcludeSemantics(child: Text('🇪🇹', style: TextStyle(fontSize: 20))),
+                    controller: _ctrl,
+                    autofocus: true,
+                    hint: '9 12 345 678',
+                    inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d\s+]')), LengthLimitingTextInputFormatter(16)],
+                    textInputAction: TextInputAction.done,
+                    style: AnbessaType.body.copyWith(fontFeatures: AnbessaType.tabular),
+                    onChanged: (_) => setState(() {}),
+                    onSubmitted: (_) => _plausible && (!signUp || _agreed) ? _send() : null,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(l.phoneLede, style: AnbessaType.caption.copyWith(color: c.muted)),
+                if (signUp) ...[
+                  const SizedBox(height: 14),
+                  MergeSemantics(
                     child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Container(
-                          height: 56,
-                          padding: const EdgeInsets.symmetric(horizontal: 14),
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(color: c.surface2, borderRadius: BorderRadius.circular(AnbessaRadius.md), border: Border.all(color: c.border)),
-                          child: Text('🇪🇹 +251', style: AnbessaType.title.copyWith(color: c.text)),
-                        ),
+                        SizedBox(width: 32, height: 32, child: Checkbox(value: _agreed, onChanged: (v) => setState(() => _agreed = v ?? false))),
                         const SizedBox(width: 10),
                         Expanded(
-                          child: TextField(
-                            controller: _ctrl,
-                            autofocus: true,
-                            keyboardType: TextInputType.phone,
-                            autofillHints: const [AutofillHints.telephoneNumber],
-                            inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d\s+]')), LengthLimitingTextInputFormatter(16)],
-                            style: AnbessaType.title.copyWith(fontSize: 20, letterSpacing: 1, fontFeatures: AnbessaType.tabular),
-                            decoration: InputDecoration(hintText: '9 12 345 678', errorText: null),
-                            onChanged: (_) => setState(() {}),
-                            onSubmitted: (_) => _send(),
+                          child: Wrap(
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              GestureDetector(onTap: () => setState(() => _agreed = !_agreed), child: Text('${l.accAgreeTo} ', style: AnbessaType.body.copyWith(color: c.text))),
+                              GestureDetector(onTap: () => openLegal('terms'), child: Text(l.accTermsAndConditions, style: linkStyle)),
+                            ],
                           ),
                         ),
                       ],
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  Text(l.phoneHint, style: AnbessaType.caption.copyWith(color: c.muted)),
-                  const SizedBox(height: 12),
-                  Problem(_error, describe: (e) => describeError(l, e)),
                 ],
-              ),
+                const SizedBox(height: 20),
+                Wrap(
+                  alignment: WrapAlignment.center,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text(signUp ? l.accHaveAccount : l.accNoAccount, style: AnbessaType.body.copyWith(color: c.text2)),
+                    TextButton(onPressed: _switch, style: TextButton.styleFrom(visualDensity: VisualDensity.compact), child: Text(signUp ? l.accSignIn : l.accSignUp, style: linkStyle)),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Problem(_error, describe: (e) => describeError(l, e)),
+              ],
             ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
-              child: PrimaryButton(label: l.sendCode, icon: Icons.arrow_forward_rounded, busy: _busy, onPressed: _plausible ? _send : null),
-            ),
-          ],
-        ),
+          ),
+          BottomActionBar(
+            child: PillButton(label: signUp ? l.accSignUp : l.accSignIn, busy: _busy, onPressed: _plausible && (!signUp || _agreed) ? _send : null),
+          ),
+        ],
       ),
     );
   }
 }
 
+/// The kit's OTP page (p. 22): "Enter OTP Code 🔐", where the code went, the boxes, "You can
+/// resend the code in 56 seconds", "Resend code". The system keyboard types the digits.
 class OtpScreen extends ConsumerStatefulWidget {
   const OtpScreen({super.key, required this.phone, this.driver = false});
   final String phone;
@@ -277,43 +351,55 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
   Widget build(BuildContext context) {
     final l = context.l10n;
     final c = context.colors;
+    final body = AnbessaType.body.copyWith(color: c.text2, fontWeight: FontWeight.w400);
+    // "You can resend the code in 56 seconds" with the number in amber
+    final countdown = l.accResendIn(_resendIn);
+    final n = '$_resendIn';
+    final at = countdown.indexOf(n);
     return Scaffold(
-      appBar: AppBar(),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
-          children: [
-            Text(l.codeTitle, style: AnbessaType.h1.copyWith(color: c.text)),
-            const SizedBox(height: 8),
-            Wrap(
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                Text(l.codeSent(formatPhone(widget.phone)), style: AnbessaType.body.copyWith(color: c.text2)),
-                TextButton(onPressed: () => context.pop(), style: TextButton.styleFrom(visualDensity: VisualDensity.compact), child: Text(l.changeNumber)),
-              ],
+      appBar: const AppTopBar(),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(AnbessaSpace.page, 4, AnbessaSpace.page, 24),
+        children: [
+          Semantics(header: true, child: Text(l.accOtpTitle, style: AnbessaType.display.copyWith(color: c.text))),
+          const SizedBox(height: 12),
+          Text(l.accOtpLede(formatPhone(widget.phone)), style: body),
+          Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: TextButton(onPressed: () => context.pop(), style: TextButton.styleFrom(padding: EdgeInsets.zero, visualDensity: VisualDensity.compact), child: Text(l.changeNumber)),
+          ),
+          const SizedBox(height: 16),
+          Shake(
+            trigger: _shake == 0 ? null : _shake,
+            child: LayoutBuilder(
+              builder: (context, box) => Center(
+                child: PinBoxes(length: 6, controller: _ctrl, error: _wrong, enabled: !_busy, onCompleted: _verify, size: ((box.maxWidth - 5 * 8) / 6).clamp(36.0, 56.0)),
+              ),
             ),
-            const SizedBox(height: 24),
-            Shake(
-              trigger: _shake == 0 ? null : _shake,
-              child: Center(child: PinBoxes(length: 6, controller: _ctrl, error: _wrong, enabled: !_busy, onCompleted: _verify, size: 48)),
+          ),
+          const SizedBox(height: 28),
+          if (_busy) const Padding(padding: EdgeInsets.only(bottom: 16), child: Center(child: SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5)))),
+          if (_elapsed >= 20 && !_busy) Padding(padding: const EdgeInsets.only(bottom: 12), child: Notice(l.sentBySmsToo, tone: NoticeTone.info)),
+          Problem(_error, describe: (e) => describeError(l, e)),
+          if (_resendIn > 0)
+            Text.rich(
+              TextSpan(children: [
+                TextSpan(text: at < 0 ? countdown : countdown.substring(0, at)),
+                if (at >= 0) TextSpan(text: n, style: TextStyle(color: c.accentText, fontWeight: FontWeight.w700, fontFeatures: AnbessaType.tabular)),
+                if (at >= 0) TextSpan(text: countdown.substring(at + n.length)),
+              ]),
+              textAlign: TextAlign.center,
+              style: body,
             ),
-            const SizedBox(height: 20),
-            if (_busy) const Center(child: SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5))),
-            if (_elapsed >= 20 && !_busy) Padding(padding: const EdgeInsets.only(bottom: 12), child: Notice(l.sentBySmsToo, tone: NoticeTone.info)),
-            Problem(_error, describe: (e) => describeError(l, e)),
-            const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                if (_resendIn > 0) ...[
-                  CountdownRing(remaining: Duration(seconds: _resendIn), total: const Duration(seconds: 30), size: 28, strokeWidth: 3, child: const SizedBox()),
-                  const SizedBox(width: 8),
-                ],
-                TextButton(onPressed: _resendIn > 0 ? null : _resend, child: Text(_resendIn > 0 ? l.resendIn(_resendIn) : l.resend)),
-              ],
+          const SizedBox(height: 8),
+          Center(
+            child: TextButton(
+              onPressed: _resendIn > 0 ? null : _resend,
+              style: TextButton.styleFrom(disabledForegroundColor: c.muted),
+              child: Text(l.accResendCode),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -391,54 +477,70 @@ class _DevSignInPanelState extends ConsumerState<DevSignInPanel> {
   }
 }
 
-class ModeSwitcherScreen extends ConsumerWidget {
+/// Ride or drive: two selectable cards (the kit's selection style) and Continue.
+class ModeSwitcherScreen extends ConsumerStatefulWidget {
   const ModeSwitcherScreen({super.key});
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ModeSwitcherScreen> createState() => _ModeSwitcherScreenState();
+}
+
+class _ModeSwitcherScreenState extends ConsumerState<ModeSwitcherScreen> {
+  AppMode _mode = AppMode.rider;
+  @override
+  Widget build(BuildContext context) {
     final l = context.l10n;
     final c = context.colors;
-    Widget option(int i, String title, String lede, AppMode mode) => FadeSlideIn(
-          delay: Duration(milliseconds: 80 * i),
-          child: Material(
-            color: c.surface,
-            borderRadius: BorderRadius.circular(AnbessaRadius.xl),
-            child: InkWell(
-              borderRadius: BorderRadius.circular(AnbessaRadius.xl),
-              onTap: () {
-                Haptics.medium();
-                ref.read(modeProvider.notifier).set(mode);
-              },
-              child: Container(
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(borderRadius: BorderRadius.circular(AnbessaRadius.xl), border: Border.all(color: c.border)),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [Text(title, style: AnbessaType.h2.copyWith(color: c.text)), const SizedBox(height: 4), Text(lede, style: AnbessaType.body2.copyWith(color: c.text2))],
-                      ),
-                    ),
-                    Icon(Icons.chevron_right_rounded, color: c.faint),
-                  ],
+    Widget option(int i, IconData icon, String title, String lede, AppMode mode) {
+      final on = _mode == mode;
+      return FadeSlideIn(
+        delay: Duration(milliseconds: 80 * i),
+        child: SelectableCard(
+          selected: on,
+          onTap: () => setState(() => _mode = mode),
+          child: Row(
+            children: [
+              CircleIcon(icon, size: 52, color: on ? c.onAccent : c.text, fill: on ? c.accent : null, borderColor: on ? c.accent : null),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [Text(title, style: AnbessaType.h2.copyWith(color: c.text)), const SizedBox(height: 4), Text(lede, style: AnbessaType.body2.copyWith(color: c.muted))],
                 ),
               ),
-            ),
+            ],
           ),
-        );
+        ),
+      );
+    }
+
     return Scaffold(
       body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const SizedBox(height: 24),
-            const AnbessaLogo(size: 48),
-            const SizedBox(height: 20),
-            Text(l.chooseModeTitle, style: AnbessaType.h1.copyWith(color: c.text)),
-            const SizedBox(height: 20),
-            option(0, l.rideTitle, l.rideLede, AppMode.rider),
-            const SizedBox(height: 12),
-            option(1, l.driveTitle, l.driveLede, AppMode.driver),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(AnbessaSpace.page, 32, AnbessaSpace.page, 16),
+                children: [
+                  const Center(child: AnbessaLogo(size: 56)),
+                  const SizedBox(height: 28),
+                  Semantics(header: true, child: Text(l.chooseModeTitle, textAlign: TextAlign.center, style: AnbessaType.display.copyWith(color: c.text))),
+                  const SizedBox(height: 28),
+                  option(0, Icons.hail_rounded, l.rideTitle, l.rideLede, AppMode.rider),
+                  const SizedBox(height: 14),
+                  option(1, Icons.directions_car_rounded, l.driveTitle, l.driveLede, AppMode.driver),
+                ],
+              ),
+            ),
+            BottomActionBar(
+              child: PillButton(
+                label: l.accContinue,
+                onPressed: () {
+                  Haptics.medium();
+                  ref.read(modeProvider.notifier).set(_mode);
+                },
+              ),
+            ),
           ],
         ),
       ),

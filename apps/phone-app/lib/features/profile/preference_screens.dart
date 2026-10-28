@@ -1,5 +1,5 @@
-// Appearance, notifications, safety (emergency contact), navigation (driver) and the companies
-// and fleets a person belongs to.
+// App Appearance, Notifications (the kit's p. 169: switches in one card), the emergency contact,
+// navigation (driver) and the companies and fleets a person belongs to, in the GoRide kit's look.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,6 +7,7 @@ import 'package:ride_app_core/ride_app_core.dart';
 import '../../core/l10n/l10n.dart';
 import '../../core/ux/haptics.dart';
 import '../maps/nav/external_nav.dart';
+import 'account_screens.dart' show AccountLede, AccountPage, OptionCard;
 import 'appearance_controller.dart';
 import 'settings_controllers.dart';
 
@@ -16,21 +17,61 @@ class AppearanceScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final l = context.l10n;
     final mode = ref.watch(themeModeProvider);
-    return Scaffold(
-      appBar: AppBar(title: Text(l.appearance)),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          SectionGroup(
+    return AccountPage(
+      title: l.accAppAppearance,
+      children: [
+        for (final (m, title, icon) in [(ThemeMode.system, l.themeSystem, Icons.brightness_auto_rounded), (ThemeMode.light, l.themeLight, Icons.light_mode_outlined), (ThemeMode.dark, l.themeDark, Icons.dark_mode_outlined)])
+          OptionCard(title: title, icon: icon, selected: mode == m, onTap: () => ref.read(themeModeProvider.notifier).set(m)),
+      ],
+    );
+  }
+}
+
+/// A kit settings row: the title (a grey line under it), a switch on the right.
+class SwitchRow extends StatelessWidget {
+  const SwitchRow({super.key, required this.title, this.subtitle, required this.value, required this.onChanged});
+  final String title;
+  final String? subtitle;
+  final bool value;
+  final ValueChanged<bool>? onChanged;
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return MergeSemantics(
+      child: InkWell(
+        onTap: onChanged == null ? null : () => onChanged!(!value),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          child: Row(
             children: [
-              for (final (m, title, icon) in [(ThemeMode.system, l.themeSystem, Icons.brightness_auto_rounded), (ThemeMode.light, l.themeLight, Icons.light_mode_rounded), (ThemeMode.dark, l.themeDark, Icons.dark_mode_rounded)])
-                ChoiceRow(title: title, leading: Icon(icon), selected: mode == m, onTap: () => ref.read(themeModeProvider.notifier).set(m)),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: AnbessaType.body.copyWith(color: c.text, fontWeight: FontWeight.w600)),
+                    if (subtitle != null) ...[const SizedBox(height: 2), Text(subtitle!, style: AnbessaType.caption.copyWith(color: c.muted))],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Switch(value: value, onChanged: onChanged),
             ],
           ),
-        ],
+        ),
       ),
     );
   }
+}
+
+/// Rows in one kit card.
+class CardColumn extends StatelessWidget {
+  const CardColumn({super.key, required this.children});
+  final List<Widget> children;
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: AppCard(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: children)),
+      );
 }
 
 class NotificationsScreen extends ConsumerWidget {
@@ -38,7 +79,6 @@ class NotificationsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l = context.l10n;
-    final c = context.colors;
     final n = ref.watch(notificationPrefsProvider);
     final h = ref.watch(hapticsSettingsProvider);
     final marketing = ref.watch(marketingPrefsProvider);
@@ -51,40 +91,33 @@ class NotificationsScreen extends ConsumerWidget {
       }
     }
 
-    return Scaffold(
-      appBar: AppBar(title: Text(l.notifications)),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          SectionGroup(
-            title: l.marketingTitle,
-            children: [
-              if (marketing.isLoading && m == null)
-                const Padding(padding: EdgeInsets.all(16), child: SkeletonList(rows: 2))
-              else if (m == null)
-                Padding(padding: const EdgeInsets.all(12), child: Problem(marketing.error, describe: (e) => describeError(l, e), onRetry: () => ref.invalidate(marketingPrefsProvider), retryLabel: l.retry))
-              else ...[
-                SettingsSwitchTile(icon: Icons.campaign_rounded, title: l.marketingPush, value: m.push, onChanged: (v) => setMarketing(push: v)),
-                SettingsSwitchTile(icon: Icons.sms_rounded, title: l.marketingSms, value: m.sms, onChanged: (v) => setMarketing(sms: v)),
-              ],
+    return AccountPage(
+      title: l.notifications,
+      children: [
+        Padding(padding: const EdgeInsets.fromLTRB(4, 4, 4, 12), child: Text(l.marketingTitle, style: AnbessaType.title.copyWith(color: context.colors.text))),
+        CardColumn(
+          children: [
+            if (marketing.isLoading && m == null)
+              const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: SkeletonList(rows: 2, avatar: false))
+            else if (m == null)
+              Padding(padding: const EdgeInsets.symmetric(vertical: 10), child: Problem(marketing.error, describe: (e) => describeError(l, e), onRetry: () => ref.invalidate(marketingPrefsProvider), retryLabel: l.retry))
+            else ...[
+              SwitchRow(title: l.marketingPush, value: m.push, onChanged: (v) => setMarketing(push: v)),
+              SwitchRow(title: l.marketingSms, value: m.sms, onChanged: (v) => setMarketing(sms: v)),
             ],
-          ),
-          Padding(padding: const EdgeInsets.fromLTRB(4, 0, 4, 16), child: Text(l.marketingLede, style: AnbessaType.caption.copyWith(color: c.muted))),
-          SectionGroup(
-            children: [
-              SettingsSwitchTile(icon: Icons.directions_car_rounded, title: l.notifTripUpdates, subtitle: l.notifTripUpdatesLede, value: n.trip, onChanged: (v) => ref.read(notificationPrefsProvider.notifier).set(trip: v)),
-              SettingsSwitchTile(icon: Icons.volume_up_rounded, title: l.notifSound, value: n.sound, onChanged: (v) => ref.read(notificationPrefsProvider.notifier).set(sound: v)),
-            ],
-          ),
-          SectionGroup(
-            children: [
-              SettingsSwitchTile(icon: Icons.vibration_rounded, title: l.notifVibrateOffer, value: h.vibrateOnOffer, onChanged: (v) => ref.read(hapticsSettingsProvider.notifier).setVibrateOnOffer(v)),
-              SettingsSwitchTile(icon: Icons.touch_app_rounded, title: l.notifHaptics, value: h.haptics, onChanged: (v) => ref.read(hapticsSettingsProvider.notifier).setHaptics(v)),
-            ],
-          ),
-          Text(l.notifOtherLocal, style: AnbessaType.caption.copyWith(color: c.muted)),
-        ],
-      ),
+          ],
+        ),
+        AccountLede(l.marketingLede),
+        CardColumn(
+          children: [
+            SwitchRow(title: l.notifTripUpdates, subtitle: l.notifTripUpdatesLede, value: n.trip, onChanged: (v) => ref.read(notificationPrefsProvider.notifier).set(trip: v)),
+            SwitchRow(title: l.notifSound, value: n.sound, onChanged: (v) => ref.read(notificationPrefsProvider.notifier).set(sound: v)),
+            SwitchRow(title: l.notifVibrateOffer, value: h.vibrateOnOffer, onChanged: (v) => ref.read(hapticsSettingsProvider.notifier).setVibrateOnOffer(v)),
+            SwitchRow(title: l.notifHaptics, value: h.haptics, onChanged: (v) => ref.read(hapticsSettingsProvider.notifier).setHaptics(v)),
+          ],
+        ),
+        AccountLede(l.notifOtherLocal),
+      ],
     );
   }
 }
@@ -115,31 +148,41 @@ class _SafetyScreenState extends ConsumerState<SafetyScreen> {
     final c = context.colors;
     final current = ref.watch(emergencyContactProvider);
     return Scaffold(
-      appBar: AppBar(title: Text(l.safety)),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
+      appBar: AppTopBar(title: l.emergencyContact),
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(l.emergencyContact, style: AnbessaType.h2.copyWith(color: c.text)),
-          const SizedBox(height: 6),
-          Text(l.emergencyContactLede, style: AnbessaType.body2.copyWith(color: c.text2)),
-          const SizedBox(height: 20),
-          TextField(controller: _name, decoration: InputDecoration(labelText: l.contactName), textCapitalization: TextCapitalization.words, onChanged: (_) => setState(() {})),
-          const SizedBox(height: 12),
-          TextField(controller: _phone, keyboardType: TextInputType.phone, decoration: InputDecoration(labelText: l.contactPhone, hintText: '+251 9…'), onChanged: (_) => setState(() {})),
-          const SizedBox(height: 12),
-          Problem(_error, describe: (e) => describeError(l, e)),
-          const SizedBox(height: 8),
-          PrimaryButton(label: l.save, onPressed: _name.text.trim().isEmpty || _phone.text.trim().isEmpty ? null : _save),
-          if (current != null)
-            TextButton(
-              onPressed: () async {
-                await ref.read(emergencyContactProvider.notifier).set(null);
-                _name.clear();
-                _phone.clear();
-                setState(() {});
-              },
-              child: Text(l.removePlace),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(AnbessaSpace.page, 4, AnbessaSpace.page, 20),
+              children: [
+                const Center(child: ResultBadge(icon: Icons.emergency_outlined, size: 64, danger: true)),
+                const SizedBox(height: 16),
+                Text(l.emergencyContactLede, textAlign: TextAlign.center, style: AnbessaType.body2.copyWith(color: c.text2, fontWeight: FontWeight.w400)),
+                const SizedBox(height: 28),
+                FilledField(label: l.contactName, hint: l.contactName, icon: Icons.person_outline_rounded, controller: _name, textCapitalization: TextCapitalization.words, onChanged: (_) => setState(() {})),
+                const SizedBox(height: 24),
+                FilledField(label: l.contactPhone, hint: '+251 9…', icon: Icons.phone_outlined, controller: _phone, keyboardType: TextInputType.phone, onChanged: (_) => setState(() {})),
+                const SizedBox(height: 12),
+                Problem(_error, describe: (e) => describeError(l, e)),
+                if (current != null)
+                  Center(
+                    child: TextButton.icon(
+                      style: TextButton.styleFrom(foregroundColor: c.danger),
+                      icon: const Icon(Icons.delete_outline_rounded),
+                      onPressed: () async {
+                        await ref.read(emergencyContactProvider.notifier).set(null);
+                        _name.clear();
+                        _phone.clear();
+                        setState(() {});
+                      },
+                      label: Text(l.removePlace),
+                    ),
+                  ),
+              ],
             ),
+          ),
+          BottomActionBar(child: PillButton(label: l.save, onPressed: _name.text.trim().isEmpty || _phone.text.trim().isEmpty ? null : _save)),
         ],
       ),
     );
@@ -151,29 +194,23 @@ class NavigationPrefsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l = context.l10n;
+    final c = context.colors;
     final p = ref.watch(navPrefsProvider);
-    return Scaffold(
-      appBar: AppBar(title: Text(l.navigation)),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          SectionGroup(
-            children: [
-              SettingsSwitchTile(icon: Icons.explore_rounded, title: l.navFollowBearing, value: p.bearing, onChanged: (v) => ref.read(navPrefsProvider.notifier).set(bearing: v)),
-              SettingsSwitchTile(icon: Icons.brightness_high_rounded, title: l.keepAwake, value: p.keepAwake, onChanged: (v) => ref.read(navPrefsProvider.notifier).set(keepAwake: v)),
-            ],
-          ),
-          SectionGroup(
-            title: l.navApp,
-            children: [
-              ChoiceRow(title: l.navAsk, leading: const Icon(Icons.help_center_rounded), selected: p.ask, onTap: () => ref.read(navPrefsProvider.notifier).set(ask: true)),
-              ChoiceRow(title: l.navGoogleMaps, leading: const Icon(Icons.map_rounded), selected: !p.ask && p.app == NavApp.google, onTap: () => ref.read(navPrefsProvider.notifier).set(ask: false, app: NavApp.google)),
-              ChoiceRow(title: l.navWaze, leading: const Icon(Icons.directions_rounded), selected: !p.ask && p.app == NavApp.waze, onTap: () => ref.read(navPrefsProvider.notifier).set(ask: false, app: NavApp.waze)),
-              ChoiceRow(title: l.navSystemMaps, leading: const Icon(Icons.navigation_rounded), selected: !p.ask && p.app == NavApp.system, onTap: () => ref.read(navPrefsProvider.notifier).set(ask: false, app: NavApp.system)),
-            ],
-          ),
-        ],
-      ),
+    return AccountPage(
+      title: l.navigation,
+      children: [
+        CardColumn(
+          children: [
+            SwitchRow(title: l.navFollowBearing, value: p.bearing, onChanged: (v) => ref.read(navPrefsProvider.notifier).set(bearing: v)),
+            SwitchRow(title: l.keepAwake, value: p.keepAwake, onChanged: (v) => ref.read(navPrefsProvider.notifier).set(keepAwake: v)),
+          ],
+        ),
+        Padding(padding: const EdgeInsets.fromLTRB(4, 8, 4, 12), child: Text(l.navApp, style: AnbessaType.title.copyWith(color: c.text))),
+        OptionCard(title: l.navAsk, icon: Icons.help_outline_rounded, selected: p.ask, onTap: () => ref.read(navPrefsProvider.notifier).set(ask: true)),
+        OptionCard(title: l.navGoogleMaps, icon: Icons.map_outlined, selected: !p.ask && p.app == NavApp.google, onTap: () => ref.read(navPrefsProvider.notifier).set(ask: false, app: NavApp.google)),
+        OptionCard(title: l.navWaze, icon: Icons.directions_outlined, selected: !p.ask && p.app == NavApp.waze, onTap: () => ref.read(navPrefsProvider.notifier).set(ask: false, app: NavApp.waze)),
+        OptionCard(title: l.navSystemMaps, icon: Icons.navigation_outlined, selected: !p.ask && p.app == NavApp.system, onTap: () => ref.read(navPrefsProvider.notifier).set(ask: false, app: NavApp.system)),
+      ],
     );
   }
 }
@@ -212,67 +249,56 @@ class _OrganizationsScreenState extends ConsumerState<OrganizationsScreen> {
     final orgs = data.value?.orgs ?? const <Organization>[];
     final invites = data.value?.invitations ?? const <OrgInvitation>[];
     final corporate = orgs.where((o) => o.isCorporate).toList();
-    return Scaffold(
-      appBar: AppBar(title: Text(l.organizations)),
-      body: RefreshIndicator(
-        onRefresh: () => ref.read(organizationsProvider.notifier).refresh(),
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            Text(l.organizationsLede, style: AnbessaType.body2.copyWith(color: c.text2)),
-            const SizedBox(height: 16),
-            Problem(_error, describe: (e) => describeError(l, e)),
-            if (data.hasError) Problem(data.error, describe: (e) => describeError(l, e), onRetry: () => ref.read(organizationsProvider.notifier).refresh(), retryLabel: l.retry),
-            if (data.isLoading && data.value == null) const SkeletonList(rows: 2),
-            if (invites.isNotEmpty)
-              SectionGroup(
-                title: l.invitations,
-                children: [
-                  for (final i in invites)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(l.invitedToJoin(i.organizationName ?? i.organizationId), style: AnbessaType.body.copyWith(fontWeight: FontWeight.w600, color: c.text)),
-                          Text(i.role, style: AnbessaType.caption.copyWith(color: c.muted)),
-                          const SizedBox(height: 8),
-                          Row(
-                            children: [
-                              Expanded(child: FilledButton(onPressed: _busy == null ? () => _answer(i, true) : null, child: Text(l.accept))),
-                              const SizedBox(width: 8),
-                              Expanded(child: OutlinedButton(onPressed: _busy == null ? () => _answer(i, false) : null, child: Text(l.decline))),
-                            ],
-                          ),
-                        ],
-                      ),
+    return AccountPage(
+      title: l.organizations,
+      onRefresh: () => ref.read(organizationsProvider.notifier).refresh(),
+      children: [
+        AccountLede(l.organizationsLede),
+        Problem(_error, describe: (e) => describeError(l, e)),
+        if (data.hasError) Problem(data.error, describe: (e) => describeError(l, e), onRetry: () => ref.read(organizationsProvider.notifier).refresh(), retryLabel: l.retry),
+        if (data.isLoading && data.value == null) const SkeletonList(rows: 2),
+        if (invites.isNotEmpty) ...[
+          Padding(padding: const EdgeInsets.fromLTRB(4, 4, 4, 10), child: Text(l.invitations, style: AnbessaType.title.copyWith(color: c.text))),
+          for (final i in invites)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: AppCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    ListRowTile(icon: Icons.mail_outline_rounded, title: l.invitedToJoin(i.organizationName ?? i.organizationId), subtitle: i.role, padding: EdgeInsets.zero),
+                    const SizedBox(height: 14),
+                    PillButtonPair(
+                      first: PillButton(label: l.decline, variant: PillVariant.tonal, compact: true, onPressed: _busy == null ? () => _answer(i, false) : null),
+                      second: PillButton(label: l.accept, compact: true, busy: _busy == i.id, onPressed: _busy == null ? () => _answer(i, true) : null),
                     ),
-                ],
+                  ],
+                ),
               ),
-            if (data.value != null && orgs.isEmpty && invites.isEmpty) IllustratedEmpty(illustration: AnbessaIllustration.documents, title: l.noOrganizations, compact: true),
-            if (orgs.isNotEmpty)
-              SectionGroup(
-                children: [
-                  for (final o in orgs)
-                    SettingsTile(
-                      icon: o.isFleet ? Icons.local_shipping_rounded : Icons.business_rounded,
-                      title: o.name,
-                      subtitle: o.status,
-                      chevron: false,
-                      trailing: o.isCorporate && corporate.length > 1
-                          ? IconButton(
-                              tooltip: l.defaultBilling,
-                              icon: Icon((billing ?? corporate.first.id) == o.id ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded, color: (billing ?? corporate.first.id) == o.id ? c.text : c.borderStrong),
-                              onPressed: () => ref.read(billingOrgProvider.notifier).set(o.id),
-                            )
-                          : null,
-                    ),
-                ],
+            ),
+        ],
+        if (data.value != null && orgs.isEmpty && invites.isEmpty) IllustratedEmpty(illustration: AnbessaIllustration.documents, title: l.noOrganizations, compact: true),
+        for (final o in orgs)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: AppCard(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              child: ListRowTile(
+                icon: o.isFleet ? Icons.local_shipping_outlined : Icons.business_outlined,
+                title: o.name,
+                subtitle: o.status,
+                trailing: o.isCorporate && corporate.length > 1
+                    ? IconButton(
+                        tooltip: l.defaultBilling,
+                        icon: Icon((billing ?? corporate.first.id) == o.id ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded, color: (billing ?? corporate.first.id) == o.id ? c.accentText : c.borderStrong),
+                        onPressed: () => ref.read(billingOrgProvider.notifier).set(o.id),
+                      )
+                    : null,
               ),
-            if (corporate.length > 1) Text(l.defaultBilling, style: AnbessaType.caption.copyWith(color: c.muted)),
-          ],
-        ),
-      ),
+            ),
+          ),
+        if (corporate.length > 1) AccountLede(l.defaultBilling),
+      ],
     );
   }
 }

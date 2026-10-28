@@ -55,7 +55,7 @@ packages/core (ride_app_core)        no Riverpod, no plugins: contracts and pure
   domain/     trip stages, money (birr), Addis time, phone formats, semver, geo helpers
   geo/        polyline6 encode/decode, distance, bearing, projection onto a route
   ui/         the design system: tokens (space, radius, motion, type), light and dark palettes,
-              Inter + Noto Sans Ethiopic, and the shared widgets (AppSheet, SwipeToConfirm,
+              Urbanist + Noto Sans Ethiopic, and the shared widgets (AppSheet, SwipeToConfirm,
               PinBoxes, Skeleton, SectionGroup/SettingsTile, StatTile, PillTabs, RatingStars,
               IllustratedEmpty, MapChip, motion helpers, Haptics, toasts)
 

@@ -88,7 +88,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: Routes.intro, pageBuilder: (_, s) => fadeThroughPage(s, const IntroScreen())),
       GoRoute(path: Routes.updateRequired, builder: (_, _) => const UpdateRequiredScreen()),
       GoRoute(path: Routes.welcome, builder: (_, _) => const WelcomeScreen()),
-      GoRoute(path: Routes.signIn, builder: (_, s) => PhoneScreen(driver: s.uri.queryParameters['driver'] == '1')),
+      GoRoute(path: Routes.signIn, builder: (_, s) => PhoneScreen(driver: s.uri.queryParameters['driver'] == '1', signUp: s.uri.queryParameters['new'] == '1')),
       GoRoute(path: Routes.verify, builder: (_, s) => OtpScreen(phone: s.uri.queryParameters['phone'] ?? '', driver: s.uri.queryParameters['driver'] == '1')),
       GoRoute(path: Routes.mode, builder: (_, _) => const ModeSwitcherScreen()),
 
@@ -146,6 +146,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: Routes.profile, builder: (_, _) => const ProfileScreen()),
       GoRoute(path: Routes.language, builder: (_, _) => const LanguageScreen()),
       GoRoute(path: Routes.sessions, builder: (_, _) => const SessionsScreen()),
+      GoRoute(path: Routes.security, builder: (_, _) => const AccountSecurityScreen()),
       GoRoute(path: Routes.paymentPrefs, builder: (_, _) => const PaymentPreferencesScreen()),
       GoRoute(path: Routes.savedPlaces, builder: (_, _) => const SavedPlacesScreen(), routes: [
         GoRoute(path: 'pick', pageBuilder: (_, s) => slideUpPage(s, RouteEditorScreen(mode: RouteEditorMode.savedPlace, savedLabel: s.uri.queryParameters['label']))),

@@ -1,6 +1,7 @@
-// The account hub: header (photo, name, rating · trips), quick actions and grouped settings, on a
-// 360 dp phone with 1.3× text, light and dark, English and Amharic; the light trip count; and the
-// payment badge's re-check only when a trip ends.
+// The account hub in the GoRide layout: the profile card (photo, name, phone, rating · trips; the
+// driver's balance with Top up) and one card of rows, on a 360 dp phone with 1.3× text, light and
+// dark, English and Amharic; the light trip count; and the payment badge's re-check only when a
+// trip ends.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -36,7 +37,8 @@ Json tripJson(String id, {String status = 'completed'}) => {...fixture('trip.jso
 FakeBackend backendWith({int trips = 3, bool more = false}) => FakeBackend()
   ..on('GET', '/api/trips/active', (_) => {'trip': null})
   ..on('GET', '/api/trips/me/rating', (_) => {'average': 4.9, 'count': 128})
-  ..on('GET', '/api/trips', (_) => {'trips': [for (var i = 0; i < trips; i++) tripJson('t$i')], 'next': more ? 'cursor' : null});
+  ..on('GET', '/api/trips', (_) => {'trips': [for (var i = 0; i < trips; i++) tripJson('t$i')], 'next': more ? 'cursor' : null})
+  ..on('GET', '/api/payments/balances/me', (_) => {...fixture('balance.json'), 'balanceMinor': 206950});
 
 Future<ProviderContainer> pumpHub(WidgetTester tester, FakeBackend backend, {AppMode mode = AppMode.rider, Brightness brightness = Brightness.light, Locale locale = const Locale('en'), Map<String, bool> flags = const {'support': true, 'scheduledRides': true}}) async {
   SharedPreferences.setMockInitialValues({});
@@ -64,7 +66,7 @@ Future<ProviderContainer> pumpHub(WidgetTester tester, FakeBackend backend, {App
   final hub = AccountScreen(mode: mode);
   final router = GoRouter(routes: [
     GoRoute(path: '/', builder: (_, _) => hub),
-    for (final p in [Routes.profile, Routes.riderActivity, Routes.driverActivity, Routes.support, Routes.savedPlaces, Routes.appearance, Routes.driverEarnings])
+    for (final p in [Routes.profile, Routes.riderActivity, Routes.driverActivity, Routes.support, Routes.savedPlaces, Routes.appearance, Routes.driverEarnings, Routes.driverTopUp, Routes.security])
       GoRoute(path: p, builder: (_, _) => Scaffold(body: Text('page $p'))),
   ]);
   await tester.pumpWidget(UncontrolledProviderScope(
@@ -94,51 +96,77 @@ void main() {
         expect(find.text('Abebe'), findsOneWidget);
         expect(find.text(l.tripsCount(3)), findsOneWidget);
         expect(find.textContaining('4.9'), findsOneWidget);
-        for (final label in [l.quickTrips, l.quickPlaces, l.quickSettings]) {
-          expect(find.widgetWithText(QuickActionCircle, label), findsOneWidget);
+        expect(find.text(l.accountTitle), findsOneWidget);
+        for (final label in [l.accSavedAddresses, l.notifications, l.accPaymentMethods, l.accAccountSecurity]) {
+          expect(find.widgetWithText(AccountRow, label), findsOneWidget);
         }
-        expect(find.widgetWithText(QuickActionCircle, l.support), findsOneWidget);
+        // no balance row for riders, no quick-action circles any more
+        expect(find.text(l.topUp), findsNothing);
+        expect(find.byType(QuickActionCircle), findsNothing);
         expect(find.byType(Hero), findsOneWidget);
         expect(tester.widget<Hero>(find.byType(Hero)).tag, meAvatarHeroTag);
-        // every settings row has its icon
-        for (final t in tester.widgetList<SettingsTile>(find.byType(SettingsTile, skipOffstage: false))) {
-          expect(t.icon.fontFamily, 'MaterialIcons');
+        // every row has its icon
+        for (final r in tester.widgetList<AccountRow>(find.byType(AccountRow, skipOffstage: false))) {
+          expect(r.icon.fontFamily, 'MaterialIcons');
         }
         await tester.scrollUntilVisible(find.text(l.appVersion('1.0.0+7')), 300);
+        expect(find.widgetWithText(AccountRow, l.accHelpSupport), findsOneWidget);
         expect(find.text(l.signOut), findsOneWidget);
         expect(tester.takeException(), isNull);
       });
     }
   }
 
-  testWidgets('driver hub: Earnings instead of Places, the drive section, dark Amharic', (tester) async {
+  testWidgets('driver hub: the balance with Top up, the drive rows, dark Amharic', (tester) async {
     await pumpHub(tester, backendWith(), mode: AppMode.driver, brightness: Brightness.dark, locale: const Locale('am'));
     final l = lookupAppLocalizations(const Locale('am'));
-    expect(find.widgetWithText(QuickActionCircle, l.tabEarnings), findsOneWidget);
-    expect(find.widgetWithText(QuickActionCircle, l.quickPlaces), findsNothing);
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text(l.accAvailableBalance), findsOneWidget);
+    expect(find.text(birr(206950, locale: 'am')), findsOneWidget);
+    expect(find.text(l.topUp), findsOneWidget);
+    expect(find.widgetWithText(AccountRow, l.accSavedAddresses), findsNothing);
+    expect(find.widgetWithText(AccountRow, l.switchToRider), findsOneWidget);
     await tester.scrollUntilVisible(find.text(l.vehicles), 200);
-    expect(find.text(l.switchToRider), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('without the support flag there is no Help circle or row', (tester) async {
-    await pumpHub(tester, backendWith(), flags: const {});
-    expect(find.widgetWithText(QuickActionCircle, 'Help'), findsNothing);
-    expect(find.text('Help'), findsNothing);
-  });
-
-  testWidgets('the Trips circle opens Activity', (tester) async {
-    await pumpHub(tester, backendWith());
-    await tester.tap(find.widgetWithText(QuickActionCircle, 'Trips'));
+  testWidgets('Top up opens the driver top-up', (tester) async {
+    await pumpHub(tester, backendWith(), mode: AppMode.driver);
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('Top up'));
     await tester.pumpAndSettle();
-    expect(find.text('page ${Routes.riderActivity}'), findsOneWidget);
+    expect(find.text('page ${Routes.driverTopUp}'), findsOneWidget);
   });
 
-  testWidgets('the header opens the profile', (tester) async {
+  testWidgets('without the support flag there is no Help & Support row', (tester) async {
+    await pumpHub(tester, backendWith(), flags: const {});
+    expect(find.text('Help & Support', skipOffstage: false), findsNothing);
+  });
+
+  testWidgets('Saved Addresses opens its page', (tester) async {
+    await pumpHub(tester, backendWith());
+    await tester.tap(find.text('Saved Addresses'));
+    await tester.pumpAndSettle();
+    expect(find.text('page ${Routes.savedPlaces}'), findsOneWidget);
+  });
+
+  testWidgets('the profile card opens Personal Info', (tester) async {
     await pumpHub(tester, backendWith());
     await tester.tap(find.text('Abebe'));
     await tester.pumpAndSettle();
     expect(find.text('page ${Routes.profile}'), findsOneWidget);
+  });
+
+  testWidgets('Sign out asks first in a confirmation sheet', (tester) async {
+    await pumpHub(tester, backendWith());
+    await tester.ensureVisible(find.text('Sign out'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Sign out'));
+    await tester.pumpAndSettle();
+    expect(find.text('Yes, Sign out'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('Yes, Sign out'), findsNothing);
   });
 
   group('trip count', () {

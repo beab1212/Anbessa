@@ -1,7 +1,8 @@
-// Account (both modes): a large header (photo, name, phone, rating · trips; tap → profile), a row
-// of quick actions (Trips, Help, Places or Earnings, Settings), then every setting in grouped
-// cards with an icon on each row: mode, Ride or Drive, Preferences, Safety, Account, Help,
-// sign out and About. Flagged entries whose backend is missing show "Coming soon".
+// Account (both modes), the GoRide kit's p. 148 / 152: the logo, "Account" and ⋮ on top; a profile
+// card (photo, name, phone, rating · trips; tap → Personal Info) with the driver's balance and
+// "Top up"; then one card of rows with outline icons and chevrons (mode switch, Saved Addresses,
+// Notifications, Payment Methods, Account & Security, App Appearance, Language, Emergency
+// contact, Organizations, Help & Support, the driver's own rows) ending with a red Logout.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,11 +12,12 @@ import '../../core/l10n/l10n.dart';
 import '../../core/network/providers.dart';
 import '../../core/router/routes.dart';
 import '../../core/session/session_controller.dart';
+import '../bootstrap/gates.dart' show AnbessaLogo;
 import '../config/client_config_provider.dart';
+import '../driver/earnings/earnings_controller.dart';
 import '../rider/history/history_screens.dart';
 import '../rider/payments/payment_due_controller.dart';
 import '../rider/trip/active_trip_controller.dart';
-import 'appearance_controller.dart';
 import 'settings_controllers.dart';
 
 final myRatingProvider = FutureProvider<MyRating>((ref) async {
@@ -49,6 +51,13 @@ const meAvatarHeroTag = 'me-avatar';
 class AccountScreen extends ConsumerWidget {
   const AccountScreen({super.key, required this.mode});
   final AppMode mode;
+
+  Future<void> _signOut(BuildContext context, WidgetRef ref) async {
+    final l = context.l10n;
+    final yes = await showConfirmSheet(context, title: l.signOut, message: l.signOutConfirm, confirmLabel: l.accYesSignOut, cancelLabel: l.cancel, destructive: true);
+    if (yes) await ref.read(sessionProvider.notifier).signOut();
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l = context.l10n;
@@ -57,178 +66,221 @@ class AccountScreen extends ConsumerWidget {
     final version = ref.watch(appVersionProvider).value;
     final support = ref.watch(featureProvider(Feature.support));
     final scheduled = ref.watch(featureProvider(Feature.scheduledRides));
-    final deletion = ref.watch(featureProvider(Feature.accountDeletion));
-    final themeMode = ref.watch(themeModeProvider);
     final orgs = ref.watch(organizationsProvider).value;
     final invites = orgs?.invitations.length ?? 0;
     if (session == null) return const SizedBox.shrink();
     final driver = mode == AppMode.driver;
-    final themeLabel = switch (themeMode) { ThemeMode.system => l.themeSystem, ThemeMode.light => l.themeLight, ThemeMode.dark => l.themeDark };
-    final comingSoon = StatusPill(l.comingSoon, tone: Tone.grey);
+        final language = Localizations.localeOf(context).languageCode == 'am' ? 'አማርኛ' : 'English';
+    // the mode row: switch, or become a driver
+    final (modeIcon, modeTitle, modeSub, modeTarget) = driver
+        ? (Icons.hail_rounded, l.switchToRider, null, AppMode.rider)
+        : session.canDrive
+            ? (Icons.directions_car_outlined, l.switchToDriver, null, AppMode.driver)
+            : (Icons.directions_car_outlined, l.becomeDriver, l.becomeDriverLede, AppMode.driver);
+
+    final rows = <Widget>[
+      AccountRow(icon: modeIcon, iconColor: c.accentText, title: modeTitle, subtitle: modeSub, onTap: () => ref.read(modeProvider.notifier).set(modeTarget)),
+      if (!driver) ...[
+        AccountRow(icon: Icons.location_on_outlined, title: l.accSavedAddresses, onTap: () => context.push(Routes.savedPlaces)),
+        if (scheduled) AccountRow(icon: Icons.event_outlined, title: l.scheduledRides, onTap: () => context.push(Routes.scheduled)),
+      ],
+      if (driver) ...[
+        AccountRow(icon: Icons.directions_car_outlined, title: l.vehicles, onTap: () => context.push(Routes.driverVehicles)),
+        AccountRow(icon: Icons.navigation_outlined, title: l.navigation, onTap: () => context.push(Routes.navigationPrefs)),
+        AccountRow(icon: Icons.account_balance_wallet_outlined, title: l.tabEarnings, onTap: () => context.go(Routes.driverEarnings)),
+        if (support) AccountRow(icon: Icons.backpack_outlined, title: l.lostItems, subtitle: l.driverLostItemsTileLede, onTap: () => context.push(Routes.lostItems)),
+      ],
+      AccountRow(icon: Icons.notifications_none_rounded, title: l.notifications, onTap: () => context.push(Routes.notifications)),
+      if (!driver) AccountRow(icon: Icons.credit_card_outlined, title: l.accPaymentMethods, onTap: () => context.push(Routes.paymentPrefs)),
+      AccountRow(icon: Icons.shield_outlined, title: l.accAccountSecurity, onTap: () => context.push(Routes.security)),
+      AccountRow(icon: Icons.remove_red_eye_outlined, title: l.accAppAppearance, onTap: () => context.push(Routes.appearance)),
+      AccountRow(icon: Icons.language_rounded, title: l.language, value: language, onTap: () => context.push(Routes.language)),
+      AccountRow(icon: Icons.emergency_outlined, iconColor: c.danger, title: l.emergencyContact, subtitle: ref.watch(emergencyContactProvider)?.name ?? l.notSet, onTap: () => context.push(Routes.safety)),
+      AccountRow(
+        icon: Icons.business_outlined,
+        title: l.organizations,
+        subtitle: orgs == null ? null : (orgs.orgs.isEmpty ? l.noOrganizations : orgs.orgs.map((o) => o.name).join(', ')),
+        badge: invites > 0 ? StatusPill('$invites', tone: Tone.amber) : null,
+        onTap: () => context.push(Routes.organizations),
+      ),
+      if (support) AccountRow(icon: Icons.help_outline_rounded, title: l.accHelpSupport, subtitle: l.supportTileLede, onTap: () => context.push(Routes.support)),
+      AccountRow(icon: Icons.logout_rounded, iconColor: c.danger, title: l.signOut, titleColor: c.danger, chevron: false, onTap: () => _signOut(context, ref)),
+    ];
 
     return Scaffold(
-      body: CustomScrollView(
-        slivers: [
-          SliverAppBar(pinned: true, title: Text(l.accountTitle)),
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-            sliver: SliverList.list(
-              children: [
-                _Header(session: session, mode: mode),
-                const SizedBox(height: 12),
-                // quick actions
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    QuickActionCircle(icon: Icons.receipt_long_rounded, label: l.quickTrips, onTap: () => context.go(driver ? Routes.driverActivity : Routes.riderActivity)),
-                    if (support) QuickActionCircle(icon: Icons.support_agent_rounded, label: l.support, onTap: () => context.push(Routes.support)),
-                    if (driver)
-                      QuickActionCircle(icon: Icons.account_balance_wallet_rounded, label: l.tabEarnings, onTap: () => context.go(Routes.driverEarnings))
-                    else
-                      QuickActionCircle(icon: Icons.bookmark_rounded, label: l.quickPlaces, onTap: () => context.push(Routes.savedPlaces)),
-                    QuickActionCircle(icon: Icons.tune_rounded, label: l.quickSettings, onTap: () => context.push(Routes.appearance)),
-                  ],
-                ),
-                const SizedBox(height: 20),
-                // mode
-                SectionGroup(
-                  children: [
-                    if (!driver && session.canDrive) SettingsTile(icon: Icons.drive_eta_rounded, iconTone: c.accentStrong, title: l.switchToDriver, onTap: () => ref.read(modeProvider.notifier).set(AppMode.driver)),
-                    if (!driver && !session.canDrive) SettingsTile(icon: Icons.drive_eta_rounded, iconTone: c.accentStrong, title: l.becomeDriver, subtitle: l.becomeDriverLede, onTap: () => ref.read(modeProvider.notifier).set(AppMode.driver)),
-                    if (driver) SettingsTile(icon: Icons.hail_rounded, iconTone: c.accentStrong, title: l.switchToRider, onTap: () => ref.read(modeProvider.notifier).set(AppMode.rider)),
-                  ],
-                ),
-                if (!driver)
-                  SectionGroup(
-                    title: l.ride,
-                    children: [
-                      SettingsTile(icon: Icons.bookmark_rounded, title: l.savedPlaces, onTap: () => context.push(Routes.savedPlaces)),
-                      SettingsTile(icon: Icons.payments_rounded, title: l.paymentPreferences, onTap: () => context.push(Routes.paymentPrefs)),
-                      if (scheduled) SettingsTile(icon: Icons.event_rounded, title: l.scheduledRides, onTap: () => context.push(Routes.scheduled)),
-                    ],
-                  ),
-                if (driver)
-                  SectionGroup(
-                    title: l.driveTitle,
-                    children: [
-                      SettingsTile(icon: Icons.directions_car_rounded, title: l.vehicles, onTap: () => context.push(Routes.driverVehicles)),
-                      SettingsTile(icon: Icons.navigation_rounded, title: l.navigation, onTap: () => context.push(Routes.navigationPrefs)),
-                      SettingsTile(icon: Icons.account_balance_wallet_rounded, title: l.tabEarnings, onTap: () => context.go(Routes.driverEarnings)),
-                      if (support) SettingsTile(icon: Icons.backpack_rounded, title: l.lostItems, subtitle: l.driverLostItemsTileLede, onTap: () => context.push(Routes.lostItems)),
-                    ],
-                  ),
-                SectionGroup(
-                  title: l.preferences,
-                  children: [
-                    SettingsValueTile(icon: Icons.language_rounded, title: l.language, value: Localizations.localeOf(context).languageCode == 'am' ? 'አማርኛ' : 'English', onTap: () => context.push(Routes.language)),
-                    SettingsValueTile(icon: Icons.dark_mode_rounded, title: l.appearance, value: themeLabel, onTap: () => context.push(Routes.appearance)),
-                    SettingsTile(icon: Icons.notifications_rounded, title: l.notifications, onTap: () => context.push(Routes.notifications)),
-                  ],
-                ),
-                SectionGroup(
-                  title: l.safety,
-                  children: [
-                    SettingsTile(icon: Icons.emergency_rounded, iconTone: c.danger, title: l.emergencyContact, subtitle: ref.watch(emergencyContactProvider)?.name ?? l.notSet, onTap: () => context.push(Routes.safety)),
-                  ],
-                ),
-                SectionGroup(
-                  title: l.account,
-                  children: [
-                    SettingsTile(
-                      icon: Icons.business_rounded,
-                      title: l.organizations,
-                      subtitle: orgs == null ? null : (orgs.orgs.isEmpty ? l.noOrganizations : orgs.orgs.map((o) => o.name).join(', ')),
-                      badge: invites > 0 ? StatusPill('$invites', tone: Tone.amber) : null,
-                      onTap: () => context.push(Routes.organizations),
-                    ),
-                    SettingsTile(icon: Icons.devices_rounded, title: l.sessions, onTap: () => context.push(Routes.sessions)),
-                    if (deletion) SettingsTile(icon: Icons.delete_outline_rounded, title: l.deleteAccount, iconTone: c.muted, badge: comingSoon, onTap: () => context.push(Routes.deleteAccount)),
-                  ],
-                ),
-                if (support) SectionGroup(title: l.support, children: [SettingsTile(icon: Icons.support_agent_rounded, title: l.support, subtitle: l.supportTileLede, onTap: () => context.push(Routes.support))]),
-                SectionGroup(
-                  children: [
-                    SettingsTile(
-                      icon: Icons.logout_rounded,
-                      title: l.signOut,
-                      destructive: true,
-                      chevron: false,
-                      onTap: () async {
-                        final yes = await showDialog<bool>(
-                          context: context,
-                          builder: (ctx) => AlertDialog(
-                            content: Text(l.signOutConfirm),
-                            actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(l.cancel)), FilledButton(onPressed: () => Navigator.pop(ctx, true), child: Text(l.signOut))],
-                          ),
-                        );
-                        if (yes == true) await ref.read(sessionProvider.notifier).signOut();
-                      },
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Center(child: Text(version == null ? '' : l.appVersion('${version.version}+${version.build}'), style: AnbessaType.caption.copyWith(color: c.faint))),
-              ],
-            ),
+      backgroundColor: c.groupedPage,
+      appBar: AppTopBar(
+        leadingKind: TopBarLeading.none,
+        leading: const AnbessaLogo(size: 30),
+        title: l.accountTitle,
+        background: c.groupedPage,
+        actions: [
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert_rounded),
+            tooltip: MaterialLocalizations.of(context).showMenuTooltip,
+            onSelected: (v) => switch (v) {
+              'mode' => ref.read(modeProvider.notifier).set(modeTarget),
+              'profile' => context.push(Routes.profile),
+              _ => _signOut(context, ref),
+            },
+            itemBuilder: (_) => [
+              PopupMenuItem(value: 'profile', child: _MenuRow(Icons.person_outline_rounded, l.accPersonalInfo)),
+              PopupMenuItem(value: 'mode', child: _MenuRow(modeIcon, modeTitle)),
+              PopupMenuItem(value: 'out', child: _MenuRow(Icons.logout_rounded, l.signOut, color: c.danger)),
+            ],
           ),
+        ],
+      ),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(AnbessaSpace.page, 4, AnbessaSpace.page, 24),
+        children: [
+          _ProfileCard(session: session, mode: mode),
+          const SizedBox(height: 16),
+          AppCard(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            child: Column(children: rows),
+          ),
+          const SizedBox(height: 16),
+          Center(child: Text(version == null ? '' : l.appVersion('${version.version}+${version.build}'), style: AnbessaType.caption.copyWith(color: c.faint))),
         ],
       ),
     );
   }
 }
 
-/// Who you are: the photo (a Hero into the profile), name, phone, rating · trips. Its own widget
-/// so the rating and the trip count arriving rebuild only this part.
-class _Header extends ConsumerWidget {
-  const _Header({required this.session, required this.mode});
+class _MenuRow extends StatelessWidget {
+  const _MenuRow(this.icon, this.label, {this.color});
+  final IconData icon;
+  final String label;
+  final Color? color;
+  @override
+  Widget build(BuildContext context) {
+    final c = color ?? context.colors.text;
+    return Row(children: [Icon(icon, size: 20, color: c), const SizedBox(width: 12), Flexible(child: Text(label, style: AnbessaType.body.copyWith(color: c, fontWeight: FontWeight.w600)))]);
+  }
+}
+
+/// A row of the account card: a plain outline icon (no circle, as the kit), the title (and a grey
+/// line), a value or badge, and a chevron.
+class AccountRow extends StatelessWidget {
+  const AccountRow({super.key, required this.icon, required this.title, this.subtitle, this.value, this.badge, this.onTap, this.iconColor, this.titleColor, this.chevron = true});
+  final IconData icon;
+  final String title;
+  final String? subtitle;
+  /// a grey value before the chevron ("English", "System")
+  final String? value;
+  final Widget? badge;
+  final VoidCallback? onTap;
+  final Color? iconColor;
+  final Color? titleColor;
+  final bool chevron;
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return ListRowTile(
+      leading: ExcludeSemantics(child: Icon(icon, size: 24, color: iconColor ?? c.text)),
+      title: title,
+      subtitle: subtitle,
+      titleColor: titleColor,
+      padding: const EdgeInsets.symmetric(vertical: 9),
+      trailing: value != null
+          ? ConstrainedBox(constraints: const BoxConstraints(maxWidth: 110), child: Text(value!, maxLines: 1, overflow: TextOverflow.ellipsis, style: AnbessaType.body2.copyWith(color: c.muted)))
+          : badge,
+      chevron: chevron,
+      onTap: onTap,
+    );
+  }
+}
+
+/// Who you are: the photo (a Hero into Personal Info), name, phone, rating · trips; for drivers
+/// the balance with "Top up". Its own widget so the rating, the trip count and the balance
+/// arriving rebuild only this card.
+class _ProfileCard extends ConsumerWidget {
+  const _ProfileCard({required this.session, required this.mode});
   final Session session;
   final AppMode mode;
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l = context.l10n;
     final c = context.colors;
+    final driver = mode == AppMode.driver;
     final rating = ref.watch(myRatingProvider).value;
-    final trips = ref.watch(tripCountProvider(mode == AppMode.driver ? 'driver' : 'rider')).value;
-    return Semantics(
-      button: true,
-      hint: l.editProfileHint,
-      child: InkWell(
-        onTap: () => context.push(Routes.profile),
-        borderRadius: BorderRadius.circular(AnbessaRadius.lg),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
-          child: Row(
-            children: [
-              Hero(tag: meAvatarHeroTag, child: AvatarImage(src: session.profile.image, name: session.displayName, size: 72, ring: true)),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+    final trips = ref.watch(tripCountProvider(driver ? 'driver' : 'rider')).value;
+    final balance = driver && session.canDrive ? ref.watch(balanceProvider).value : null;
+    final caption = AnbessaType.caption.copyWith(color: c.muted);
+    return AppCard(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      child: Column(
+        children: [
+          Semantics(
+            button: true,
+            hint: l.editProfileHint,
+            child: InkWell(
+              onTap: () => context.push(Routes.profile),
+              borderRadius: BorderRadius.circular(AnbessaRadius.md),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Row(
                   children: [
-                    Text(session.displayName, style: AnbessaType.h1.copyWith(color: c.text), maxLines: 1, overflow: TextOverflow.ellipsis),
-                    const SizedBox(height: 2),
-                    Text(formatPhone(session.profile.phone), style: AnbessaType.body2.copyWith(color: c.muted, fontFeatures: AnbessaType.tabular), maxLines: 1, overflow: TextOverflow.ellipsis),
-                    const SizedBox(height: 6),
-                    Wrap(
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      spacing: 6,
-                      runSpacing: 2,
-                      children: [
-                        RatingSummary(average: rating?.average, count: rating?.count ?? 0, newLabel: '—'),
-                        if (trips != null) ...[
-                          ExcludeSemantics(child: Text('·', style: AnbessaType.body2.copyWith(color: c.faint))),
-                          Text(trips.more ? l.tripsCountAtLeast(trips.count) : l.tripsCount(trips.count), style: AnbessaType.body2.copyWith(color: c.text2)),
+                    Hero(tag: meAvatarHeroTag, child: AvatarImage(src: session.profile.image, name: session.displayName, size: 50)),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(session.displayName, style: AnbessaType.title.copyWith(color: c.text), maxLines: 1, overflow: TextOverflow.ellipsis),
+                          const SizedBox(height: 4),
+                          Row(children: [
+                            ExcludeSemantics(child: Icon(Icons.phone_outlined, size: 15, color: c.muted)),
+                            const SizedBox(width: 6),
+                            Flexible(child: Text(formatPhone(session.profile.phone), style: caption.copyWith(fontFeatures: AnbessaType.tabular), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                          ]),
+                          const SizedBox(height: 4),
+                          Wrap(
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            spacing: 6,
+                            runSpacing: 2,
+                            children: [
+                              RatingSummary(average: rating?.average, count: rating?.count ?? 0, newLabel: '—', style: caption.copyWith(color: c.text2)),
+                              if (trips != null) ...[
+                                ExcludeSemantics(child: Text('·', style: caption)),
+                                Text(trips.more ? l.tripsCountAtLeast(trips.count) : l.tripsCount(trips.count), style: caption.copyWith(color: c.text2)),
+                              ],
+                            ],
+                          ),
                         ],
-                      ],
+                      ),
                     ),
+                    ExcludeSemantics(child: Icon(Icons.chevron_right_rounded, color: c.text)),
                   ],
                 ),
               ),
-              ExcludeSemantics(child: Icon(Icons.chevron_right_rounded, color: c.faint)),
-            ],
+            ),
           ),
-        ),
+          if (balance != null) ...[
+            Divider(height: 1, color: c.border),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Row(
+                children: [
+                  CircleIcon(Icons.account_balance_wallet_outlined, size: 48, color: c.accentText),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        MoneyText(balance.balanceMinor, locale: context.localeTag, style: AnbessaType.title.copyWith(color: balance.balanceMinor < 0 ? c.danger : c.text)),
+                        const SizedBox(height: 2),
+                        Text(l.accAvailableBalance, style: caption.copyWith(fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis),
+                      ],
+                    ),
+                  ),
+                  PillButton(label: l.topUp, variant: PillVariant.outlineNeutral, compact: true, onPressed: () => context.push(Routes.driverTopUp)),
+                ],
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }

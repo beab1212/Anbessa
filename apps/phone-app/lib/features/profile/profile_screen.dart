@@ -1,4 +1,5 @@
-// Name and photo. The photo is resized on the phone to 256 px and sent as a small JPEG data
+// Personal Info (the kit's p. 168): the photo with an edit badge, Full Name, the phone number
+// (read only: it is how you sign in), Save pinned at the bottom. The photo is resized on the phone to 256 px and sent as a small JPEG data
 // URL (the server refuses anything over 48 KB).
 
 import 'dart:convert';
@@ -43,17 +44,17 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
   Future<void> _changePhoto() async {
     final l = context.l10n;
-    final choice = await showModalBottomSheet<String>(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(leading: const Icon(Icons.photo_camera_rounded), title: Text(l.takePhotoOption), onTap: () => Navigator.pop(ctx, 'camera')),
-            ListTile(leading: const Icon(Icons.photo_library_rounded), title: Text(l.chooseFromGalleryOption), onTap: () => Navigator.pop(ctx, 'gallery')),
-            if (ref.read(currentSessionProvider)?.profile.image != null) ListTile(leading: Icon(Icons.delete_outline_rounded, color: context.colors.danger), title: Text(l.removePhoto, style: TextStyle(color: context.colors.danger)), onTap: () => Navigator.pop(ctx, 'remove')),
-          ],
-        ),
+    final hasPhoto = ref.read(currentSessionProvider)?.profile.image != null;
+    final choice = await showHandleSheet<String>(
+      context,
+      title: l.changePhoto,
+      builder: (ctx) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListRowTile(icon: Icons.photo_camera_outlined, title: l.takePhotoOption, onTap: () => Navigator.pop(ctx, 'camera')),
+          ListRowTile(icon: Icons.photo_library_outlined, title: l.chooseFromGalleryOption, onTap: () => Navigator.pop(ctx, 'gallery')),
+          if (hasPhoto) ListRowTile(leading: CircleIcon(Icons.delete_outline_rounded, color: context.colors.danger), title: l.removePhoto, titleColor: context.colors.danger, onTap: () => Navigator.pop(ctx, 'remove')),
+        ],
       ),
     );
     if (choice == null) return;
@@ -91,36 +92,68 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     final l = context.l10n;
     final c = context.colors;
     final s = ref.watch(currentSessionProvider);
+    final phone = formatPhone(s?.profile.phone);
+    final national = phone.startsWith('+251') ? phone.substring(4).trim() : phone;
     return Scaffold(
-      appBar: AppBar(title: Text(l.profile)),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
+      appBar: AppTopBar(title: l.accPersonalInfo),
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Center(
-            child: GestureDetector(
-              onTap: _photoBusy ? null : _changePhoto,
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  Hero(tag: meAvatarHeroTag, child: AvatarImage(src: s?.profile.image, name: s?.displayName ?? '', size: 112, ring: true)),
-                  if (_photoBusy) SizedBox(width: 28, height: 28, child: CircularProgressIndicator(strokeWidth: 2.5, color: c.text)),
-                ],
-              ),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(AnbessaSpace.page, 8, AnbessaSpace.page, 20),
+              children: [
+                Center(
+                  child: Semantics(
+                    button: true,
+                    label: l.changePhoto,
+                    child: GestureDetector(
+                      onTap: _photoBusy ? null : _changePhoto,
+                      child: SizedBox(
+                        width: 104,
+                        height: 104,
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            Hero(tag: meAvatarHeroTag, child: AvatarImage(src: s?.profile.image, name: s?.displayName ?? '', size: 104)),
+                            if (_photoBusy) SizedBox(width: 28, height: 28, child: CircularProgressIndicator(strokeWidth: 2.5, color: c.text)),
+                            // the kit's small edit badge on the photo's corner
+                            PositionedDirectional(
+                              end: 2,
+                              bottom: 4,
+                              child: Container(
+                                width: 26,
+                                height: 26,
+                                decoration: BoxDecoration(color: c.accent, borderRadius: BorderRadius.circular(7), border: Border.all(color: c.page, width: 2)),
+                                child: Icon(Icons.edit_rounded, size: 14, color: c.onAccent),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 28),
+                FilledField(label: l.accFullName, hint: l.accFullName, controller: _name, textCapitalization: TextCapitalization.words, autofillHints: const [AutofillHints.name], onChanged: (_) => setState(() {})),
+                const SizedBox(height: 24),
+                FilledField.phone(
+                  label: l.phoneLabel,
+                  dialCode: '+251',
+                  flag: const ExcludeSemantics(child: Text('🇪🇹', style: TextStyle(fontSize: 20))),
+                  initialValue: national,
+                  enabled: false,
+                ),
+                const SizedBox(height: 8),
+                Text(l.accPhoneReadOnly, style: AnbessaType.caption.copyWith(color: c.muted)),
+                const SizedBox(height: 16),
+                Problem(_error, describe: (e) => describeError(l, e)),
+              ],
             ),
           ),
-          const SizedBox(height: 8),
-          Center(child: TextButton(onPressed: _photoBusy ? null : _changePhoto, child: Text(l.changePhoto))),
-          const SizedBox(height: 16),
-          TextField(controller: _name, decoration: InputDecoration(labelText: l.nameLabel), textCapitalization: TextCapitalization.words, onChanged: (_) => setState(() {})),
-          const SizedBox(height: 12),
-          SectionGroup(
-            margin: EdgeInsets.zero,
-            children: [SettingsValueTile(icon: Icons.phone_rounded, title: l.phoneLabelShort, value: formatPhone(s?.profile.phone))],
+          BottomActionBar(
+            child: PillButton(label: l.save, busy: _busy, onPressed: _name.text.trim().length < 2 || _name.text.trim() == s?.profile.name ? null : _save),
           ),
-          const SizedBox(height: 12),
-          Problem(_error, describe: (e) => describeError(l, e)),
-          const SizedBox(height: 12),
-          PrimaryButton(label: l.save, busy: _busy, onPressed: _name.text.trim().length < 2 || _name.text.trim() == s?.profile.name ? null : _save),
         ],
       ),
     );

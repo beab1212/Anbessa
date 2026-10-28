@@ -39,10 +39,19 @@ abstract class LocationSource {
 }
 
 class GeolocatorSource implements LocationSource {
+  /// Asked once per run before the system's location prompt (the "Enable Location" dialog, set
+  /// by the app); false ("Maybe later") skips the system prompt that time.
+  static Future<bool> Function()? rationale;
+  static bool _rationaleShown = false;
+
   @override
   Future<LocationPermissionState> ensurePermission(LocationProfile profile) async {
     if (!await Geolocator.isLocationServiceEnabled()) return LocationPermissionState.serviceOff;
     var p = await Geolocator.checkPermission();
+    if (p == LocationPermission.denied && rationale != null && !_rationaleShown) {
+      _rationaleShown = true;
+      if (!await rationale!()) return LocationPermissionState.denied;
+    }
     if (p == LocationPermission.denied) p = await Geolocator.requestPermission();
     return switch (p) {
       LocationPermission.always || LocationPermission.whileInUse => LocationPermissionState.granted,

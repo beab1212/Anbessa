@@ -6,11 +6,13 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:ride_app_core/ride_app_core.dart';
 import 'core/l10n/l10n.dart';
+import 'core/location/location_source.dart';
 import 'core/perf.dart';
 import 'core/push/local_notifications.dart';
 import 'core/push/push_service.dart';
 import 'core/router/app_router.dart';
 import 'core/router/routes.dart';
+import 'features/bootstrap/location_prompt.dart';
 import 'features/config/client_config_provider.dart';
 import 'features/profile/account_screens.dart';
 import 'features/profile/appearance_controller.dart';
@@ -35,6 +37,12 @@ class _AnbessaAppState extends ConsumerState<AnbessaApp> with WidgetsBindingObse
       if (p != null) _onLocalTap(p);
     });
     if (!kReleaseMode) _watchHomeShown();
+    // the kit's "Enable Location" dialog before the system prompt
+    GeolocatorSource.rationale = () async {
+      final ctx = rootNavigatorKey.currentContext;
+      if (ctx == null || !ctx.mounted) return true;
+      return showEnableLocationDialog(ctx);
+    };
   }
 
   /// Perf: the first time either home is on screen (debug and profile builds).

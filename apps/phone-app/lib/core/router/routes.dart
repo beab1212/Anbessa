@@ -44,6 +44,8 @@ abstract final class Routes {
   static const profile = '/account/profile';
   static const language = '/account/language';
   static const sessions = '/account/sessions';
+  /// Account & Security: signed-in devices and deleting the account
+  static const security = '/account/security';
   static const paymentPrefs = '/account/payments';
   static const savedPlaces = '/account/places';
   /// the full-screen place picker that saves Home, Work or another place ([label]: home | work | other)
