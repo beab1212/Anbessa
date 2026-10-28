@@ -399,3 +399,7 @@ Page numbers are the kit PDF's (light frame first; the dark twin is listed when 
 | 170, 175 | Account & Security | rows with switches / chevrons / grey descriptions, red "Delete Account" |
 | 171–172, 176–177 | Linked accounts / Data & analytics | `AppCard` rows, status text right (`accentText` "Connect") |
 | 178–183 | Payment methods / Add payment | `AppCard` rows with logo + "Connected", `FilledField`s in a two-column row, `BottomActionBar` "+ Add New Payment" |
+
+## Brand mark and app icon
+
+The app icon is "Lion Grille": the front of a car whose headlights, nose and grille read as a lion's face, ink on an amber rounded square. Masters live in `packages/core/assets/brand/`: `anbessa_icon.svg` (rounded, in-app logo and web favicon), `anbessa_icon_square.svg` (full-bleed, iOS icons), `anbessa_icon_foreground.svg` (transparent, Android adaptive foreground). `AnbessaMark(size:)` draws it in the app (`AnbessaLogo` in the phone app wraps it). Launcher PNGs were rendered from these masters with ImageMagick: Android `mipmap-*/ic_launcher.png` and `ic_launcher_foreground.png` with `mipmap-anydpi-v26/ic_launcher.xml` (amber `ic_launcher_background`), iOS `AppIcon.appiconset`, web `apps/web/public/favicon.svg` and `apple-touch-icon.png`. Shapes avoid curved strokes so every SVG renderer draws them the same. Re-render after changing a master.

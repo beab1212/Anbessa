@@ -29,6 +29,7 @@ flutter:
   assets:
     - assets/illustrations/
     - assets/vehicles/
+    - assets/brand/
     - assets/fonts/OFL-Urbanist.txt
   # the body font (OFL). Use it as 'packages/ride_app_core/Urbanist' (anbessaFontFamily).
   fonts:

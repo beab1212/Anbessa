@@ -75,24 +75,12 @@ class SplashScreen extends ConsumerWidget {
 
 /// The አ mark: a rounded amber square with an ink glyph; [inverted] puts an amber glyph on ink
 /// (the splash, on an amber page).
+/// The app icon used as the in-app logo (welcome, top bars).
 class AnbessaLogo extends StatelessWidget {
-  const AnbessaLogo({super.key, this.size = 40, this.inverted = false});
+  const AnbessaLogo({super.key, this.size = 40});
   final double size;
-  final bool inverted;
-  static const _ink = Color(0xFF17191D);
   @override
-  Widget build(BuildContext context) {
-    final c = context.colors;
-    return ExcludeSemantics(
-      child: Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(color: inverted ? _ink : c.accent, borderRadius: BorderRadius.circular(size * 0.3)),
-        alignment: Alignment.center,
-        child: Text('አ', style: TextStyle(color: inverted ? c.accent : _ink, fontSize: size * 0.58, fontWeight: FontWeight.w700, fontFamily: 'NotoSansEthiopic', height: 1)),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => AnbessaMark(size: size);
 }
 
 class UpdateRequiredScreen extends ConsumerWidget {

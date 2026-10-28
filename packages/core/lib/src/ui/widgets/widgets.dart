@@ -1,6 +1,7 @@
 // Shared widgets. They take their words as parameters: the app owns localisation.
 
 export 'animated_counter.dart';
+export 'brand_mark.dart';
 export 'app_sheet.dart';
 export 'app_top_bar.dart';
 export 'avatar_image.dart';
