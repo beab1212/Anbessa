@@ -16,7 +16,10 @@ mkdir -p "$DIR"
 
 if [ ! -f "$DIR/region.osm.pbf" ]; then
   echo "→ downloading $PBF_URL"
-  curl -fL --retry 3 -o "$DIR/region.osm.pbf.part" "$PBF_URL"
+  # -C - resumes a .part left by an earlier run; --retry-all-errors also retries dropped
+  # connections (curl 56), which slow links hit often. A stale .part from an older extract
+  # would corrupt the file: delete it if the run fails in osrm-extract.
+  curl -fL -C - --retry 20 --retry-delay 10 --retry-all-errors -o "$DIR/region.osm.pbf.part" "$PBF_URL"
   mv "$DIR/region.osm.pbf.part" "$DIR/region.osm.pbf"
 fi
 
