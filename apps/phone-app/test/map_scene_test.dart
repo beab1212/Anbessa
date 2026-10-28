@@ -92,6 +92,24 @@ void main() {
     final layers = sceneLayers(look);
     T layer<T extends ml.StyleLayer>(String id) => layers.firstWhere((l) => l.id == id) as T;
 
+    test("the person's own position never uses a car image: only the dot, its cone and the avatar pin", () {
+      const cars = {SceneIds.imgCarDriver, SceneIds.imgCarStale, SceneIds.imgCarNearby};
+      final mine = layers.whereType<ml.SymbolStyleLayer>().where((l) => l.sourceId == SceneIds.me).toList();
+      expect(mine.map((l) => l.layout['icon-image']), unorderedEquals([SceneIds.imgMeCone, SceneIds.imgMeDot, SceneIds.imgMeAvatar]));
+      // only the followed car and the cars nearby draw car images
+      for (final l in layers.whereType<ml.SymbolStyleLayer>()) {
+        final img = l.layout['icon-image'];
+        if (img is String && cars.contains(img)) expect(l.sourceId, SceneIds.nearby);
+        if (img is List) expect(l.sourceId, isNot(SceneIds.me));
+      }
+      for (final avatar in [false, true]) {
+        final f = features(meGeoJson(at: (lat: 9.0, lng: 38.7), heading: 45, avatar: avatar)).single as Map<String, dynamic>;
+        final props = f['properties'] as Map<String, dynamic>;
+        expect(props.containsKey('icon'), isFalse);
+        expect(props.values.where((v) => cars.contains(v)), isEmpty);
+      }
+    });
+
     test('route lines have round caps and joins and zoom-dependent widths, the casing under the fill', () {
       final ids = layers.map((l) => l.id).toList();
       expect(ids.indexOf(SceneIds.routeCasing), lessThan(ids.indexOf(SceneIds.routeFill)));
@@ -155,6 +173,40 @@ void main() {
       expect(cars.isTicking, isFalse);
       cars.paused = false;
       expect(cars.isTicking, isTrue);
+      cars.dispose();
+    });
+
+    testWidgets('a parked car keeps facing the same way though the server heading wobbles between polls', (tester) async {
+      var now = DateTime.utc(2026, 10, 27, 9);
+      final cars = CarsAnimator(vsync: const _TestVsync(), now: () => now);
+      cars.update(const [NearbyCar(lat: 9.0, lng: 38.7, heading: 90)]);
+      for (final h in [0.0, 250.0, 0.0, 12.0]) {
+        now = now.add(const Duration(seconds: 10));
+        cars.update([NearbyCar(lat: 9.0, lng: 38.7, heading: h)]);
+        for (var ms = 0; ms <= 3000; ms += 100) {
+          cars.tick(now.add(Duration(milliseconds: ms)));
+          expect(cars.frames.value.single.bearing, closeTo(90, 1e-6));
+        }
+      }
+      cars.dispose();
+    });
+
+    testWidgets('two cars that pass each other keep their identities (closest pair first)', (tester) async {
+      var now = DateTime.utc(2026, 10, 27, 9);
+      final cars = CarsAnimator(vsync: const _TestVsync(), now: () => now);
+      // two cars 50 m apart on one street, both driving east; the server lists them nearest first
+      const lngPerM = 1 / 109950;
+      cars.update(const [NearbyCar(lat: 9.0, lng: 38.7, heading: 90), NearbyCar(lat: 9.0, lng: 38.7 + 50 * lngPerM, heading: 90)]);
+      final ids = [for (final f in cars.frames.value) f.id];
+      now = now.add(const Duration(seconds: 10));
+      // the back one drove 40 m (now 10 m behind where the front one was), the front one 45 m
+      cars.update(const [NearbyCar(lat: 9.0, lng: 38.7 + 40 * lngPerM, heading: 90), NearbyCar(lat: 9.0, lng: 38.7 + 95 * lngPerM, heading: 90)]);
+      final idOf = {38.7 + 40 * lngPerM: ids[0], 38.7 + 95 * lngPerM: ids[1]};
+      cars.tick(now.add(const Duration(seconds: 3)));
+      for (final f in cars.frames.value) {
+        expect(f.id, idOf.entries.firstWhere((e) => (e.key - f.lng).abs() < 1e-7).value, reason: 'a car swapped with its neighbour');
+        expect(f.bearing, closeTo(90, 1e-6));
+      }
       cars.dispose();
     });
   });

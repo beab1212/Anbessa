@@ -283,7 +283,7 @@ class RiderMapShellState extends ConsumerState<RiderMapShell> with TickerProvide
               if (pin) const _DropPin(),
               if (locating) const _LocatingRings(),
               _StageOverlays(stage: _stage, pin: pin, tripStage: tripStage),
-              RiderSheet(stage: _stage, pin: pin, stops: stops, locating: locating),
+              RiderSheet(stage: _stage, pin: pin, stops: stops, locating: locating, tripStage: tripStage),
               // over everything for a while: the search page, the end of a trip
               Positioned.fill(
                 child: AnimatedSwitcher(
@@ -312,8 +312,10 @@ class RiderMapShellState extends ConsumerState<RiderMapShell> with TickerProvide
 
 /// The one sheet: snap points per stage, content switched with a shared-axis transition.
 class RiderSheet extends StatelessWidget {
-  const RiderSheet({super.key, required this.stage, required this.pin, required this.stops, this.locating = false});
+  const RiderSheet({super.key, required this.stage, required this.pin, required this.stops, this.locating = false, this.tripStage});
   final RiderMapStage stage;
+  /// the trip's stage: finding a driver pins Cancel Ride under the sheet
+  final RiderStage? tripStage;
   final bool pin;
   final SheetStops stops;
   /// home without a position yet: "Searching your location..."
@@ -323,6 +325,7 @@ class RiderSheet extends StatelessWidget {
   Widget build(BuildContext context) {
     final shell = RiderMapScope.of(context);
     final key = ValueKey((stage.kind, stage.tripId, pin, locating));
+    final footerKey = ValueKey((stage.kind, stage.tripId, tripStage));
     Widget? footer;
     Widget body;
     switch (stage.kind) {
@@ -336,6 +339,7 @@ class RiderSheet extends StatelessWidget {
         body = const QuoteSheet();
       case RiderMapStageKind.trip:
         body = TripSheet(key: ValueKey(stage.tripId), tripId: stage.tripId!);
+        if (tripStage == RiderStage.finding) footer = TripSheetFooter(tripId: stage.tripId!);
     }
     return AppSheet(
       controller: shell.sheet,
@@ -343,7 +347,7 @@ class RiderSheet extends StatelessWidget {
       initialSnap: stops.initial,
       onHeightChanged: shell._onSheetHeight,
       padding: const EdgeInsets.fromLTRB(AnbessaSpace.page, 4, AnbessaSpace.page, 16),
-      footer: footer == null ? null : AnimatedSwitcherX(child: KeyedSubtree(key: key, child: footer)),
+      footer: footer == null ? null : AnimatedSwitcherX(child: KeyedSubtree(key: footerKey, child: footer)),
       builder: (context, _) => SharedAxisSwitcher(child: KeyedSubtree(key: key, child: body)),
     );
   }

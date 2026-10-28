@@ -562,7 +562,8 @@ Other behaviour:
 
 - A north needle shows when the map is turned outside navigation; tapping it turns north up.
 - The credit line is drawn by the app (one line, 9 px). A raster tile error sets `mapTilesDownProvider`.
-- Raster pins add the map's rotation so headings stay true. The car is amber, grey when stale.
+- Raster pins add the map's rotation so headings stay true (their marker layer counter-rotates, so the car is turned by heading + map rotation, once). On the vector engine every car is a symbol with `icon-rotate` = its heading and `icon-rotation-alignment: map`: the icon turns with the map, so a camera turn never adds or removes a turn of its own. The car images point north (heading 0). The car is white, grey when stale.
+- Who is a car: only the driver's car on a trip (`driverCar`, drawn only once its animator has a pose) and the cars around the rider on home (`nearbyCars`). The rider is never a car: their avatar pin on home and search (`meAsAvatar`), the pickup avatar on choose ride, the avatar in the rings while a driver is found, the blue dot (`anb-me-dot` + heading cone) while the driver comes. The `anb-me` layers only use the dot, cone and avatar images (tested in `map_scene_test.dart`, `rider_markers_test.dart`). `GET /api/locations/nearby` leaves out the caller's own car: a driver still online who switched the app to rider mode used to get their own car drawn where they stand, which looked like the rider's position being a car.
 
 ### Route lines (`route_layer.dart`)
 
@@ -581,9 +582,9 @@ Glides a car between GPS samples; a `ValueListenable<AnimatedPose?>` (`lat`, `ln
 
 - The first sample, or one more than 300 m from the shown pose, snaps.
 - With a `route` (a `RouteTrack`), each sample is projected onto the road within a window from the last progress (25 m behind to max(200 m, 2 × speed × gap + 60 m) ahead; the whole road when that misses). Progress is monotonic: a sample up to 25 m behind is jitter and holds the car. The shown pose moves along the road's distance over the sample gap (linear in distance, so speed is continuous across samples), and its heading is the road's bearing across ±6 m (turning through corners). When the next sample is late it keeps rolling along the road at the last speed for up to 6 s, then stops. A sample more than 40 m off the road is drawn where it is.
-- Without a route the glide is a straight line, heading the short way (`lerpAngleDeg`), and there is no dead reckoning.
-- Heading without a route: the sample's heading when given; below 1.5 m/s (measured from the samples when not given) the last heading is kept, so a parked car doesn't spin on GPS jitter; otherwise the bearing of the movement (when it moved more than 3 m).
-- The ticker runs only while gliding or rolling. More than 20 s without a sample marks the pose `stale` (a timer flips it).
+- Without a route the glide is a straight line and there is no dead reckoning.
+- Heading (`heading_filter.dart`, unit tested in `heading_filter_test.dart`): a `HeadingFilter` decides the car's actual travel heading per sample: the phone's GPS heading only while the car moves (≥ 1.5 m/s, reported or measured; a phone standing still reports 0 = north or noise, which used to turn parked cars north and back every few seconds); else the bearing of its movement since the last real sample at least 8 m away (closer fixes are jitter; the anchor stays, so slow real movement adds up); else the road's bearing where it is snapped; else the last heading is held. On a route the car takes the road's bearing as it drives along it. A `HeadingEaser` then turns the drawn heading to a new one the short way round (350° → 10° turns 20°) over 450 ms (ease-out cubic), only when the heading changes by more than 1°; the heading is never interpolated over the whole position glide or recomputed from the animated position.
+- The ticker runs only while gliding, rolling or turning. More than 20 s without a sample marks the pose `stale` (a timer flips it).
 
 Fed by the rider map shell's trip stage (the driver's car, one animator per trip owned by `RiderMapShell`; route = the ETA polyline to the pickup, or the trip's road while riding: `MapIntent.carRoad`), `DriverHomeScreen` and `DriverTripScreen` (the driver's own car from `lastPositionProvider`; on a trip the route is the guidance route), and per car by `CarsAnimator`.
 
@@ -591,7 +592,7 @@ Fed by the rider map shell's trip stage (the driver's car, one animator per trip
 
 `NearbyCarsController.watch(lat, lng)` starts polling `GET /api/locations/nearby` every 10 s, and polls at once when the point moved more than 150 m. `stop()` cancels; `pause()` stops polling but remembers the point, `resume()` polls at once and goes on. The rider home pauses it (and its `CarsAnimator`) while it is covered by another screen or tab (`TickerMode`), stops it when the app is paused and restarts it on resume.
 
-`CarsAnimator` matches each new car to the nearest existing animator within 150 m (so a moving car glides instead of blinking), with `maxGlide` 3 s and no dead reckoning; a new car fades in and a car that left fades out (400 ms, per-feature opacity). It publishes one `List<NearbyCarFrame>` per tick on `frames` (the map draws it natively; the screen never rebuilds for it), and its ticker stops when nothing moves or while `paused`.
+`CarsAnimator` matches the polled cars (anonymous, on a ~30 m grid, sorted by distance to the rider) to the drawn ones by the least total movement within 150 m: closest pairs first, then crossed pairs undone, so a moving car glides instead of blinking and two neighbours never trade identities (which made them glide across and turn round); each car's heading comes from its own `HeadingFilter`, so a parked car whose server heading wobbles between polls keeps facing the same way; with `maxGlide` 3 s and no dead reckoning; a new car fades in and a car that left fades out (400 ms, per-feature opacity). It publishes one `List<NearbyCarFrame>` per tick on `frames` (the map draws it natively; the screen never rebuilds for it), and its ticker stops when nothing moves or while `paused`.
 
 ### Navigation (`nav/`)
 

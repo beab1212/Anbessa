@@ -12,9 +12,14 @@ Common patterns:
 
 ### SplashScreen (`bootstrap/gates.dart`)
 
-The GoRide kit's splash (p. 15) in our colours: the whole screen amber (both themes), the አ mark (`AnbessaLogo(inverted: true)`: amber glyph on an ink square) and "Anbessa" in ink, and an ink spinner near the bottom. Shown while `sessionProvider` loads; the router moves on.
+The whole screen amber (both themes) with an animated intro (`SplashIntro`, `bootstrap/splash_intro.dart`), no spinner and no logo square. Shown while `sessionProvider` loads; the router moves on.
 
-When the stored session couldn't be checked (no network at a cold start: `sessionProvider` has an error and no value), the router keeps the person here instead of sending them to Welcome. The spinner is replaced by the offline text (`offlineBanner`) and an ink "Try again" pill (`retry`) that invalidates `sessionProvider`.
+- Timeline (`SplashTimeline`, `SplashFrame.at(t)`, pure and unit tested): our own side-view car (`paintSideCar`: ink body, pale amber windows, head and tail lights, wheels with amber rims and five spokes) drives in from off-screen left along a road line (ink dashes fading out at the screen edges) at full speed with three motion streaks behind it, then brakes evenly to a stop in the middle at 1.2 s; the nose dips and settles in a small damped bounce. The wheels turn with the distance covered. From 0.95 s "Anbessa" (Urbanist ExtraBold 46, ink; the brand name, never translated) rises and fades in under the road, one letter every 60 ms (each letter placed from the whole word's layout, so kerning is kept). From 2.3 s, while the app is still loading, the car cruises on the spot: the road's dashes slide left at 70 px/s, the wheels turn, the body bobs, short streaks.
+- Cheap: one `AnimationController` (its value is seconds, linear) drives one `CustomPainter` inside a `RepaintBoundary`; the name is laid out once. Reduced motion (`MediaQuery.disableAnimations`): the still end state, the controller never starts.
+- Semantics: the art is an image labelled "Anbessa" in a live region labelled "Loading" (`accLoading`).
+- The native launch screen is the same plain amber with no icon (Android `launch_background.xml`, `values*/styles.xml`, and on Android 12+ `values-v31` / `values-night-v31` with `windowSplashScreenBackground` amber and an empty `windowSplashScreenAnimatedIcon`; iOS `LaunchScreen.storyboard` amber with no image), so the hand-off to the animation doesn't flash.
+
+When the stored session couldn't be checked (no network at a cold start: `sessionProvider` has an error and no value), the router keeps the person here instead of sending them to Welcome. The offline text (`offlineBanner`) and an ink "Try again" pill (`retry`) that invalidates `sessionProvider` appear under the name (in a region of their own, so the art doesn't move); the car keeps cruising.
 
 ### IntroScreen (`intro/intro_screen.dart`)
 
@@ -129,7 +134,7 @@ The sheet content follows `riderStageOf(trip)` with a shared-axis switch; the sh
 - Top: the route card; Share (active and not `requested`; on → "share again / stop sharing") and SOS (red, flag `sos`, while `sosAvailable`) as round buttons under it.
 - The camera fits each stage once (the rings centred while finding), never as the car moves.
 - When dispatch gives the trip to another driver, "Your driver changed" once.
-- Cancel: `showCancelSheet` (free for 2 min after the match, 30 ETB after), `POST /api/trips/:id/cancel` with a new key.
+- Cancel: `CancelRideButton` (finding a driver: pinned as the sheet's footer, `TripSheetFooter`, so it is on screen at the sheet's resting size whatever the text size; the driver stages: at the end of the sheet, with the fee note once the free window closes) → `showCancelSheet` (`cancel_sheet.dart`: on the root navigator, `isScrollControlled`, sized to its content up to the screen; the reasons scroll, the title, the fee pill and the red "Cancel trip" / tonal "Keep the trip" pills always show; free for 2 min after the match, 30 ETB after) → `POST /api/trips/:id/cancel` with the reason and an idempotency key (one per trip and reason, so a retry after a dropped reply is the same cancel). The answer replaces the active trip: the stage turns `cancelled` and `TripEndLayer` shows "Ride has been canceled!"; OK clears the ended trip and goes home. A refusal is shown over the button (`Problem`) and the trip stays. A stage change while the reasons sheet is open (the driver arrives) still sends the rider's choice. The driver's cancel uses the same sheet (`driverSide`).
 - Providers: `tripViewProvider(id)`, `tripPartiesProvider(id)`, `driverLiveProvider(id)`, `tripEtaProvider(id)`, `featureProvider`.
 
 ### PlacePicker (`rider/booking/route_editor_screen.dart`, `/account/places/pick?label=home|work|other`)

@@ -14,7 +14,6 @@ import 'package:phone_app/core/realtime/realtime_hub.dart';
 import 'package:phone_app/core/session/secure_store.dart';
 import 'package:phone_app/core/session/session_controller.dart';
 import 'package:phone_app/features/auth/auth_screens.dart';
-import 'package:phone_app/features/bootstrap/gates.dart';
 import 'package:phone_app/features/bootstrap/location_prompt.dart';
 import 'package:phone_app/features/config/client_config_provider.dart';
 import 'package:phone_app/features/profile/account_screens.dart';
@@ -216,13 +215,6 @@ void main() {
     await tester.tap(find.text('Device Management'));
     await tester.pumpAndSettle();
     expect(find.text('sessions page'), findsOneWidget);
-  });
-
-  testWidgets('the splash offers a retry when the session could not be checked', (tester) async {
-    await pumpPage(tester, const SplashScreen(), offline: true);
-    await tester.pump(const Duration(milliseconds: 500));
-    expect(find.text('Anbessa'), findsOneWidget);
-    expect(find.text('Try again'), findsOneWidget);
   });
 
   testWidgets('the Enable Location dialog answers true for Grant and false for Maybe Later', (tester) async {

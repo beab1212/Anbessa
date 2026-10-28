@@ -205,7 +205,7 @@ class _DriverTripScreenState extends ConsumerState<DriverTripScreen> with Single
   Future<void> _cancel(Trip t, {bool noShow = false}) async {
     var reason = noShow ? CancelReason.noShow : null;
     reason ??= await showCancelSheet(context, free: true, feeMinor: 0, driverSide: true);
-    if (reason == null) return;
+    if (reason == null || !mounted) return;
     _cancelKey ??= newIdempotencyKey();
     await _do(() => ref.read(apisProvider).trips.cancel(t.id, reason!, idempotencyKey: _cancelKey!));
   }

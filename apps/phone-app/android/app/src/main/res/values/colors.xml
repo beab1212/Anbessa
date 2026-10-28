@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Anbessa amber: the launch screen, handing off to the Flutter splash animation on the same colour -->
+    <color name="splash_amber">#FFFFB300</color>
+</resources>

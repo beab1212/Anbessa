@@ -8,8 +8,12 @@
 // the road at its last speed for a few seconds, then stops. Without a route the glide is a
 // straight line and there is no dead reckoning.
 //
-// A parked car keeps its heading: below walking speed, GPS-derived bearings are noise. A big
-// jump snaps. More than [staleAfter] without a sample marks the pose stale.
+// Which way the car faces comes from a HeadingFilter (heading_filter.dart): the phone's heading
+// while it really moves, else its movement between real samples at least 8 m apart, else the
+// road's bearing; a parked car or GPS jitter keeps the last heading. Along a road the car takes
+// the road's bearing as it drives. The drawn heading turns to a new one the short way round over
+// ~450 ms (a HeadingEaser), only when it changes, never as a side effect of the position glide.
+// A big jump snaps. More than [staleAfter] without a sample marks the pose stale.
 //
 // The animator is a ValueListenable: the map listens to it and draws each frame natively, so
 // screens never rebuild per frame.
@@ -20,6 +24,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:ride_app_core/ride_app_core.dart';
+import 'heading_filter.dart';
 import 'scene/route_track.dart';
 
 @immutable
@@ -51,7 +56,10 @@ class MarkerAnimator extends ChangeNotifier implements ValueListenable<AnimatedP
     this.parkedSpeed = 1.5,
     this.offRouteMeters = 40,
     this.backTolerance = 25,
-  }) : _now = now ?? DateTime.now {
+    Duration turn = const Duration(milliseconds: 450),
+  })  : _now = now ?? DateTime.now,
+        _filter = HeadingFilter(movingSpeed: parkedSpeed),
+        _turn = HeadingEaser(duration: turn) {
     if (vsync != null) _ticker = vsync.createTicker(_tick);
   }
 
@@ -70,6 +78,8 @@ class MarkerAnimator extends ChangeNotifier implements ValueListenable<AnimatedP
   Ticker? _ticker;
   Timer? _staleTimer;
 
+  final HeadingFilter _filter;
+  final HeadingEaser _turn;
   // what is shown now
   AnimatedPose? _pose;
   double _heading = 0;
@@ -79,8 +89,6 @@ class MarkerAnimator extends ChangeNotifier implements ValueListenable<AnimatedP
   GeoPoint? _to;
   double? _fromAlong;
   double? _toAlong;
-  double _fromHeading = 0;
-  double _toHeading = 0;
   DateTime? _glideStart;
   DateTime? _glideEnd;
   Duration _glide = Duration.zero;
@@ -101,7 +109,7 @@ class MarkerAnimator extends ChangeNotifier implements ValueListenable<AnimatedP
   bool get isStale => _sampleAt != null && _now().difference(_sampleAt!) > staleAfter;
 
   /// Gliding, or rolling on along the route: the ticker is needed.
-  bool get isAnimating => _glideStart != null || _deadReckoning(_now());
+  bool get isAnimating => _glideStart != null || _deadReckoning(_now()) || _turn.busyAt(_now());
 
   /// Where the car is along [route], metres from its start (null off the route or without one).
   double? get progressMeters => _progress;
@@ -173,16 +181,18 @@ class MarkerAnimator extends ChangeNotifier implements ValueListenable<AnimatedP
       }
     }
     final target = along != null ? track!.pointAt(along) : p;
-    final targetHeading = along != null ? track!.bearingAt(along) : _headingFor(p, prev, heading, speed ?? measured);
+    final roadBearing = along != null ? track!.bearingAt(along) : null;
     final jump = first ? 0.0 : geoDistanceMeters(_pose!.point, target);
     _progress = along;
 
     if (first || jump > snapOverMeters) {
-      _heading = targetHeading;
+      // somewhere new: what the samples said before says nothing about this one
+      _filter.reset();
+      _heading = _filter.update(target, gpsHeading: heading, speed: speed, roadBearing: roadBearing) ?? roadBearing ?? _heading;
+      _turn.snap(_heading);
       _shownAlong = along;
       _from = _to = target;
       _fromAlong = _toAlong = along;
-      _fromHeading = _toHeading = targetHeading;
       _glideStart = null;
       _glideEnd = now;
       _glideSpeed = 0;
@@ -195,9 +205,10 @@ class MarkerAnimator extends ChangeNotifier implements ValueListenable<AnimatedP
     final gap = prevAt == null ? maxGlide : sampleAt.difference(prevAt);
     _glide = gap <= Duration.zero ? maxGlide : (gap > maxGlide ? maxGlide : gap);
     _from = _pose!.point;
-    _fromHeading = _heading;
     _to = target;
-    _toHeading = targetHeading;
+    // off the road the sample decides the heading; on it the road does, as the car drives
+    final h = _filter.update(along != null ? target : p, gpsHeading: heading, speed: speed ?? measured, roadBearing: roadBearing);
+    if (h != null && along == null) _turn.turnTo(h, now);
     if (along != null && _shownAlong != null) {
       _fromAlong = _shownAlong;
       // dead reckoning may have carried the car past the new sample: wait there rather than reverse
@@ -209,14 +220,6 @@ class MarkerAnimator extends ChangeNotifier implements ValueListenable<AnimatedP
     }
     _glideStart = now;
     _ensureTicking();
-  }
-
-  double _headingFor(GeoPoint p, GeoPoint? prev, double? heading, double speed) {
-    if (heading != null) return heading;
-    // parked or creeping: whatever the bearing between two noisy fixes says, keep the last one
-    if (speed < parkedSpeed || prev == null) return _heading;
-    if (geoDistanceMeters(prev, p) < 3) return _heading;
-    return geoBearing(prev, p);
   }
 
   bool _deadReckoning(DateTime now) {
@@ -265,16 +268,15 @@ class MarkerAnimator extends ChangeNotifier implements ValueListenable<AnimatedP
         _shownAlong = a;
         p = track.pointAt(a);
         // a car standing still keeps facing where it faced
-        if ((_toAlong! - _fromAlong!).abs() > 0.5) _heading = track.bearingAt(a);
+        if ((_toAlong! - _fromAlong!).abs() > 0.5) _turn.turnTo(track.bearingAt(a), now);
       } else {
         p = geoLerp(_from!, _to!, t);
-        _heading = lerpAngleDeg(_fromHeading, _toHeading, t);
       }
+      _heading = _turn.valueAt(now) ?? _heading;
       if (t >= 1) {
         _glideStart = null;
         _glideEnd = now;
         _from = _to;
-        _fromHeading = _toHeading;
         _fromAlong = _toAlong;
       }
       _emit(p, now, speed: _glideSpeed);
@@ -285,10 +287,18 @@ class MarkerAnimator extends ChangeNotifier implements ValueListenable<AnimatedP
       final extra = now.difference(_glideEnd!).inMilliseconds / 1000 * _speed;
       final a = min(_track!.length, _toAlong! + extra);
       _shownAlong = a;
-      _heading = _track!.bearingAt(a);
+      _turn.turnTo(_track!.bearingAt(a), now);
+      _heading = _turn.valueAt(now) ?? _heading;
       _emit(_track!.pointAt(a), now, speed: _speed);
       return;
     }
+    // still turning in place
+    if (_turn.busyAt(now)) {
+      _heading = _turn.valueAt(now) ?? _heading;
+      _emit(_pose!.point, now, speed: 0);
+      return;
+    }
+    _heading = _turn.valueAt(now) ?? _heading;
     // nothing moves: stop the ticker (a new sample starts it again)
     final t = _ticker;
     if (t != null && t.isActive) t.stop();

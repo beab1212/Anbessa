@@ -147,24 +147,48 @@ class CarsAnimator {
   void update(List<NearbyCar> cars) {
     final now = _now();
     final remaining = [for (final c in _cars) if (c.leaving == null) c];
-    final next = <_Car>[];
-    for (final car in cars) {
+    // match the polled cars to the drawn ones by the least total movement (closest pairs first,
+    // then crossed pairs undone), not in the server's order: a car taken by its neighbour would
+    // glide across and turn round to get there, and the two would look like they spin
+    final pairs = <(int, _Car, double)>[];
+    for (final (i, car) in cars.indexed) {
       final p = (lat: car.lat, lng: car.lng);
-      _Car? best;
-      var bestD = 150.0;
       for (final c in remaining) {
-        final d = c.anim.pose == null ? double.infinity : geoDistanceMeters(c.anim.pose!.point, p);
-        if (d < bestD) {
-          bestD = d;
-          best = c;
+        final at = c.anim.pose;
+        if (at == null) continue;
+        final d = geoDistanceMeters(at.point, p);
+        if (d < 150) pairs.add((i, c, d));
+      }
+    }
+    pairs.sort((x, y) => x.$3.compareTo(y.$3));
+    final matched = <int, _Car>{};
+    final taken = <_Car>{};
+    for (final (i, c, _) in pairs) {
+      if (matched.containsKey(i) || taken.contains(c)) continue;
+      matched[i] = c;
+      taken.add(c);
+    }
+    // then undo crossed pairs: two cars trading places costs more than each keeping its own
+    final idx = matched.keys.toList();
+    double dist(int i, _Car c) => geoDistanceMeters(c.anim.pose!.point, (lat: cars[i].lat, lng: cars[i].lng));
+    for (var pass = 0, changed = true; changed && pass < 4; pass++) {
+      changed = false;
+      for (var x = 0; x < idx.length; x++) {
+        for (var y = x + 1; y < idx.length; y++) {
+          final i = idx[x], j = idx[y], ci = matched[i]!, cj = matched[j]!;
+          if (dist(i, cj) + dist(j, ci) + 0.5 < dist(i, ci) + dist(j, cj) && dist(i, cj) < 150 && dist(j, ci) < 150) {
+            matched[i] = cj;
+            matched[j] = ci;
+            changed = true;
+          }
         }
       }
-      if (best != null) {
-        remaining.remove(best);
-      } else {
-        best = _Car(_nextId++, MarkerAnimator(now: _now, maxGlide: const Duration(seconds: 3), deadReckonFor: Duration.zero), now);
-      }
-      best.anim.push(p, heading: car.heading, at: now);
+    }
+    remaining.removeWhere(taken.contains);
+    final next = <_Car>[];
+    for (final (i, car) in cars.indexed) {
+      final best = matched[i] ?? _Car(_nextId++, MarkerAnimator(now: _now, maxGlide: const Duration(seconds: 3), deadReckonFor: Duration.zero), now);
+      best.anim.push((lat: car.lat, lng: car.lng), heading: car.heading, at: now);
       next.add(best);
     }
     for (final gone in remaining) {

@@ -38,28 +38,7 @@ class TripSheet extends ConsumerStatefulWidget {
 }
 
 class _TripSheetState extends ConsumerState<TripSheet> {
-  bool _busy = false;
-  Object? _error;
   RiderStage? _lastStage;
-
-  Future<void> _cancel(Trip t) async {
-    final free = riderCancelIsFree(t, DateTime.now().toUtc());
-    final reason = await showCancelSheet(context, free: free, feeMinor: _cancelFeeMinor);
-    if (reason == null) return;
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
-    try {
-      final u = await ref.read(apisProvider).trips.cancel(t.id, reason, idempotencyKey: newIdempotencyKey());
-      ref.read(activeTripProvider.notifier).replace(u);
-    } catch (e) {
-      Haptics.error();
-      setState(() => _error = e);
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
 
   /// A new stage: haptics, a word, confetti at the end; the sheet settles at its resting size.
   void _onStage(RiderStage stage) {
@@ -142,14 +121,97 @@ class _TripSheetState extends ConsumerState<TripSheet> {
       child: KeyedSubtree(
         key: ValueKey(stage),
         child: switch (stage) {
-          RiderStage.finding => _Finding(trip: t, busy: _busy, error: _error, onCancel: () => _cancel(t)),
+          RiderStage.finding => _Finding(trip: t),
           RiderStage.driverAssigned || RiderStage.driverArrived || RiderStage.inTrip => _DriverStage(
-              trip: t, stage: stage, parties: parties, live: view.live, etaSeconds: view.etaSeconds, pinOn: pinOn, busy: _busy, error: _error, onCancel: () => _cancel(t)),
+              trip: t, stage: stage, parties: parties, live: view.live, etaSeconds: view.etaSeconds, pinOn: pinOn),
           // the end of the trip covers the shell (TripEndLayer); the sheet waits under it
           RiderStage.completed || RiderStage.cancelled => const SizedBox(height: 120),
           RiderStage.unknown => Text(tripStatusLabel(l, t.status)),
         },
       ),
+    );
+  }
+}
+
+/// Pinned under the trip sheet while a driver is being found: Cancel Ride, always on screen
+/// whatever the text size (the sheet's content scrolls above it).
+class TripSheetFooter extends ConsumerWidget {
+  const TripSheetFooter({super.key, required this.tripId});
+  final String tripId;
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final v = ref.watch(tripViewProvider(tripId));
+    if (v == null || v.stage != RiderStage.finding) return const SizedBox.shrink();
+    return CancelRideButton(trip: v.trip, showFee: false);
+  }
+}
+
+/// The kit's red-outlined "Cancel Ride": the reasons sheet, then POST /api/trips/:id/cancel with
+/// the reason (one idempotency key per trip and reason, so a retry is the same cancel). The trip
+/// that comes back replaces the active one: its stage turns to cancelled and the shell shows "Ride
+/// has been canceled!". A refusal is said above the button and the trip stays. Under it, the fee
+/// once the free window has closed (checked every few seconds).
+class CancelRideButton extends ConsumerStatefulWidget {
+  const CancelRideButton({super.key, required this.trip, this.showFee = true});
+  final Trip trip;
+  final bool showFee;
+  @override
+  ConsumerState<CancelRideButton> createState() => _CancelRideButtonState();
+}
+
+class _CancelRideButtonState extends ConsumerState<CancelRideButton> {
+  bool _busy = false;
+  Object? _error;
+  (String, CancelReason, String)? _key;
+
+  Future<void> _cancel() async {
+    if (_busy) return;
+    final t = widget.trip;
+    final free = riderCancelIsFree(t, DateTime.now().toUtc());
+    // read before the sheet: a stage change while it is open (the driver arrives) rebuilds the
+    // sheet's content and this button with it, and the rider's choice must still be sent
+    final apis = ref.read(apisProvider);
+    final active = ref.read(activeTripProvider.notifier);
+    final reason = await showCancelSheet(context, free: free, feeMinor: _cancelFeeMinor);
+    if (reason == null) return;
+    final k = _key;
+    final key = k != null && k.$1 == t.id && k.$2 == reason ? k.$3 : newIdempotencyKey();
+    _key = (t.id, reason, key);
+    if (mounted) {
+      setState(() {
+        _busy = true;
+        _error = null;
+      });
+    }
+    try {
+      final u = await apis.trips.cancel(t.id, reason, idempotencyKey: key);
+      active.replace(u);
+    } catch (e) {
+      Haptics.error();
+      if (mounted) setState(() => _error = e);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l = context.l10n;
+    final c = context.colors;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Problem(_error, describe: (e) => describeError(l, e)),
+        PillButton(key: const ValueKey('cancel-ride'), label: l.grCancelRide, variant: PillVariant.outlineDanger, busy: _busy, onPressed: _busy ? null : _cancel),
+        if (widget.showFee)
+          TickingBuilder(
+            interval: const Duration(seconds: 5),
+            builder: (context, now) => riderCancelIsFree(widget.trip, now.toUtc())
+                ? const SizedBox.shrink()
+                : Padding(padding: const EdgeInsets.only(top: 8), child: Text(l.cancelFeeWarning(birr(_cancelFeeMinor, locale: context.localeTag)), textAlign: TextAlign.center, style: AnbessaType.caption.copyWith(color: c.muted))),
+          ),
+      ],
     );
   }
 }
@@ -209,11 +271,8 @@ class _Headline extends StatelessWidget {
 }
 
 class _Finding extends StatelessWidget {
-  const _Finding({required this.trip, required this.busy, required this.error, required this.onCancel});
+  const _Finding({required this.trip});
   final Trip trip;
-  final bool busy;
-  final Object? error;
-  final VoidCallback onCancel;
   @override
   Widget build(BuildContext context) {
     final l = context.l10n;
@@ -235,9 +294,7 @@ class _Finding extends StatelessWidget {
         ),
         const SizedBox(height: 16),
         const Center(child: LocatingDot()),
-        const SizedBox(height: 20),
-        Problem(error, describe: (e) => describeError(l, e)),
-        PillButton(key: const ValueKey('cancel-ride'), label: l.grCancelRide, variant: PillVariant.outlineDanger, busy: busy, onPressed: busy ? null : onCancel),
+        // Cancel Ride is the sheet's footer here (TripSheetFooter): always on screen
       ],
     );
   }
@@ -343,16 +400,13 @@ class TripCards extends ConsumerWidget {
 
 /// The driver heading to the pickup, waiting there, and the ride itself.
 class _DriverStage extends ConsumerWidget {
-  const _DriverStage({required this.trip, required this.stage, required this.parties, required this.live, required this.etaSeconds, required this.pinOn, required this.busy, required this.error, required this.onCancel});
+  const _DriverStage({required this.trip, required this.stage, required this.parties, required this.live, required this.etaSeconds, required this.pinOn});
   final Trip trip;
   final RiderStage stage;
   final TripParties? parties;
   final DriverLive? live;
   final int? etaSeconds;
   final bool pinOn;
-  final bool busy;
-  final Object? error;
-  final VoidCallback onCancel;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -420,15 +474,7 @@ class _DriverStage extends ConsumerWidget {
         TripCards(trip: trip),
         if (!riding) ...[
           const SizedBox(height: 20),
-          Problem(error, describe: (e) => describeError(l, e)),
-          PillButton(key: const ValueKey('cancel-ride'), label: l.grCancelRide, variant: PillVariant.outlineDanger, busy: busy, onPressed: busy ? null : onCancel),
-          // the free window closes on its own: checked every few seconds
-          TickingBuilder(
-            interval: const Duration(seconds: 5),
-            builder: (context, now) => riderCancelIsFree(trip, now.toUtc())
-                ? const SizedBox.shrink()
-                : Padding(padding: const EdgeInsets.only(top: 8), child: Text(l.cancelFeeWarning(birr(_cancelFeeMinor, locale: context.localeTag)), textAlign: TextAlign.center, style: AnbessaType.caption.copyWith(color: c.muted))),
-          ),
+          CancelRideButton(trip: trip),
         ],
       ],
     );
