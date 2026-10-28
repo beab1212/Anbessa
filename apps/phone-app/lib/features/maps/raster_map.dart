@@ -155,6 +155,8 @@ class _RasterMapState extends ConsumerState<RasterMap> with TickerProviderStateM
                         : MarkerLayer(
                             rotate: true,
                             markers: [
+                              if (w.pulse?.onCar ?? false)
+                                Marker(point: LatLng(p.lat, p.lng), width: 220, height: 220, child: const IgnorePointer(child: RadarRings(key: mapPulseKey, size: 220))),
                               Marker(
                                 point: LatLng(p.lat, p.lng),
                                 width: 52,
@@ -241,6 +243,13 @@ class _RasterPort implements CameraPort {
 
   @override
   double get bearing => _s._ready ? -_s._ctrl.camera.rotation : 0;
+
+  @override
+  CameraView? get current {
+    if (!_s._ready) return null;
+    final cam = _s._ctrl.camera;
+    return (center: (lat: cam.center.latitude, lng: cam.center.longitude), zoom: cam.zoom, bearing: -cam.rotation, pitch: 0.0);
+  }
 
   @override
   bool get followsEveryFrame => true;

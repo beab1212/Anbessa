@@ -30,6 +30,7 @@ import 'me_marker.dart';
 import 'raster_map.dart';
 import 'route_layer.dart';
 import 'scene/scene_geojson.dart';
+import 'scene/scene_images.dart' show plainPickupPinImage;
 import 'vector_map.dart';
 
 export 'callouts.dart' show MapCallout;
@@ -60,6 +61,21 @@ class MapOverlay {
   final Size size;
   final Widget child;
   final Alignment alignment;
+}
+
+/// The search pulse (rings that keep spreading out): at a point, or around the followed car
+/// wherever it is drawn ([point] until there is a car). The vector engine draws it natively, so
+/// it never trails the map.
+@immutable
+class MapPulse {
+  const MapPulse.at(this.point) : onCar = false;
+  const MapPulse.onCar({this.point}) : onCar = true;
+  final LatLng? point;
+  final bool onCar;
+  @override
+  bool operator ==(Object other) => other is MapPulse && other.point == point && other.onCar == onCar;
+  @override
+  int get hashCode => Object.hash(point, onCar);
 }
 
 /// The person the map's avatar pins show (the pickup, and "you" with [AnbessaMap.meAsAvatar]).
@@ -96,6 +112,7 @@ class AnbessaMap extends ConsumerWidget {
     this.nearbyLabel,
     this.callouts = const [],
     this.overlays = const [],
+    this.pulse,
     this.topInset = 0,
     this.bottomInset = 0,
     this.sheetHeight,
@@ -112,6 +129,7 @@ class AnbessaMap extends ConsumerWidget {
     this.interactive = true,
     this.person,
     this.meAsAvatar = false,
+    this.pickupAsAvatar = true,
     this.roundControls = false,
   });
 
@@ -150,6 +168,8 @@ class AnbessaMap extends ConsumerWidget {
   /// labels at fixed points (Flutter widgets: keep to two or three)
   final List<MapCallout> callouts;
   final List<MapOverlay> overlays;
+  /// the search pulse, if searching
+  final MapPulse? pulse;
   /// pixels covered at the top (banners) and bottom (the sheet)
   final double topInset;
   final double bottomInset;
@@ -175,6 +195,9 @@ class AnbessaMap extends ConsumerWidget {
   final MapPerson? person;
   /// draw the person as their avatar pin (the home map) instead of the small dot
   final bool meAsAvatar;
+  /// the pickup as the person's avatar pin (while choosing a ride); false draws a plain pickup pin
+  /// without their photo (once the ride is booked)
+  final bool pickupAsAvatar;
   /// the GoRide kit's controls: round white buttons (a layers button for the mode, a crosshair
   /// to recenter) instead of the small squares
   final bool roundControls;
@@ -230,10 +253,12 @@ List<MapPin> pinsFor(AnbessaMap w, double Function(BuildContext) mapRotation, {b
   Widget turning(Widget Function(double rot) child) => Builder(builder: (ctx) => child(mapRotation(ctx)));
   return [
     for (final o in w.overlays) MapPin(point: o.point, size: o.size, alignment: o.alignment, child: o.child),
+    if (native && w.pulse?.point != null && !(w.pulse!.onCar && w.carNow != null)) MapPin(point: w.pulse!.point!, size: const Size(220, 220), child: const IgnorePointer(child: RadarRings(key: mapPulseKey, size: 220))),
     if (native) ...[
       if (w.nearbyCars == null)
         for (final car in w.cars) MapPin(point: car.position, size: const Size(42, 42), child: turning((r) => NearbyCarGlyph(heading: car.heading, mapRotation: r))),
-      if (w.pickup != null) MapPin(point: w.pickup!, size: avatarPinSize(46), alignment: Alignment.bottomCenter, child: MapAvatarPin(photo: w.person?.photo, name: w.person?.name ?? '', diameter: 46)),
+      if (w.pickup != null && w.pickupAsAvatar) MapPin(point: w.pickup!, size: avatarPinSize(46), alignment: Alignment.bottomCenter, child: MapAvatarPin(photo: w.person?.photo, name: w.person?.name ?? '', diameter: 46))
+      else if (w.pickup != null) MapPin(point: w.pickup!, size: plainPickupPinSize, alignment: Alignment.bottomCenter, child: const PlainPickupPin()),
       if (w.dropoff != null) MapPin(point: w.dropoff!, size: destinationPinSize(36), alignment: Alignment.bottomCenter, child: const DestinationPin(diameter: 36)),
       if (me != null && w.meAsAvatar)
         MapPin(point: me.position, size: avatarPinSize(46), alignment: Alignment.bottomCenter, child: MapAvatarPin(photo: w.person?.photo, name: w.person?.name ?? '', diameter: 46))
@@ -244,8 +269,33 @@ List<MapPin> pinsFor(AnbessaMap w, double Function(BuildContext) mapRotation, {b
       else if (still != null)
         MapPin(point: still.position, size: const Size(44, 44), child: turning((r) => CarMarker(heading: still.heading ?? 0, stale: still.stale, onTrip: still.onTrip, mapRotation: r))),
     ],
-    for (final m in w.callouts.take(3)) MapPin(point: m.point, size: const Size(240, 34), alignment: Alignment(0, -m.offsetY / 17), child: Center(child: FadeSlideIn(key: ValueKey('callout:${m.point.latitude.toStringAsFixed(5)},${m.point.longitude.toStringAsFixed(5)}'), offset: 0.3, child: MapCalloutChip(callout: m)))),
+    if (native)
+      for (final m in w.callouts.take(3)) MapPin(point: m.point, size: const Size(240, 34), alignment: Alignment(0, -m.offsetY / 17), child: Center(child: FadeSlideIn(key: ValueKey('callout:${m.point.latitude.toStringAsFixed(5)},${m.point.longitude.toStringAsFixed(5)}'), offset: 0.3, child: MapCalloutChip(callout: m)))),
   ];
+}
+
+/// Finds the search pulse in widget tests (the raster engine draws it as a widget).
+const mapPulseKey = ValueKey('map-pulse');
+
+/// How high a callout's tail sits above its point on the vector map, for its [MapCallout.offsetY].
+double calloutLift(MapCallout m) => max(0.0, -m.offsetY - 4);
+
+/// The plain pickup pin as a widget (the raster engine), the same drawing as the native image.
+const plainPickupPinSize = Size(30, 40);
+
+class PlainPickupPin extends StatelessWidget {
+  const PlainPickupPin({super.key});
+  @override
+  Widget build(BuildContext context) => Semantics(label: 'pickup', child: CustomPaint(size: plainPickupPinSize, painter: _ImagePainter(plainPickupPinImage(context.colors, 1).paint)));
+}
+
+class _ImagePainter extends CustomPainter {
+  const _ImagePainter(this.draw);
+  final void Function(Canvas) draw;
+  @override
+  void paint(Canvas canvas, Size size) => draw(canvas);
+  @override
+  bool shouldRepaint(_ImagePainter old) => false;
 }
 
 /// The controls on the map's right edge: the 2D / 3D / satellite switch, a north needle when the

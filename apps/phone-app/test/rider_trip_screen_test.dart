@@ -52,11 +52,15 @@ void main() {
     expect(find.text('Finding you a nearby driver...'), findsOneWidget);
     expect(find.text('Cancel Ride'), findsOneWidget);
     expect(find.byType(LocatingDot), findsOneWidget);
-    // the rings sit on the map at the pickup, the rider's avatar in them (no pickup pin)
+    // the rings pulse on the map around a plain pickup pin: no photo of the rider once booked
     final map = tester.widget<AnbessaMap>(find.byType(AnbessaMap));
-    expect(map.overlays.single.point, LatLng(t.pickup.lat, t.pickup.lng));
-    expect(map.overlays.single.child, isA<RadarRings>());
-    expect(map.pickup, isNull);
+    expect(map.pulse, MapPulse.at(LatLng(t.pickup.lat, t.pickup.lng)));
+    expect(map.overlays, isEmpty);
+    expect(map.pickup, LatLng(t.pickup.lat, t.pickup.lng));
+    expect(map.pickupAsAvatar, isFalse);
+    expect(find.byKey(mapPulseKey), findsOneWidget);
+    expect(find.byType(MapAvatarPin), findsNothing);
+    expect(find.byType(PlainPickupPin), findsOneWidget);
     expect(find.byType(ElapsedText), findsOneWidget);
     expect(find.byType(RoutePointsCard), findsOneWidget);
     expect(find.byTooltip('Share trip'), findsNothing); // nothing to follow until a driver is on it

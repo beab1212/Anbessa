@@ -5,8 +5,14 @@
 // and joins, nearby cars, pins, the person, the followed car and its label) and, in 3D, the
 // extruded buildings under the routes. After that, every set*() call only replaces the data of
 // its own source through updateGeoJsonSource: no layer is ever removed and re-added for a data
-// change. Updates are coalesced per source to at most ~30 a second (the latest data wins), and
-// identical data is not sent again. A style change (theme, 2D/3D/satellite) drops everything
+// change. Updates are coalesced per source to at most ~30 a second (the latest data wins; the
+// followed car goes out on every frame, so it moves in step with a camera that follows it), and
+// identical data is not sent again.
+//
+// In 3D the cars are standing low-poly cars (car3d.dart): their 36 frames are painted when 3D
+// is first shown on a style, and each car picks the frame for its heading relative to the
+// camera's bearing (setViewBearing). The search pulse and the labels at points are native too,
+// so nothing on the map trails it while it moves. A style change (theme, 2D/3D/satellite) drops everything
 // native; attach() is called again for the new style and re-creates it from the last data.
 
 import 'dart:async';
@@ -18,6 +24,7 @@ import '../map_styles.dart';
 import '../marker_animator.dart';
 import '../me_marker.dart';
 import '../route_layer.dart';
+import 'car3d.dart';
 import 'scene_geojson.dart';
 import 'scene_images.dart';
 import 'scene_style.dart';
@@ -25,8 +32,10 @@ import 'scene_style.dart';
 class MapScene {
   MapScene({this.minInterval = const Duration(milliseconds: 33)});
 
-  /// the shortest time between two updates of one source
+  /// the shortest time between two updates of one source (the followed car: every frame)
   final Duration minInterval;
+
+  Duration _intervalOf(String id) => id == SceneIds.driver ? Duration.zero : minInterval;
 
   ml.StyleController? _style;
   SceneLook? _look;
@@ -48,6 +57,16 @@ class MapScene {
   String? _shownDriverLabel;
   String? _shownNearbyLabel;
   ScenePerson _person = ScenePerson.nobody;
+  // 3D cars: whether the style has their frames, and the camera's bearing they are seen from
+  bool _car3dReady = false;
+  double _viewBearing = 0;
+  // the pulse: where (or on the followed car), and its phase
+  GeoPoint? _pulseAt;
+  bool _pulseOnCar = false;
+  double _pulsePhase = 0;
+  // labels at points, and the images the style has for them
+  List<({GeoPoint point, String text, double lift})> _callouts = const [];
+  final _calloutImages = <String>{};
 
   /// The scene's layers and sources exist on the current style.
   bool get isAttached => _style != null;
@@ -62,9 +81,16 @@ class MapScene {
     _sent.clear();
     _shownDriverLabel = _shownNearbyLabel = null;
     _buildings = look.buildings;
+    _car3dReady = false;
+    _calloutImages.clear();
     try {
       await _addImages(style, look);
       if (gen != _gen) return;
+      if (look.buildings) {
+        await _addCar3dImages(style, look);
+        if (gen != _gen) return;
+        _car3dReady = true;
+      }
       for (final id in SceneIds.sources) {
         final data = _wanted[id] ?? emptyFeatureCollection;
         try {
@@ -88,10 +114,14 @@ class MapScene {
     if (gen != _gen || _disposed) return;
     _style = style;
     _look = look;
+    // the cars as this style draws them (flat, or the 3D frames)
+    _putDriver();
+    _putNearby();
     for (final id in _wanted.keys) {
       if (_wanted[id] != _sent[id]) _schedule(id);
     }
     unawaited(_syncLabels());
+    unawaited(_syncCallouts());
   }
 
   /// The style is being replaced: forget it until the next attach.
@@ -112,6 +142,7 @@ class MapScene {
       SceneIds.imgCarNearby: nearbyCarImage(c, k),
       SceneIds.imgCarShadow: carShadowImage(c, k),
       SceneIds.imgPinDropoff: destinationPinImage(c, k),
+      SceneIds.imgPinPickupPlain: plainPickupPinImage(c, k),
       SceneIds.imgMeDot: meDotImage(c, k),
       SceneIds.imgMeCone: meConeImage(c, k),
     };
@@ -137,6 +168,13 @@ class MapScene {
     unawaited(_addPersonImages(style, look));
   }
 
+  /// The standing 3D car, one image per direction.
+  Future<void> _addCar3dImages(ml.StyleController style, SceneLook look) async {
+    for (var i = 0; i < car3dFrames; i++) {
+      await _addImage(style, car3dImageId(i), car3dImage(i, look.car3dScale));
+    }
+  }
+
   Future<void> _addImage(ml.StyleController style, String id, SceneImage img) async {
     try {
       await style.addImageFromCanvas(id: id, painter: img.paint, width: img.width, height: img.height);
@@ -151,7 +189,17 @@ class MapScene {
     if (style == null || look == null) return;
     if (on) {
       await _addBuildings(style, look, below: SceneIds.routeSecondary);
+      if (!_car3dReady) {
+        final gen = _gen;
+        await _addCar3dImages(style, look);
+        if (gen != _gen || !_buildings) return;
+        _car3dReady = true;
+      }
+      _putDriver();
+      _putNearby();
     } else {
+      _putDriver();
+      _putNearby();
       try {
         await style.removeLayer(buildingsLayerId);
       } catch (_) {}
@@ -177,7 +225,25 @@ class MapScene {
     _put(SceneIds.routes, routesGeoJson([for (final r in routes) if (!r.isEmpty) SceneRoute(toGeoPoints(r.points), sceneKindOf(r.kind))]));
   }
 
-  void setPins({LatLng? pickup, LatLng? dropoff}) => _put(SceneIds.pins, pinsGeoJson(pickup: _gp(pickup), dropoff: _gp(dropoff)));
+  /// The pickup and drop-off pins; [plainPickup] draws the pickup without the person's photo.
+  void setPins({LatLng? pickup, LatLng? dropoff, bool plainPickup = false}) =>
+      _put(SceneIds.pins, pinsGeoJson(pickup: _gp(pickup), dropoff: _gp(dropoff), plainPickup: plainPickup));
+
+  /// The camera's bearing: the 3D cars are seen from it.
+  void setViewBearing(double bearing) {
+    final old = _viewBearing;
+    _viewBearing = bearing;
+    if (!_cars3d) return;
+    // only when some car's frame changes (a frame is 10°)
+    bool moved(double heading) => car3dFrameFor(heading, old) != car3dFrameFor(heading, bearing);
+    final d = _driver;
+    if (d != null && moved(d.heading)) _putDriver();
+    if (_nearby.any((c) => moved(c.bearing))) _putNearby();
+  }
+
+  bool get _cars3d => _buildings && _car3dReady;
+
+  Car3dFrame? get _frame3d => _cars3d ? (b) => car3dImageId(car3dFrameFor(b, _viewBearing)) : null;
 
   void setDriverCar(AnimatedPose? pose) {
     _driver = pose;
@@ -186,7 +252,8 @@ class MapScene {
 
   void _putDriver() {
     final p = _driver;
-    _put(SceneIds.driver, driverGeoJson(at: p?.point, bearing: p?.heading ?? 0, stale: p?.stale ?? false, label: _driverLabel != null && _shownDriverLabel == _driverLabel));
+    _put(SceneIds.driver, driverGeoJson(at: p?.point, bearing: p?.heading ?? 0, stale: p?.stale ?? false, label: _driverLabel != null && _shownDriverLabel == _driverLabel, frame3d: _frame3d));
+    if (_pulseOnCar) _putPulse();
   }
 
   /// The label above the followed car ("4 min"); null hides it.
@@ -202,7 +269,7 @@ class MapScene {
     _putNearby();
   }
 
-  void _putNearby() => _put(SceneIds.nearby, nearbyGeoJson(_nearby, leadLabel: _nearbyLabel != null && _shownNearbyLabel == _nearbyLabel));
+  void _putNearby() => _put(SceneIds.nearby, nearbyGeoJson(_nearby, leadLabel: _nearbyLabel != null && _shownNearbyLabel == _nearbyLabel, frame3d: _frame3d));
 
   /// The label above the nearest car around the rider; null hides it.
   void setNearbyLabel(String? text) {
@@ -214,6 +281,54 @@ class MapScene {
 
   /// The person: a dot (and heading cone), or their avatar pin with [avatar].
   void setMe(MePose? me, {bool avatar = false}) => _put(SceneIds.me, meGeoJson(at: _gp(me?.position), heading: me?.heading, avatar: avatar));
+
+  /// The search pulse at [at], or around the followed car with [onCar] ([at] until there is
+  /// one); neither hides it.
+  void setPulse({LatLng? at, bool onCar = false}) {
+    _pulseAt = _gp(at);
+    _pulseOnCar = onCar;
+    _putPulse();
+  }
+
+  /// The pulse's phase (0–1 of a wave); the map's ticker moves it.
+  void setPulsePhase(double t) {
+    _pulsePhase = t;
+    _putPulse();
+  }
+
+  bool get hasPulse => _pulseAt != null || _pulseOnCar;
+
+  void _putPulse() {
+    final at = _pulseOnCar ? (_driver?.point ?? _pulseAt) : _pulseAt;
+    _put(SceneIds.pulse, pulseGeoJson(at, _pulsePhase));
+  }
+
+  /// Labels at points, each [lift] logical pixels above its point.
+  void setCallouts(List<({LatLng point, String text, double lift})> callouts) {
+    final next = [for (final c in callouts) (point: _gp(c.point)!, text: c.text, lift: c.lift)];
+    _callouts = next;
+    unawaited(_syncCallouts());
+  }
+
+  static String _calloutImageId(String text, double lift) => 'anb-callout-${lift.round()}-${text.hashCode.toUnsigned(32)}';
+
+  /// Draw the images the labels need, then show them.
+  Future<void> _syncCallouts() async {
+    final style = _style, look = _look;
+    if (style == null || look == null) {
+      _put(SceneIds.callouts, calloutsGeoJson([for (final c in _callouts) if (_calloutImages.contains(_calloutImageId(c.text, c.lift))) SceneCallout(point: c.point, image: _calloutImageId(c.text, c.lift))]));
+      return;
+    }
+    final gen = _gen;
+    for (final c in _callouts) {
+      final id = _calloutImageId(c.text, c.lift);
+      if (_calloutImages.contains(id)) continue;
+      await _addImage(style, id, labelImage(look.colors, look.imageScale, c.text, lift: c.lift));
+      if (gen != _gen) return;
+      _calloutImages.add(id);
+    }
+    _put(SceneIds.callouts, calloutsGeoJson([for (final c in _callouts) SceneCallout(point: c.point, image: _calloutImageId(c.text, c.lift))]));
+  }
 
   /// Draw the label images, then show the features that use them.
   Future<void> _syncLabels() async {
@@ -247,7 +362,7 @@ class MapScene {
   void _schedule(String id) {
     if (_style == null || _disposed || _timers.containsKey(id)) return;
     final last = _flushedAt[id];
-    final wait = last == null ? Duration.zero : minInterval - DateTime.now().difference(last);
+    final wait = last == null ? Duration.zero : _intervalOf(id) - DateTime.now().difference(last);
     if (wait <= Duration.zero) {
       _flush(id);
     } else {

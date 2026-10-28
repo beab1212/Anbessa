@@ -181,7 +181,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
     }
 
-    final radar = find.byKey(const ValueKey('driver-radar'));
+    final radar = find.byKey(mapPulseKey);
     final dot = find.byKey(const ValueKey('driver-searching'));
 
     for (final b in Brightness.values) {

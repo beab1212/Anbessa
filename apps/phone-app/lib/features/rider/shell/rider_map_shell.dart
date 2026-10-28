@@ -422,7 +422,6 @@ class _RiderMapViewState extends ConsumerState<_RiderMapView> with SingleTickerP
   @override
   Widget build(BuildContext context) {
     final l = context.l10n;
-    final c = context.colors;
     final shell = RiderMapScope.of(context);
     final stage = widget.stage;
     final intent = _intent(stage);
@@ -472,15 +471,10 @@ class _RiderMapViewState extends ConsumerState<_RiderMapView> with SingleTickerP
           follow: intent.follow,
           followZoom: intent.followZoom,
           callouts: callouts,
-          overlays: [
-            if (intent.radarAt != null)
-              MapOverlay(
-                point: intent.radarAt!,
-                size: const Size(220, 220),
-                child: RadarRings(size: 220, color: c.accent, child: _RingAvatar(person: person)),
-              ),
-          ],
+          pulse: intent.radarAt == null ? null : MapPulse.at(intent.radarAt!),
           person: person,
+          // once a ride is booked the person's photo leaves the map: a plain pickup pin
+          pickupAsAvatar: stage.kind != RiderMapStageKind.trip,
           meAsAvatar: intent.meAvatar,
           roundControls: true,
           showModeSwitch: false,
@@ -503,17 +497,6 @@ class _RiderMapViewState extends ConsumerState<_RiderMapView> with SingleTickerP
 const _pinCentreOffset = (48 - 32) / 2;
 
 /// The rider's avatar in a white-edged amber ring, in the middle of the "finding a driver" rings.
-class _RingAvatar extends StatelessWidget {
-  const _RingAvatar({required this.person});
-  final MapPerson person;
-  @override
-  Widget build(BuildContext context) => Container(
-        decoration: BoxDecoration(shape: BoxShape.circle, color: context.colors.accent),
-        padding: const EdgeInsets.all(4),
-        child: AvatarImage(src: person.photo, name: person.name, size: 56),
-      );
-}
-
 /// The centre pin of "Select from map": the rider's avatar pin for a pickup, the red pin for a
 /// destination; it lifts while the map moves and drops with a bounce.
 class _DropPin extends ConsumerWidget {

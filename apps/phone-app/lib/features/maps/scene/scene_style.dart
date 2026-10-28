@@ -22,6 +22,10 @@ class SceneLook {
 
   bool get bright => colors.isDark || imagery;
 
+  /// The 3D car frames are painted at most twice their size: 36 of them at 3× would take a lot of
+  /// texture memory for little gain at the sizes cars are shown.
+  double get car3dScale => imageScale > 2 ? 2 : imageScale;
+
   /// Same images and paints (buildings are toggled separately).
   bool samePaint(SceneLook o) => o.colors.isDark == colors.isDark && o.colors.accent == colors.accent && o.colors.text == colors.text && o.imagery == imagery && o.imageScale == imageScale;
 }
@@ -68,6 +72,18 @@ List<Object> carIconSize(SceneLook look, List<(double, double)> stops) => [
       for (final (z, w) in stops) ...[z, w / carImageWidth / look.imageScale],
     ];
 
+/// `icon-size` for a 3D car frame: the same shown car widths as the flat car (a frame is painted
+/// so its car is [carImageWidth] wide at [SceneLook.car3dScale]).
+List<Object> car3dIconSize(SceneLook look, List<(double, double)> stops) => [
+      'interpolate',
+      ['exponential', 1.5],
+      ['zoom'],
+      for (final (z, w) in stops) ...[z, w / carImageWidth / look.car3dScale],
+    ];
+
+/// The pulse's radius on screen, in logical pixels (the old 220 px rings).
+const pulseRadius = 110.0;
+
 /// The offset of a label over a car, growing with the car: (zoom, logical pixels above).
 List<Object> _labelOffset(SceneLook look, List<(double, double)> stops) => [
       'interpolate',
@@ -75,6 +91,21 @@ List<Object> _labelOffset(SceneLook look, List<(double, double)> stops) => [
       ['zoom'],
       for (final (z, dy) in stops) ...[z, ['literal', [0.0, -dy * look.imageScale]]],
     ];
+
+/// The flat car (2D and satellite) and its shadow; the 3D map uses the standing frames instead.
+const _flatCar = ['!=', ['get', 'car3d'], true];
+const _car3d = ['==', ['get', 'car3d'], true];
+
+/// How the 3D car stands: upright facing the screen, its frame already chosen for the heading
+/// and the camera's bearing, the car's ground centre on the point.
+const _car3dLayout = {
+  'icon-image': ['get', 'icon3'],
+  'icon-rotation-alignment': 'viewport',
+  'icon-pitch-alignment': 'viewport',
+  'icon-anchor': 'center',
+  'icon-allow-overlap': true,
+  'icon-ignore-placement': true,
+};
 
 /// How every car lies on the map: flat on the road (pitch-aligned), turned by the bearing the
 /// heading filter settled on, never hidden by collisions.
@@ -127,17 +158,37 @@ List<ml.StyleLayer> sceneLayers(SceneLook look) {
       layout: _roundLine,
       paint: {'line-color': cssColor(rc.secondary), 'line-width': _byZoom(_straightStops), 'line-dasharray': [0.1, 2.0]},
     ),
+    // the search pulse: rings on the ground, drawn natively so they never trail the map
+    ml.CircleStyleLayer(
+      id: SceneIds.pulseLayer,
+      sourceId: SceneIds.pulse,
+      paint: {
+        'circle-radius': ['*', ['get', 'r'], pulseRadius],
+        'circle-color': cssColor(look.colors.accent),
+        'circle-opacity': ['get', 'o'],
+        'circle-pitch-alignment': 'map',
+      },
+    ),
     // each car's contact shadow right under it, then the car
     ml.SymbolStyleLayer(
       id: SceneIds.nearbyShadow,
       sourceId: SceneIds.nearby,
+      filter: _flatCar,
       layout: {'icon-image': SceneIds.imgCarShadow, 'icon-size': carIconSize(look, nearbyCarWidthStops), ..._carLayout},
       paint: {'icon-opacity': ['get', 'opacity']},
     ),
     ml.SymbolStyleLayer(
       id: SceneIds.nearbyCars,
       sourceId: SceneIds.nearby,
+      filter: _flatCar,
       layout: {'icon-image': SceneIds.imgCarNearby, 'icon-size': carIconSize(look, nearbyCarWidthStops), ..._carLayout},
+      paint: {'icon-opacity': ['get', 'opacity']},
+    ),
+    ml.SymbolStyleLayer(
+      id: SceneIds.nearbyCar3d,
+      sourceId: SceneIds.nearby,
+      filter: _car3d,
+      layout: {'icon-size': car3dIconSize(look, nearbyCarWidthStops), ..._car3dLayout},
       paint: {'icon-opacity': ['get', 'opacity']},
     ),
     ml.SymbolStyleLayer(
@@ -206,12 +257,21 @@ List<ml.StyleLayer> sceneLayers(SceneLook look) {
     ml.SymbolStyleLayer(
       id: SceneIds.driverShadow,
       sourceId: SceneIds.driver,
+      filter: _flatCar,
       layout: {'icon-image': SceneIds.imgCarShadow, 'icon-size': carIconSize(look, driverCarWidthStops), ..._carLayout},
     ),
     ml.SymbolStyleLayer(
       id: SceneIds.driverCar,
       sourceId: SceneIds.driver,
+      filter: _flatCar,
       layout: {'icon-image': ['get', 'icon'], 'icon-size': carIconSize(look, driverCarWidthStops), ..._carLayout},
+    ),
+    ml.SymbolStyleLayer(
+      id: SceneIds.driverCar3d,
+      sourceId: SceneIds.driver,
+      filter: _car3d,
+      layout: {'icon-size': car3dIconSize(look, driverCarWidthStops), ..._car3dLayout},
+      paint: {'icon-opacity': ['get', 'opacity']},
     ),
     ml.SymbolStyleLayer(
       id: SceneIds.driverLabel,
@@ -222,6 +282,18 @@ List<ml.StyleLayer> sceneLayers(SceneLook look) {
         'icon-size': 1 / k,
         'icon-anchor': 'bottom',
         'icon-offset': _labelOffset(look, const [(15, 22), (17, 26), (18, 30), (19, 38)]),
+        'icon-allow-overlap': true,
+        'icon-ignore-placement': true,
+      },
+    ),
+    // labels at points; the room under each label's tail is part of its image
+    ml.SymbolStyleLayer(
+      id: SceneIds.calloutLayer,
+      sourceId: SceneIds.callouts,
+      layout: {
+        'icon-image': ['get', 'img'],
+        'icon-size': 1 / k,
+        'icon-anchor': 'bottom',
         'icon-allow-overlap': true,
         'icon-ignore-placement': true,
       },

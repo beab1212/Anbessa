@@ -27,6 +27,9 @@ class FakePort implements CameraPort {
   Size? get viewport => const Size(360, 720);
   @override
   double get bearing => 0;
+  CameraView? view;
+  @override
+  CameraView? get current => view;
   @override
   bool get followsEveryFrame => false;
   @override
@@ -193,5 +196,61 @@ void main() {
     expect(followMoveDuration(const Duration(milliseconds: 16)), const Duration(milliseconds: 300));
     expect(followMoveDuration(const Duration(milliseconds: 650)), const Duration(milliseconds: 650));
     expect(followMoveDuration(const Duration(seconds: 4)), const Duration(seconds: 1));
+  });
+
+  group('frame by frame (an animated car)', () {
+    testWidgets('every frame of the car moves the camera exactly onto it, at once', (tester) async {
+      d.follow(subject, zoom: 17, animate: false, everyFrame: true);
+      port.moves.clear();
+      for (var i = 1; i <= 5; i++) {
+        now = now.add(const Duration(milliseconds: 16));
+        subject.value = pose(9.01 + i * 1e-5);
+        final m = port.moves.last;
+        expect(m.duration, Duration.zero);
+        expect(m.center!.lat, closeTo(9.01 + i * 1e-5, 1e-12));
+        expect(m.zoom, 17);
+      }
+      // no cadence, no trailing timers: one move per frame
+      expect(port.moves.length, 5);
+    });
+
+    testWidgets('entering it blends from where the camera was, then sits on the car', (tester) async {
+      port.view = (center: (lat: 9.0, lng: 38.76), zoom: 13, bearing: 0, pitch: 0);
+      d.follow(subject, zoom: 17, everyFrame: true);
+      now = now.add(d.transition ~/ 2);
+      subject.value = pose(9.0100001);
+      final half = port.moves.last;
+      expect(half.duration, Duration.zero);
+      expect(half.center!.lat, closeTo(9.005, 1e-3));
+      expect(half.zoom, closeTo(15, 0.01));
+      now = now.add(d.transition);
+      subject.value = pose(9.0101);
+      expect(port.moves.last.center!.lat, closeTo(9.0101, 1e-12));
+      expect(port.moves.last.zoom, 17);
+    });
+
+    testWidgets('navigation: the zoom follows the speed over time, not per frame', (tester) async {
+      d.navigate(subject, animate: false, everyFrame: true);
+      subject.value = pose(9.0100001, speed: 0);
+      expect(port.moves.last.zoom, closeTo(17.5, 1e-9));
+      // suddenly fast: one frame later the zoom has hardly moved
+      now = now.add(const Duration(milliseconds: 16));
+      subject.value = pose(9.0101, speed: 25);
+      expect(port.moves.last.zoom, greaterThan(17.48));
+      // seconds later it has settled near the speed's zoom
+      for (var i = 0; i < 600; i++) {
+        now = now.add(const Duration(milliseconds: 16));
+        subject.value = pose(9.0102 + i * 1e-6, speed: 25);
+      }
+      expect(port.moves.last.zoom, closeTo(navZoomForSpeed(25), 0.05));
+    });
+
+    testWidgets('a gesture stops it', (tester) async {
+      d.follow(subject, animate: false, everyFrame: true);
+      d.onUserGesture();
+      port.moves.clear();
+      subject.value = pose(9.02);
+      expect(port.moves, isEmpty);
+    });
   });
 }

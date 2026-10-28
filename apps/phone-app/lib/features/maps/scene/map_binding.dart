@@ -24,6 +24,7 @@ class MapBinding {
   ValueListenable<double>? _sheet;
   bool _started = false;
   FollowMode? _lastFollow;
+  bool _lastFrames = false;
   Object? _lastFitKey;
   List<LatLng> _lastFit = const [];
 
@@ -52,11 +53,14 @@ class MapBinding {
     _started = true;
     final followChanged = first || w.follow != _lastFollow;
     _lastFollow = w.follow;
+    final frames = followsAnimatedCar(w);
+    final framesChanged = frames != _lastFrames;
+    _lastFrames = frames;
     switch (w.follow) {
       case FollowMode.driverBearing:
-        if (followChanged) director.navigate(subject, animate: !first);
+        if (followChanged || framesChanged) director.navigate(subject, animate: !first, everyFrame: frames);
       case FollowMode.me || FollowMode.driver:
-        if (followChanged) director.follow(subject, zoom: w.followZoom, animate: !first);
+        if (followChanged || framesChanged) director.follow(subject, zoom: w.followZoom, animate: !first, everyFrame: frames);
       case FollowMode.none:
         if (w.fit.isNotEmpty) {
           final keyed = w.fitKey != null;
@@ -90,9 +94,9 @@ class MapBinding {
       // nothing interrupted: redo the screen's intent
       switch (w.follow) {
         case FollowMode.driverBearing:
-          director.navigate(subject);
+          director.navigate(subject, everyFrame: followsAnimatedCar(w));
         case FollowMode.me || FollowMode.driver:
-          director.follow(subject, zoom: w.followZoom);
+          director.follow(subject, zoom: w.followZoom, everyFrame: followsAnimatedCar(w));
         case FollowMode.none:
           if (w.fit.isNotEmpty) director.overview(toGeo(w.fit));
       }
@@ -107,6 +111,14 @@ class MapBinding {
     subject.dispose();
   }
 }
+
+/// The camera follows the animated car ([AnbessaMap.driverCar]), which changes on every frame:
+/// the camera then moves with each frame (see CameraDirector).
+bool followsAnimatedCar(AnbessaMap w) => w.driverCar != null && switch (w.follow) {
+      FollowMode.driver || FollowMode.driverBearing => true,
+      FollowMode.me => w.mePoseOrPoint == null,
+      FollowMode.none => false,
+    };
 
 List<GeoPoint> toGeo(List<LatLng> pts) => [for (final p in pts) (lat: p.latitude, lng: p.longitude)];
 

@@ -3,14 +3,15 @@
 //
 // Everything that moves is native: a MapScene owns GeoJSON sources and symbol/line layers for the
 // routes, pins, the person, the followed car and the cars nearby, and updates only their data.
-// The camera is driven by a CameraDirector through a MapBinding. The only Flutter widgets over
-// the map are the screen's overlays (the search pulse) and a few callouts, hidden while the
-// person drags the map (WidgetLayer positions trail the native camera).
+// The camera is driven by a CameraDirector through a MapBinding. The search pulse and the labels
+// at points are native too (a ticker here moves the pulse); the only Flutter widgets over the map
+// are a screen's own overlays, if any (WidgetLayer positions trail the native camera).
 
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart' show Ticker;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart' show LatLng;
 import 'package:maplibre/maplibre.dart' as ml;
@@ -40,7 +41,7 @@ class VectorMap extends ConsumerStatefulWidget {
   ConsumerState<VectorMap> createState() => _VectorMapState();
 }
 
-class _VectorMapState extends ConsumerState<VectorMap> {
+class _VectorMapState extends ConsumerState<VectorMap> with SingleTickerProviderStateMixin {
   ml.MapController? _ctrl;
   final MapScene _scene = MapScene();
   late final _VectorPort _port = _VectorPort(this);
@@ -54,14 +55,21 @@ class _VectorMapState extends ConsumerState<VectorMap> {
   Size? _size;
   ValueListenable<AnimatedPose?>? _carL;
   ValueListenable<List<NearbyCarFrame>>? _carsL;
+  late final Ticker _pulseTicker = createTicker(_onPulseTick);
 
   AnbessaMap get w => widget.spec;
 
   @override
   void initState() {
     super.initState();
-    _syncContent();
     _binding.sync(w, ready: false);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // content needs the context (reduced motion for the pulse)
+    _syncContent();
   }
 
   @override
@@ -75,7 +83,9 @@ class _VectorMapState extends ConsumerState<VectorMap> {
 
   void _syncContent() {
     _scene.setRoutes(w.allRoutes);
-    _scene.setPins(pickup: w.pickup, dropoff: w.dropoff);
+    _scene.setPins(pickup: w.pickup, dropoff: w.dropoff, plainPickup: !w.pickupAsAvatar);
+    _scene.setCallouts([for (final m in w.callouts.take(3)) (point: m.point, text: m.label, lift: calloutLift(m))]);
+    _syncPulse();
     _scene.setMe(w.mePoseOrPoint, avatar: w.meAsAvatar);
     _syncPerson();
     if (!identical(_carL, w.driverCar)) {
@@ -94,6 +104,27 @@ class _VectorMapState extends ConsumerState<VectorMap> {
     _scene.setNearbyCars(frames);
     _scene.setNearbyLabel(frames.isEmpty ? null : w.nearbyLabel);
   }
+
+  /// The pulse: native rings, moved by a ticker while shown (one still frame with reduced motion).
+  void _syncPulse() {
+    final p = w.pulse;
+    _scene.setPulse(at: p?.point, onCar: p?.onCar ?? false);
+    if (p == null) {
+      if (_pulseTicker.isActive) _pulseTicker.stop();
+      return;
+    }
+    if (!mounted) return;
+    if (MediaQuery.maybeDisableAnimationsOf(context) ?? false) {
+      if (_pulseTicker.isActive) _pulseTicker.stop();
+      _scene.setPulsePhase(0.5);
+    } else if (!_pulseTicker.isActive) {
+      _pulseTicker.start();
+    }
+  }
+
+  static const _pulsePeriod = 2400;
+
+  void _onPulseTick(Duration elapsed) => _scene.setPulsePhase((elapsed.inMilliseconds % _pulsePeriod) / _pulsePeriod);
 
   MapPerson? _person;
   int _personGen = 0;
@@ -172,15 +203,17 @@ class _VectorMapState extends ConsumerState<VectorMap> {
   void _onEvent(ml.MapEvent e) {
     switch (e) {
       case ml.MapEventStartMoveCamera(:final reason) when reason == ml.CameraChangeReason.apiGesture:
-        if (!_gesture) setState(() => _gesture = true);
+        _gesture = true;
         _binding.director.onUserGesture();
         w.onUserGesture?.call();
       case ml.MapEventCameraIdle():
         if (_gesture) {
-          setState(() => _gesture = false);
+          _gesture = false;
           final cam = _ctrl?.camera;
           if (cam != null) w.onMove?.call(_latLng(cam.center));
         }
+      case ml.MapEventMoveCamera(:final camera):
+        _scene.setViewBearing(camera.bearing);
       case ml.MapEventClick(:final point):
         w.onTap?.call(_latLng(point));
       default:
@@ -194,6 +227,7 @@ class _VectorMapState extends ConsumerState<VectorMap> {
   void dispose() {
     _carL?.removeListener(_onCar);
     _carsL?.removeListener(_onCars);
+    _pulseTicker.dispose();
     _binding.dispose();
     _scene.dispose();
     super.dispose();
@@ -221,9 +255,7 @@ class _VectorMapState extends ConsumerState<VectorMap> {
     final initial = w.center ?? w.subject ?? (w.fit.isNotEmpty ? w.fit.first : LatLng(city.bbox.centerLat, city.bbox.centerLng));
     final nav = w.follow == FollowMode.driverBearing;
     double bearingOf(BuildContext ctx) => ml.MapCamera.maybeOf(ctx)?.bearing ?? 0;
-    final pins = pinsFor(w, (ctx) => -bearingOf(ctx), native: false);
-    final overlays = pins.take(w.overlays.length).toList();
-    final callouts = pins.skip(w.overlays.length).toList();
+    final overlays = pinsFor(w, (ctx) => -bearingOf(ctx), native: false);
     ml.Marker marker(MapPin p) => ml.Marker(point: _geo(p.point), size: p.size, alignment: p.alignment, child: p.child);
     return LayoutBuilder(
       builder: (context, box) {
@@ -245,12 +277,6 @@ class _VectorMapState extends ConsumerState<VectorMap> {
           onEvent: _onEvent,
           children: [
             if (overlays.isNotEmpty) ml.WidgetLayer(markers: [for (final p in overlays) marker(p)]),
-            if (callouts.isNotEmpty)
-              AnimatedOpacity(
-                opacity: _gesture ? 0 : 1,
-                duration: AnbessaMotion.fast,
-                child: ml.WidgetLayer(markers: [for (final p in callouts) marker(p)]),
-              ),
             _withBottom((bottom) => MapInfoSlot(bottom: bottom, attribution: vectorAttributionFor(mode))),
             if (w.interactive)
               _withBottom(
@@ -304,6 +330,12 @@ class _VectorPort implements CameraPort {
 
   @override
   double get bearing => _s._ctrl?.camera?.bearing ?? 0;
+
+  @override
+  CameraView? get current {
+    final cam = _s._ctrl?.camera;
+    return cam == null ? null : (center: (lat: cam.center.lat, lng: cam.center.lon), zoom: cam.zoom, bearing: cam.bearing, pitch: cam.pitch);
+  }
 
   @override
   bool get followsEveryFrame => false;

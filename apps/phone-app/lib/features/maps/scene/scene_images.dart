@@ -112,6 +112,33 @@ void _paintPersonGlyph(Canvas canvas, Offset center, double size) {
   tp.paint(canvas, center - Offset(tp.width / 2, tp.height / 2));
 }
 
+/// The pickup once a ride is booked: a plain pin without the person's photo (an amber head with
+/// an ink ring and a white centre on a short stem; the bottom centre is the point).
+SceneImage plainPickupPinImage(AnbessaColors c, double scale) {
+  const w = 30.0, head = 24.0, stem = 12.0, foot = 4.0;
+  const h = head + stem + foot;
+  return (
+    width: (w * scale).ceil(),
+    height: (h * scale).ceil(),
+    paint: (canvas) {
+      canvas.scale(scale);
+      const cx = w / 2;
+      // the shadow where it stands, the stem, then the head
+      canvas.drawOval(Rect.fromCenter(center: const Offset(cx, h - foot / 2), width: 10, height: 4), Paint()
+        ..color = const Color(0x40000000)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 1));
+      canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(cx - 1.5, head - 2, 3, stem + 2), const Radius.circular(1.5)), Paint()..color = const Color(0xFF17191D));
+      const centre = Offset(cx, head / 2);
+      canvas.drawCircle(centre.translate(0, 1), head / 2, Paint()
+        ..color = const Color(0x33000000)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 1.5));
+      canvas.drawCircle(centre, head / 2, Paint()..color = const Color(0xFF17191D));
+      canvas.drawCircle(centre, head / 2 - 3, Paint()..color = c.accent);
+      canvas.drawCircle(centre, 4, Paint()..color = Colors.white);
+    },
+  );
+}
+
 /// The destination: the kit's red ring pin with a white face and a red dot.
 SceneImage destinationPinImage(AnbessaColors c, double scale) {
   final s = destinationPinSize(destinationPinDiameter);
@@ -163,8 +190,9 @@ SceneImage meConeImage(AnbessaColors c, double scale) {
 }
 
 /// A label chip with a small tail at the bottom centre ("4 min" over the car): ink text on the
-/// surface, a hairline border and an amber dot.
-SceneImage labelImage(AnbessaColors c, double scale, String text) {
+/// surface, a hairline border and an amber dot. [lift] adds that much empty room under the tail,
+/// so a layer anchoring the image's bottom on a point shows the label that high above it.
+SceneImage labelImage(AnbessaColors c, double scale, String text, {double lift = 0}) {
   final tp = TextPainter(
     text: TextSpan(text: text, style: AnbessaType.label.copyWith(color: c.text, fontWeight: FontWeight.w700, fontSize: 13, fontFeatures: AnbessaType.tabular)),
     textDirection: TextDirection.ltr,
@@ -173,7 +201,7 @@ SceneImage labelImage(AnbessaColors c, double scale, String text) {
   )..layout(maxWidth: 200);
   const padX = 10.0, dot = 7.0, gap = 6.0, bodyH = 28.0, tail = 6.0;
   final w = padX * 2 + dot + gap + tp.width;
-  const h = bodyH + tail + 2;
+  final h = bodyH + tail + 2 + max(0.0, lift);
   return (
     width: ((w + 4) * scale).ceil(),
     height: (h * scale).ceil(),

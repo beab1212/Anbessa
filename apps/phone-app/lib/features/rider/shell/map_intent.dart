@@ -407,8 +407,9 @@ final tripMapIntentProvider = Provider.autoDispose.family<MapIntent, String>((re
     _ => tripPts.length >= 2 ? tripPts : [pickup, dropoff],
   };
   return MapIntent(
-    // finding a driver: the rider's avatar sits in the rings instead of the pickup pin
-    pickup: stage == RiderStage.inTrip || stage == RiderStage.finding ? null : pickup,
+    // a plain pickup pin (no photo once booked), in the search rings while finding a driver;
+    // gone once the rider is in the car
+    pickup: stage == RiderStage.inTrip ? null : pickup,
     dropoff: dropoff,
     routes: routes,
     fit: fit,

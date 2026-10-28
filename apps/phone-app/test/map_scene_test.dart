@@ -10,6 +10,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:maplibre/maplibre.dart' as ml;
 import 'package:phone_app/features/maps/anbessa_map.dart';
 import 'package:phone_app/features/maps/nearby_cars_layer.dart';
+import 'package:phone_app/features/maps/scene/car3d.dart';
 import 'package:phone_app/features/maps/scene/map_scene.dart';
 import 'package:phone_app/features/maps/scene/scene_geojson.dart';
 import 'package:phone_app/features/maps/scene/scene_images.dart';
@@ -20,6 +21,83 @@ Map<String, dynamic> parse(String s) => jsonDecode(s) as Map<String, dynamic>;
 List<dynamic> features(String s) => parse(s)['features'] as List<dynamic>;
 
 void main() {
+  group('booked rides, 3D cars, the pulse and labels', () {
+    test('once booked, the pickup is a plain pin without the photo', () {
+      final avatar = features(pinsGeoJson(pickup: (lat: 9.0, lng: 38.7)));
+      final plain = features(pinsGeoJson(pickup: (lat: 9.0, lng: 38.7), plainPickup: true));
+      expect(avatar.single['properties']['pin'], SceneIds.imgPinPickup);
+      expect(plain.single['properties']['pin'], SceneIds.imgPinPickupPlain);
+    });
+
+    test('in 3D a car carries its standing frame for its heading; flat cars carry none', () {
+      String frame(double b) => car3dImageId(car3dFrameFor(b, 0));
+      final flat = features(driverGeoJson(at: (lat: 9.0, lng: 38.7), bearing: 95));
+      final standing = features(driverGeoJson(at: (lat: 9.0, lng: 38.7), bearing: 95, frame3d: frame, stale: true));
+      expect(flat.single['properties'].containsKey('car3d'), isFalse);
+      expect(standing.single['properties']['car3d'], true);
+      expect(standing.single['properties']['icon3'], 'anb-car3d-10');
+      expect(standing.single['properties']['opacity'], 0.55);
+      final cars = features(nearbyGeoJson(const [NearbyCarFrame(id: 1, lat: 9, lng: 38.7, bearing: 180)], frame3d: frame));
+      expect(cars.single['properties']['icon3'], 'anb-car3d-18');
+    });
+
+    test('the frame is the heading relative to the camera, every 10°, the short way round', () {
+      expect(car3dFrameFor(0, 0), 0);
+      expect(car3dFrameFor(94, 0), 9);
+      expect(car3dFrameFor(96, 0), 10);
+      // the map turned with the car (navigation): seen from behind
+      expect(car3dFrameFor(250, 250), 0);
+      expect(car3dFrameFor(10, 350), 2);
+      expect(car3dFrameFor(356, 0), 0);
+      expect(car3dFrameFor(-90, 0), 27);
+    });
+
+    test('every frame paints, the car centred on its ground point', () {
+      final img = car3dImage(7, 2);
+      expect(img.width, img.height);
+      expect(img.width, (car3dImageSize * 2).ceil());
+    });
+
+    test('the pulse: two still rings and two waves half a period apart, nothing without a point', () {
+      expect(features(pulseGeoJson(null, 0.3)), isEmpty);
+      final rings = features(pulseGeoJson((lat: 9.0, lng: 38.7), 0.25));
+      expect(rings, hasLength(4));
+      final waves = rings.skip(2).map((f) => f['properties']).toList();
+      expect(waves[0]['r'], lessThan(waves[1]['r']));
+      expect(waves[0]['o'], greaterThan(waves[1]['o']));
+    });
+
+    test('labels at points carry their image', () {
+      final f = features(calloutsGeoJson(const [SceneCallout(point: (lat: 9.0, lng: 38.7), image: 'anb-callout-x', lift: 48)]));
+      expect(f.single['properties']['img'], 'anb-callout-x');
+    });
+
+    test('a lifted label has the room under its tail in its image', () {
+      final plain = labelImage(AnbessaColors.light, 1, 'Arrive 14:32');
+      final lifted = labelImage(AnbessaColors.light, 1, 'Arrive 14:32', lift: 48);
+      expect(lifted.height - plain.height, 48);
+    });
+
+    test('flat and standing car layers never draw the same car', () {
+      final layers = sceneLayers(SceneLook(colors: AnbessaColors.light, buildings: true, imageScale: 3));
+      T layer<T extends ml.StyleLayer>(String id) => layers.firstWhere((l) => l.id == id) as T;
+      for (final id in [SceneIds.driverCar, SceneIds.driverShadow, SceneIds.nearbyCars, SceneIds.nearbyShadow]) {
+        expect(layer<ml.SymbolStyleLayer>(id).filter, ['!=', ['get', 'car3d'], true]);
+      }
+      for (final id in [SceneIds.driverCar3d, SceneIds.nearbyCar3d]) {
+        final l = layer<ml.SymbolStyleLayer>(id);
+        expect(l.filter, ['==', ['get', 'car3d'], true]);
+        expect(l.layout['icon-image'], ['get', 'icon3']);
+        // standing up, facing the screen; the frame already accounts for the turn
+        expect(l.layout['icon-pitch-alignment'], 'viewport');
+        expect(l.layout['icon-rotation-alignment'], 'viewport');
+        expect(l.layout.containsKey('icon-rotate'), isFalse);
+      }
+      final pulse = layer<ml.CircleStyleLayer>(SceneIds.pulseLayer);
+      expect(pulse.paint['circle-pitch-alignment'], 'map');
+    });
+  });
+
   group('GeoJSON', () {
     test('routes: one LineString per drawable line, [lng, lat] order, kind as a property', () {
       final s = routesGeoJson(const [
@@ -193,7 +271,10 @@ void main() {
       final ids = layers.map((l) => l.id).toList();
       expect(ids.indexOf(SceneIds.driverCar), greaterThan(ids.indexOf(SceneIds.routeFill)));
       expect(ids.indexOf(SceneIds.driverCar), greaterThan(ids.indexOf(SceneIds.pinLayer)));
-      expect(ids.last, SceneIds.driverLabel);
+      expect(ids.indexOf(SceneIds.driverCar3d), greaterThan(ids.indexOf(SceneIds.pinLayer)));
+      // only the labels at points are drawn over the car's label
+      expect(ids.last, SceneIds.calloutLayer);
+      expect(ids[ids.length - 2], SceneIds.driverLabel);
     });
   });
 

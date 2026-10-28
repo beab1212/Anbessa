@@ -12,6 +12,13 @@
 // the camera glides with the car. The subject is a ValueListenable (an animator), never a
 // widget rebuild.
 //
+// An animated car (everyFrame) is followed frame by frame instead: the camera jumps to the very
+// pose the car is drawn at on each animation frame, so the car stays put on the screen. Chained
+// eased moves speed up and slow down around a car that moves evenly, which reads as the car
+// floating about, the more the closer the map is zoomed. Entering the mode, recentring and inset
+// changes blend from where the camera was over [transition]; the navigation zoom and the padding
+// follow their targets smoothly over time rather than per call.
+//
 // Any gesture by the person switches to free and raises [showRecenter]; recenter() goes back to
 // the mode the gesture interrupted.
 
@@ -25,6 +32,9 @@ import '../marker_animator.dart';
 
 enum CameraModeKind { free, overview, follow, navigate }
 
+/// Where a camera looks.
+typedef CameraView = ({GeoPoint center, double zoom, double bearing, double pitch});
+
 /// What the director asks of a map engine.
 abstract interface class CameraPort {
   /// The map's size in logical pixels (null before layout).
@@ -32,6 +42,9 @@ abstract interface class CameraPort {
 
   /// The camera's bearing now, degrees.
   double get bearing;
+
+  /// What the camera shows now (null before the map has a camera).
+  CameraView? get current;
 
   /// Move the camera; [duration] zero moves at once. Cancelled moves are ignored.
   Future<void> moveTo({required GeoPoint center, required double zoom, required double bearing, required double pitch, required EdgeInsets padding, required Duration duration});
@@ -103,6 +116,13 @@ class CameraDirector {
 
   DateTime? _lastMove;
   Timer? _trailing;
+  // frame-by-frame following
+  bool _everyFrame = false;
+  CameraView? _blendFrom;
+  DateTime? _blendStart;
+  DateTime? _lastFrame;
+  EdgeInsets? _padShown;
+  double? _zoomShown;
   Timer? _settle;
   bool _disposed = false;
 
@@ -129,7 +149,8 @@ class CameraDirector {
       case CameraModeKind.overview:
         _fit(duration: _d(transition));
       case CameraModeKind.follow || CameraModeKind.navigate:
-        _move(duration: _d(transition));
+        // frame by frame, the padding glides to the new insets by itself
+        if (!_everyFrame) _move(duration: _d(transition));
       case CameraModeKind.free:
         break;
     }
@@ -146,7 +167,7 @@ class CameraDirector {
       case CameraModeKind.overview:
         _fit(duration: _d(transition));
       case CameraModeKind.follow || CameraModeKind.navigate:
-        _move(duration: _d(transition));
+        _transition();
       case CameraModeKind.free:
         break;
     }
@@ -170,31 +191,50 @@ class CameraDirector {
     _fit(duration: animate ? _d(transition) : Duration.zero);
   }
 
-  /// Keep [subject] centred, north up, at [zoom].
-  void follow(ValueListenable<AnimatedPose?> subject, {double zoom = 16, bool animate = true}) {
+  /// Keep [subject] centred, north up, at [zoom]. [everyFrame]: the subject is an animated car
+  /// that changes on every frame; the camera moves with each of them.
+  void follow(ValueListenable<AnimatedPose?> subject, {double zoom = 16, bool animate = true, bool everyFrame = false}) {
     _followZoom = zoom;
     _attachSubject(subject);
-    _enter(CameraModeKind.follow);
-    _move(duration: animate ? _d(transition) : Duration.zero);
+    _enter(CameraModeKind.follow, everyFrame: everyFrame);
+    _transition(animate: animate);
   }
 
   /// Drive with [subject]: turned its way, tilted, zoomed by speed.
-  void navigate(ValueListenable<AnimatedPose?> subject, {bool animate = true}) {
+  void navigate(ValueListenable<AnimatedPose?> subject, {bool animate = true, bool everyFrame = false}) {
     _attachSubject(subject);
     _navZoom = null;
-    _enter(CameraModeKind.navigate);
-    _move(duration: animate ? _d(transition) : Duration.zero);
+    _zoomShown = null;
+    _enter(CameraModeKind.navigate, everyFrame: everyFrame);
+    _transition(animate: animate);
+  }
+
+  /// Move into the current follow or navigate mode: an animated move, and frame by frame a blend
+  /// from where the camera is (the frames take over from the animation as they come).
+  void _transition({bool animate = true}) {
+    final d = animate ? _d(transition) : Duration.zero;
+    if (_everyFrame && d > Duration.zero) {
+      _blendFrom = port.current;
+      _blendStart = _now();
+    } else {
+      _blendFrom = _blendStart = null;
+    }
+    _move(duration: d);
   }
 
   /// Stop moving the camera (nothing to show, or the screen took over).
   void free() {
     _detachSubject();
+    _everyFrame = false;
     _mode = CameraModeKind.free;
     _resume = null;
     _showRecenter.value = false;
   }
 
-  void _enter(CameraModeKind m) {
+  void _enter(CameraModeKind m, {bool everyFrame = false}) {
+    _everyFrame = everyFrame;
+    _padShown = null;
+    _lastFrame = null;
     _mode = m;
     _resume = null;
     _showRecenter.value = false;
@@ -221,10 +261,11 @@ class CameraDirector {
       case CameraModeKind.overview:
         _fit(duration: _d(transition));
       case CameraModeKind.follow:
-        _move(duration: _d(transition));
+        _transition();
       case CameraModeKind.navigate:
         _navZoom = null;
-        _move(duration: _d(transition));
+        _zoomShown = null;
+        _transition();
       case CameraModeKind.free:
         break;
     }
@@ -248,6 +289,10 @@ class CameraDirector {
 
   void _onSubject() {
     if (_disposed || (_mode != CameraModeKind.follow && _mode != CameraModeKind.navigate)) return;
+    if (_everyFrame) {
+      _frameMove();
+      return;
+    }
     if (port.followsEveryFrame) {
       _move(duration: Duration.zero);
       return;
@@ -294,6 +339,49 @@ class CameraDirector {
     ).catchError((Object _) {});
   }
 
+  /// One frame of frame-by-frame following: the camera exactly on the subject (blended from the
+  /// camera's start while a transition runs), the padding and the navigation zoom eased in time.
+  void _frameMove() {
+    final s = _subject?.value;
+    if (s == null) return;
+    final now = _now();
+    final last = _lastFrame;
+    _lastFrame = now;
+    final dt = last == null ? 0.0 : now.difference(last).inMicroseconds / 1e6;
+    double ease(double tau) => last == null ? 1 : 1 - exp(-dt / tau);
+
+    final nav = _mode == CameraModeKind.navigate;
+    final vp = port.viewport;
+    final padTarget = nav && vp != null ? lowerThirdPadding(vp, _insets) : _insets;
+    final pad = _padShown == null ? padTarget : EdgeInsets.lerp(_padShown, padTarget, ease(0.25))!;
+    _padShown = pad;
+    var zoom = _followZoom;
+    if (nav) {
+      final target = navZoomForSpeed(s.speed);
+      final z = _zoomShown;
+      zoom = _zoomShown = z == null ? target : z + (target - z) * ease(2.0);
+    }
+    var center = s.point;
+    var bearing = nav ? s.heading : 0.0;
+    var pitch = nav ? navPitchFor(threeD: _threeD) : _basePitch;
+
+    final from = _blendFrom, start = _blendStart;
+    if (from != null && start != null) {
+      final t = now.difference(start).inMicroseconds / max(1, transition.inMicroseconds);
+      if (t >= 1) {
+        _blendFrom = _blendStart = null;
+      } else {
+        final k = _easeInOut(t);
+        center = (lat: from.center.lat + (center.lat - from.center.lat) * k, lng: from.center.lng + (center.lng - from.center.lng) * k);
+        zoom = from.zoom + (zoom - from.zoom) * k;
+        bearing = from.bearing + _shortest(from.bearing, bearing) * k;
+        pitch = from.pitch + (pitch - from.pitch) * k;
+      }
+    }
+    _lastMove = now;
+    port.moveTo(center: center, zoom: zoom, bearing: bearing, pitch: pitch, padding: pad, duration: Duration.zero).catchError((Object _) {});
+  }
+
   void _fit({required Duration duration}) {
     if (_points.isEmpty) return;
     _lastMove = _now();
@@ -310,6 +398,11 @@ class CameraDirector {
     _showRecenter.dispose();
   }
 }
+
+double _easeInOut(double t) => t < 0.5 ? 4 * t * t * t : 1 - pow(-2 * t + 2, 3) / 2;
+
+/// The signed turn from [a] to [b] the short way round, degrees.
+double _shortest(double a, double b) => ((b - a) % 360 + 540) % 360 - 180;
 
 /// The zoom at which [points] fill a [viewport] minus [padding], on a Web Mercator map whose
 /// world is [tileSize] × 2^zoom pixels wide (512 for MapLibre, 256 for flutter_map). Bearing is

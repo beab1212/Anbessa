@@ -108,14 +108,8 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> with Single
             topInset: top + 56,
             sheetHeight: o == null ? _sheetHeight : null,
             bottomInset: o == null ? 0 : 420,
-            overlays: [
-              if (searching && me != null)
-                MapOverlay(
-                  point: LatLng(me.lat, me.lng),
-                  size: const Size(driverRadarSize, driverRadarSize),
-                  child: const IgnorePointer(child: RadarRings(key: ValueKey('driver-radar'), size: driverRadarSize)),
-                ),
-            ],
+            // the search rings stay on the car as it is drawn (native on phones)
+            pulse: searching ? MapPulse.onCar(point: me == null ? null : LatLng(me.lat, me.lng)) : null,
           ),
           // status and health
           Positioned(
