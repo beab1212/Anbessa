@@ -10,6 +10,7 @@ import '../../core/l10n/l10n.dart';
 import '../../core/network/providers.dart';
 import '../../core/router/routes.dart';
 import '../../core/session/session_controller.dart';
+import '../../core/ux/kit_group.dart';
 import '../config/client_config_provider.dart';
 import '../rider/history/history_screens.dart';
 import '../rider/trip/active_trip_controller.dart';
@@ -46,52 +47,81 @@ class SupportScreen extends ConsumerWidget {
     }
 
     return Scaffold(
-      appBar: AppBar(title: Text(l.support)),
+      backgroundColor: c.page,
+      appBar: AppTopBar(title: l.support),
       body: RefreshIndicator(
         onRefresh: refresh,
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
+          padding: const EdgeInsets.fromLTRB(AnbessaSpace.page, 4, AnbessaSpace.page, 32),
           children: [
-            Text(l.supportLede, style: AnbessaType.body.copyWith(color: c.text2)),
-            const SizedBox(height: 16),
-            PrimaryButton(label: l.newTicket, icon: Icons.add_comment_rounded, onPressed: () => context.push(Routes.supportNew)),
+            // the kit's "Have a promo code?"-style lead card: what this is, and the way in
+            AppCard(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      const KitRowIcon(Icons.support_agent_rounded),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(l.actHelpTitle, style: AnbessaType.title.copyWith(color: c.text)),
+                            const SizedBox(height: 4),
+                            Text(l.supportLede, style: AnbessaType.caption.copyWith(color: c.muted)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  PillButton(label: l.newTicket, icon: Icons.add_comment_outlined, onPressed: () => context.push(Routes.supportNew)),
+                ],
+              ),
+            ),
             const SizedBox(height: 24),
             ...tickets.when(
               loading: () => const [SkeletonList(rows: 3, avatar: false)],
               error: (e, _) => [Problem(e, describe: (e) => describeError(l, e), onRetry: () => ref.invalidate(myTicketsProvider), retryLabel: l.retry)],
               data: (list) => [
                 if (list.isEmpty && lost.isEmpty) IllustratedEmpty(illustration: AnbessaIllustration.searchEmpty, title: l.supportEmptyTitle, body: l.supportEmptyBody, compact: true),
-                if (list.isNotEmpty)
-                  SectionGroup(
+                if (list.isNotEmpty) ...[
+                  KitGroup(
                     title: l.supportYourRequests,
                     children: [
                       for (final t in list)
-                        SettingsTile(
-                          icon: Icons.chat_bubble_outline_rounded,
+                        ListRowTile(
+                          leading: const KitRowIcon(Icons.chat_bubble_outline_rounded),
                           title: t.subject,
                           subtitle: _ticketLine(context, t),
-                          trailing: StatusPill(ticketStatusLabel(l, t.status), tone: ticketStatusTone(t.status)),
+                          valueSub: ticketStatusLabel(l, t.status), valueSubColor: kitToneText(context, ticketStatusTone(t.status)),
                           onTap: () => context.push(Routes.supportTicket(t.id)),
                         ),
                     ],
                   ),
+                  const SizedBox(height: 20),
+                ],
               ],
             ),
-            if (lost.isNotEmpty)
-              SectionGroup(
+            if (lost.isNotEmpty) ...[
+              KitGroup(
                 title: l.lostItems,
                 children: [
                   for (final i in lost)
-                    SettingsTile(
-                      icon: Icons.backpack_rounded,
+                    ListRowTile(
+                      leading: const KitRowIcon(Icons.backpack_outlined),
                       title: _short(i.description, 60),
                       subtitle: l.lostReportedOn(dayAndTime(i.createdAt, locale: context.localeTag)),
-                      trailing: StatusPill(lostItemStatusLabel(l, i.status), tone: lostItemStatusTone(i.status)),
+                      valueSub: lostItemStatusLabel(l, i.status), valueSubColor: kitToneText(context, lostItemStatusTone(i.status)),
                       onTap: () => context.push(Routes.lostItem(i.id)),
                     ),
                 ],
               ),
-            Text(l.supportEmergencyNote, style: AnbessaType.caption.copyWith(color: c.muted)),
+              const SizedBox(height: 20),
+            ],
+            Notice(l.supportEmergencyNote, tone: NoticeTone.warning),
           ],
         ),
       ),
@@ -112,7 +142,6 @@ class _NewTicketScreenState extends ConsumerState<NewTicketScreen> {
   TicketCategory? _category;
   late String? _tripId = widget.tripId;
   bool _busy = false;
-  Object? _error;
   // one key per distinct request: a retry of the same words reuses it, an edit gets a new one
   String? _key;
   String? _keyFor;
@@ -144,7 +173,6 @@ class _NewTicketScreenState extends ConsumerState<NewTicketScreen> {
     final driverSide = ref.read(effectiveModeProvider) == AppMode.driver && (session?.claims.hasRole('DRIVER') ?? false);
     setState(() {
       _busy = true;
-      _error = null;
     });
     try {
       final t = await ref.read(supportRepositoryProvider).open(
@@ -161,19 +189,16 @@ class _NewTicketScreenState extends ConsumerState<NewTicketScreen> {
       if (mounted) context.replace(Routes.supportTicket(t.id));
     } catch (e) {
       Haptics.error();
-      if (mounted) setState(() => _error = e);
+      if (mounted) {
+        showWhoops(context, describeError(context.l10n, e));
+      }
     }
     if (mounted) setState(() => _busy = false);
   }
 
   Future<void> _pickTrip() async {
     final as = ref.read(effectiveModeProvider) == AppMode.driver ? 'driver' : 'rider';
-    final picked = await showModalBottomSheet<String>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (ctx) => _TripPicker(as: as, selected: _tripId),
-    );
+    final picked = await showHandleSheet<String>(context, title: context.l10n.ticketPickTrip, builder: (ctx) => _TripPicker(as: as, selected: _tripId));
     if (picked == null || !mounted) return;
     setState(() => _tripId = picked.isEmpty ? null : picked);
   }
@@ -185,36 +210,51 @@ class _NewTicketScreenState extends ConsumerState<NewTicketScreen> {
     final trip = _tripId == null ? null : ref.watch(tripProvider(_tripId!)).value;
     final tripLabel = _tripId == null ? l.ticketNoTrip : (trip == null ? '…' : _tripLabel(context, trip));
     return Scaffold(
-      appBar: AppBar(title: Text(l.newTicket)),
+      backgroundColor: c.page,
+      appBar: AppTopBar(title: l.newTicket),
+      bottomNavigationBar: BottomActionBar(child: PillButton(label: l.send, busy: _busy, onPressed: _ready ? _submit : null)),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
+        padding: const EdgeInsets.fromLTRB(AnbessaSpace.page, 4, AnbessaSpace.page, 24),
         children: [
-          SectionGroup(
-            title: l.ticketWhatAbout,
-            children: [
-              for (final cat in ticketCategoriesForApp)
-                ChoiceRow(title: ticketCategoryLabel(l, cat), subtitle: ticketCategoryHint(l, cat), leading: Icon(ticketCategoryIcon(cat)), selected: _category == cat, onTap: () => setState(() => _category = cat)),
-            ],
-          ),
-          if (_category == TicketCategory.safety) ...[Notice(l.ticketSafetyNotice, tone: NoticeTone.warning), const SizedBox(height: 16)],
+          Text(l.ticketWhatAbout, style: AnbessaType.title.copyWith(color: c.text)),
+          const SizedBox(height: 12),
+          for (final cat in ticketCategoriesForApp)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: SelectableCard(
+                selected: _category == cat,
+                onTap: () => setState(() => _category = cat),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                child: Row(
+                  children: [
+                    KitRowIcon(ticketCategoryIcon(cat), color: cat == TicketCategory.safety ? c.danger : null),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(ticketCategoryLabel(l, cat), style: AnbessaType.title.copyWith(color: c.text)),
+                          if (ticketCategoryHint(l, cat).isNotEmpty) Text(ticketCategoryHint(l, cat), style: AnbessaType.caption.copyWith(color: c.muted)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          if (_category == TicketCategory.safety) ...[const SizedBox(height: 6), Notice(l.ticketSafetyNotice, tone: NoticeTone.warning)],
+          const SizedBox(height: 8),
           Text(l.ticketLostItemHint, style: AnbessaType.caption.copyWith(color: c.muted)),
-          const SizedBox(height: 16),
-          SectionGroup(
-            title: l.ticketTrip,
-            children: [SettingsValueTile(icon: Icons.route_rounded, title: l.ticketTripLabel, value: tripLabel, onTap: _pickTrip)],
+          const SizedBox(height: 24),
+          FieldLabel(l.ticketTripLabel),
+          AppCard(
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            color: c.field,
+            border: false,
+            child: ListRowTile(leading: const KitRowIcon(Icons.route_outlined), title: tripLabel, chevron: true, onTap: _pickTrip),
           ),
-          TextField(
-            controller: _text,
-            minLines: 5,
-            maxLines: 10,
-            maxLength: 5000,
-            textCapitalization: TextCapitalization.sentences,
-            decoration: InputDecoration(labelText: l.ticketMessageLabel, hintText: l.ticketMessageHint, alignLabelWithHint: true),
-          ),
-          const SizedBox(height: 8),
-          Problem(_error, describe: (e) => describeError(l, e)),
-          const SizedBox(height: 8),
-          PrimaryButton(label: l.send, busy: _busy, onPressed: _ready ? _submit : null),
+          const SizedBox(height: 24),
+          FilledField(label: l.ticketMessageLabel, hint: l.ticketMessageHint, controller: _text, maxLines: 6, maxLength: 5000, textCapitalization: TextCapitalization.sentences),
         ],
       ),
     );
@@ -233,33 +273,26 @@ class _TripPicker extends ConsumerWidget {
     final l = context.l10n;
     final history = ref.watch(tripHistoryProvider(as));
     final trips = (history.value?.trips ?? const <Trip>[]).take(10).toList();
-    return SafeArea(
-      child: ConstrainedBox(
-        constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.8),
-        child: ListView(
-          shrinkWrap: true,
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-          children: [
-            Text(l.ticketPickTrip, style: AnbessaType.title.copyWith(color: context.colors.text)),
-            const SizedBox(height: 12),
-            SectionGroup(
-              margin: EdgeInsets.zero,
-              children: [
-                ChoiceRow(title: l.ticketNoTrip, leading: const Icon(Icons.do_not_disturb_on_rounded), selected: selected == null, onTap: () => Navigator.pop(context, '')),
-                for (final t in trips)
-                  ChoiceRow(
-                    leading: const Icon(Icons.receipt_long_rounded),
-                    title: t.dropoff.address ?? '—',
-                    subtitle: '${dayAndTime(t.times.requestedAt, locale: context.localeTag)} · ${tripStatusLabel(l, t.status)}',
-                    selected: selected == t.id,
-                    onTap: () => Navigator.pop(context, t.id),
-                  ),
-              ],
+    final c = context.colors;
+    Widget check(bool on) => on ? Icon(Icons.check_circle_rounded, color: c.accent) : const SizedBox(width: 24);
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.7),
+      child: ListView(
+        shrinkWrap: true,
+        children: [
+          ListRowTile(leading: const KitRowIcon(Icons.do_not_disturb_on_outlined), title: l.ticketNoTrip, trailing: check(selected == null), divider: true, onTap: () => Navigator.pop(context, '')),
+          for (final t in trips)
+            ListRowTile(
+              leading: KitRowIcon(vehicleIcon(t.vehicleType)),
+              title: t.dropoff.address ?? '—',
+              subtitle: '${dayAndTime(t.times.requestedAt, locale: context.localeTag)} · ${tripStatusLabel(l, t.status)}',
+              trailing: check(selected == t.id),
+              divider: true,
+              onTap: () => Navigator.pop(context, t.id),
             ),
-            if (history.isLoading) const Padding(padding: EdgeInsets.only(top: 12), child: SkeletonList(rows: 2, avatar: false)),
-            if (history.hasError) Padding(padding: const EdgeInsets.only(top: 12), child: Problem(history.error, describe: (e) => describeError(l, e))),
-          ],
-        ),
+          if (history.isLoading) const Padding(padding: EdgeInsets.only(top: 12), child: SkeletonList(rows: 2, avatar: false)),
+          if (history.hasError) Padding(padding: const EdgeInsets.only(top: 12), child: Problem(history.error, describe: (e) => describeError(l, e))),
+        ],
       ),
     );
   }
@@ -299,9 +332,10 @@ class _TicketScreenState extends ConsumerState<TicketScreen> {
     final thread = async.value;
     if (thread == null) {
       return Scaffold(
-        appBar: AppBar(title: Text(l.support)),
+        backgroundColor: c.page,
+        appBar: AppTopBar(title: l.support),
         body: Padding(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(AnbessaSpace.page),
           child: async.hasError
               ? Problem(async.error, describe: (e) => describeError(l, e), onRetry: () => ref.invalidate(ticketThreadProvider(widget.ticketId)), retryLabel: l.retry)
               : const SkeletonList(rows: 4, avatar: false),
@@ -311,7 +345,8 @@ class _TicketScreenState extends ConsumerState<TicketScreen> {
     final t = thread.ticket;
     final now = DateTime.now();
     return Scaffold(
-      appBar: AppBar(title: Text('#${t.ref}')),
+      backgroundColor: c.page,
+      appBar: AppTopBar(title: '#${t.ref}'),
       body: Column(
         children: [
           Expanded(
@@ -322,7 +357,7 @@ class _TicketScreenState extends ConsumerState<TicketScreen> {
                 } catch (_) {}
               },
               child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                padding: const EdgeInsets.fromLTRB(AnbessaSpace.page, 4, AnbessaSpace.page, 24),
                 children: [
                   Text(t.subject, style: AnbessaType.h2.copyWith(color: c.text)),
                   const SizedBox(height: 8),
@@ -338,7 +373,17 @@ class _TicketScreenState extends ConsumerState<TicketScreen> {
                   const SizedBox(height: 16),
                   if (t.status == TicketStatus.waitingRequester) ...[Notice(l.ticketWaitingYouLede, tone: NoticeTone.warning), const SizedBox(height: 12)],
                   if (t.resolutionNote != null && (t.status == TicketStatus.resolved || t.status == TicketStatus.closed)) ...[
-                    SectionCard(title: l.ticketAnswer, child: Text(t.resolutionNote!, style: AnbessaType.body2.copyWith(color: c.text))),
+                    AppCard(
+                      color: c.selectedFill,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(children: [Icon(Icons.verified_outlined, size: 20, color: c.accentText), const SizedBox(width: 8), Text(l.ticketAnswer, style: AnbessaType.title.copyWith(color: c.text))]),
+                          const SizedBox(height: 8),
+                          Text(t.resolutionNote!, style: AnbessaType.body2.copyWith(color: c.text)),
+                        ],
+                      ),
+                    ),
                     const SizedBox(height: 12),
                   ],
                   ThreadMessage(author: l.threadYou, body: t.description, at: t.createdAt, mine: true),
@@ -355,11 +400,11 @@ class _TicketScreenState extends ConsumerState<TicketScreen> {
                   if (t.canReopen(now)) ...[
                     Text(l.ticketReopenLede, style: AnbessaType.caption.copyWith(color: c.muted)),
                     const SizedBox(height: 8),
-                    OutlinedButton(onPressed: _busy ? null : _reopen, child: Text(l.ticketReopen)),
+                    PillButton(label: l.ticketReopen, variant: PillVariant.outline, busy: _busy, onPressed: _busy ? null : _reopen),
                   ] else if (!t.canReply) ...[
                     Notice(l.ticketClosedLede),
                     const SizedBox(height: 8),
-                    TextButton(onPressed: () => context.push(Routes.supportNew), child: Text(l.newTicket)),
+                    PillButton(label: l.newTicket, variant: PillVariant.tonal, onPressed: () => context.push(Routes.supportNew)),
                   ],
                 ],
               ),
@@ -411,11 +456,11 @@ class _ReopenDialogState extends State<_ReopenDialog> {
 
 /// The leading icon of a help-request category.
 IconData ticketCategoryIcon(TicketCategory c) => switch (c) {
-      TicketCategory.safety => Icons.shield_rounded,
-      TicketCategory.payment => Icons.payments_rounded,
-      TicketCategory.trip => Icons.local_taxi_rounded,
-      TicketCategory.lostItem => Icons.backpack_rounded,
-      TicketCategory.account => Icons.person_rounded,
-      TicketCategory.feedback => Icons.rate_review_rounded,
+      TicketCategory.safety => Icons.shield_outlined,
+      TicketCategory.payment => Icons.payments_outlined,
+      TicketCategory.trip => Icons.local_taxi_outlined,
+      TicketCategory.lostItem => Icons.backpack_outlined,
+      TicketCategory.account => Icons.person_outline_rounded,
+      TicketCategory.feedback => Icons.rate_review_outlined,
       TicketCategory.unknown => Icons.help_outline_rounded,
     };

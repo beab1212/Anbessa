@@ -19,28 +19,44 @@ class VehiclesScreen extends ConsumerWidget {
     final home = ref.watch(driverHomeProvider);
     final all = home.value?.allVehicles ?? const <Vehicle>[];
     return Scaffold(
-      appBar: AppBar(title: Text(l.vehicles), actions: [IconButton(tooltip: l.addVehicle, icon: const Icon(Icons.add_rounded), onPressed: () => context.push(Routes.driverVehicleNew))]),
+      backgroundColor: c.page,
+      appBar: AppTopBar(title: l.vehicles, actions: [IconButton(tooltip: l.addVehicle, icon: Icon(Icons.add_rounded, color: c.text), onPressed: () => context.push(Routes.driverVehicleNew)), const SizedBox(width: 8)]),
       body: RefreshIndicator(
         onRefresh: () => ref.read(driverHomeProvider.notifier).refresh(),
         child: home.isLoading && home.value == null
-            ? const Padding(padding: EdgeInsets.all(16), child: SkeletonList(rows: 2))
+            ? const Padding(padding: EdgeInsets.all(AnbessaSpace.page), child: SkeletonList(rows: 2))
             : all.isEmpty
-                ? ListView(children: [const SizedBox(height: 40), IllustratedEmpty(illustration: AnbessaIllustration.carWaiting, title: l.noVehicles, action: PrimaryButton(label: l.addVehicle, icon: Icons.add_rounded, onPressed: () => context.push(Routes.driverVehicleNew)))])
+                ? ListView(children: [const SizedBox(height: 40), IllustratedEmpty(illustration: AnbessaIllustration.carWaiting, title: l.noVehicles, action: PillButton(label: l.addVehicle, icon: Icons.add_rounded, expand: false, onPressed: () => context.push(Routes.driverVehicleNew)))])
                 : ListView(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.fromLTRB(AnbessaSpace.page, 8, AnbessaSpace.page, 24),
                     children: [
-                      SectionGroup(
-                        children: [
-                          for (final v in all)
-                            SettingsTile(
-                              icon: vehicleIcon(v.vehicleType),
-                              title: '${v.plateNumber} · ${v.label}',
-                              subtitle: v.isFleet ? l.fleetCar : null,
-                              trailing: StatusPill(vehicleStatusLabel(l, v.status), tone: vehicleTone(v.status)),
-                              onTap: v.isFleet ? null : () => context.push(Routes.driverVehicle(v.id)),
+                      // one card per car: the side art, plate and model, status (the kit's ride class tile)
+                      for (final v in all)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: AppCard(
+                            onTap: v.isFleet ? null : () => context.push(Routes.driverVehicle(v.id)),
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                            child: Row(
+                              children: [
+                                ExcludeSemantics(child: VehicleArt(v.vehicleType, width: 64)),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text('${v.plateNumber} · ${v.label}', maxLines: 1, overflow: TextOverflow.ellipsis, style: AnbessaType.title.copyWith(color: c.text)),
+                                      const SizedBox(height: 6),
+                                      Wrap(spacing: 6, runSpacing: 4, children: [StatusPill(vehicleStatusLabel(l, v.status), tone: vehicleTone(v.status)), if (v.isFleet) OutlineBadge(l.fleetCar)]),
+                                    ],
+                                  ),
+                                ),
+                                if (!v.isFleet) ExcludeSemantics(child: Icon(Icons.chevron_right_rounded, color: c.text)),
+                              ],
                             ),
-                        ],
-                      ),
+                          ),
+                        ),
+                      const SizedBox(height: 4),
                       Text(l.vehicleDocuments, style: AnbessaType.caption.copyWith(color: c.muted)),
                     ],
                   ),

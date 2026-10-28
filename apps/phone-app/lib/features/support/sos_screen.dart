@@ -13,6 +13,7 @@ import '../../core/l10n/l10n.dart';
 import '../../core/location/location_source.dart';
 import '../../core/network/providers.dart';
 import '../../core/state.dart';
+import '../../core/ux/kit_group.dart';
 import '../profile/settings_controllers.dart';
 import '../rider/trip/active_trip_controller.dart';
 import 'support_repository.dart';
@@ -78,8 +79,7 @@ class _SosScreenState extends ConsumerState<SosScreen> {
       final fix = await () async {
         if (await source.ensurePermission(LocationProfile.once) != LocationPermissionState.granted) return null;
         return source.current();
-      }()
-          .timeout(const Duration(seconds: 8));
+      }().timeout(const Duration(seconds: 8));
       if (fix != null) {
         ref.read(lastPositionProvider.notifier).set(fix);
         return (lat: fix.lat, lng: fix.lng, accuracy: fix.accuracy, approximate: false);
@@ -179,48 +179,67 @@ class _SosScreenState extends ConsumerState<SosScreen> {
     final alert = _alert;
 
     return Scaffold(
-      appBar: AppBar(title: Text(l.sosTitle)),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
-        children: [
-          if (alert != null && _phase == _Phase.sent) ...[
-            _AlertStatus(alert: alert, duplicate: _duplicate, approximate: _approximate, pollFailed: _pollFailed),
-            const SizedBox(height: 24),
-          ] else ...[
-            Text(l.sosLede, style: AnbessaType.body.copyWith(color: c.text2)),
-            const SizedBox(height: 24),
-          ],
-          PrimaryButton(label: l.callPolice, icon: Icons.phone_rounded, danger: true, onPressed: () => _call(policeNumber)),
-          const SizedBox(height: 12),
-          if (alert == null || _phase != _Phase.sent) ...[
-            if (_phase == _Phase.sending)
-              _Sending(label: l.sosSending)
-            else
-              HoldToConfirm(
-                label: l.alertSafety,
-                hint: l.sosHoldHint,
-                enabled: open,
-                onConfirmed: () => _send(trip),
+      backgroundColor: c.page,
+      appBar: AppTopBar(title: l.sosTitle, leadingKind: TopBarLeading.close),
+      // the police number is always one tap away, at the bottom like the kit's main action
+      bottomNavigationBar: BottomActionBar(
+        child: PrimaryButton(label: l.callPolice, icon: Icons.phone_rounded, danger: true, onPressed: () => _call(policeNumber)),
+      ),
+      // a short page: built whole (a lazy list could leave the failure notice unbuilt)
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(AnbessaSpace.page, 8, AnbessaSpace.page, 32),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (alert != null && _phase == _Phase.sent) ...[
+              _AlertStatus(alert: alert, duplicate: _duplicate, approximate: _approximate, pollFailed: _pollFailed),
+              const SizedBox(height: 24),
+            ] else ...[
+              // the kit's result layout: a big round badge, then the words, centred
+              const SizedBox(height: 8),
+              const Center(
+                child: ExcludeSemantics(child: ResultBadge(icon: Icons.sos_rounded, danger: true, size: 72, ring: true)),
               ),
-            const SizedBox(height: 8),
-            Text(open ? l.sosHoldLede : (tripId == null ? l.sosNoTrip : l.sosWindowClosed), style: AnbessaType.caption.copyWith(color: c.muted)),
-            if (_phase == _Phase.failed) ...[
               const SizedBox(height: 16),
-              Notice(l.sosFailed, tone: NoticeTone.error),
-              const SizedBox(height: 8),
-              Problem(_error, describe: (e) => describeError(l, e)),
-              const SizedBox(height: 8),
-              OutlinedButton(onPressed: () => _send(trip), child: Text(l.sosSendAgain)),
+              Text(
+                l.sosLede,
+                textAlign: TextAlign.center,
+                style: AnbessaType.body.copyWith(color: c.text2),
+              ),
+              const SizedBox(height: 24),
+            ],
+            if (alert == null || _phase != _Phase.sent) ...[
+              if (_phase == _Phase.sending) _Sending(label: l.sosSending) else HoldToConfirm(label: l.alertSafety, hint: l.sosHoldHint, enabled: open, onConfirmed: () => _send(trip)),
+              const SizedBox(height: 10),
+              Text(
+                open ? l.sosHoldLede : (tripId == null ? l.sosNoTrip : l.sosWindowClosed),
+                textAlign: TextAlign.center,
+                style: AnbessaType.caption.copyWith(color: c.muted),
+              ),
+              if (_phase == _Phase.failed) ...[
+                const SizedBox(height: 16),
+                Notice(l.sosFailed, tone: NoticeTone.error),
+                const SizedBox(height: 8),
+                Problem(_error, describe: (e) => describeError(l, e)),
+                const SizedBox(height: 8),
+                PillButton(label: l.sosSendAgain, variant: PillVariant.outlineDanger, onPressed: () => _send(trip)),
+              ],
+            ],
+            if (contact != null) ...[
+              const SizedBox(height: 24),
+              AppCard(
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                child: ListRowTile(
+                  leading: const KitRowIcon(Icons.contact_phone_outlined),
+                  title: l.sosCallContact(contact.name),
+                  subtitle: formatPhone(contact.phone),
+                  trailing: CircleActionButton(icon: Icons.phone_outlined, tooltip: l.sosCallContact(contact.name), onTap: () => _call(contact.phone)),
+                  onTap: () => _call(contact.phone),
+                ),
+              ),
             ],
           ],
-          if (contact != null) ...[
-            const SizedBox(height: 24),
-            SectionGroup(
-              margin: EdgeInsets.zero,
-              children: [SettingsTile(icon: Icons.phone_rounded, title: l.sosCallContact(contact.name), subtitle: formatPhone(contact.phone), chevron: false, onTap: () => _call(contact.phone))],
-            ),
-          ],
-        ],
+        ),
       ),
     );
   }
@@ -242,17 +261,38 @@ class _AlertStatus extends StatelessWidget {
       SosStatus.resolved => (l.sosStatusResolved, Tone.green, l.sosResolvedTitle, _outcome(l, alert.outcome)),
       _ => (l.sosStatusOpen, Tone.red, l.sosOpenTitle, l.sosOpenBody),
     };
+    final resolved = alert.status == SosStatus.resolved;
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Align(alignment: Alignment.centerLeft, child: StatusPill(pill, tone: tone, pulse: alert.isLive)),
+        Center(
+          child: ExcludeSemantics(
+            child: ResultBadge(icon: resolved ? Icons.check_rounded : Icons.shield_outlined, danger: !resolved && alert.status != SosStatus.acknowledged, size: 64, ring: true),
+          ),
+        ),
         const SizedBox(height: 12),
-        Text(title, style: AnbessaType.h2.copyWith(color: c.text)),
+        Center(
+          child: StatusPill(pill, tone: tone, pulse: alert.isLive),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          title,
+          textAlign: TextAlign.center,
+          style: AnbessaType.h1.copyWith(color: c.text),
+        ),
         const SizedBox(height: 8),
-        Text(body, style: AnbessaType.body.copyWith(color: c.text2)),
-        const SizedBox(height: 12),
-        KeyValue(l.sosSentAt, Text(dayAndTime(alert.triggeredAt, locale: context.localeTag))),
-        if (alert.acknowledgedAt != null) KeyValue(l.sosSeenAt, Text(dayAndTime(alert.acknowledgedAt!, locale: context.localeTag))),
+        Text(
+          body,
+          textAlign: TextAlign.center,
+          style: AnbessaType.body.copyWith(color: c.text2),
+        ),
+        const SizedBox(height: 16),
+        KeyValueCard(
+          rows: [
+            KeyValueCard.row(l.sosSentAt, dayAndTime(alert.triggeredAt, locale: context.localeTag)),
+            if (alert.acknowledgedAt != null) KeyValueCard.row(l.sosSeenAt, dayAndTime(alert.acknowledgedAt!, locale: context.localeTag)),
+          ],
+        ),
         if (duplicate) ...[const SizedBox(height: 8), Notice(l.sosDuplicate)],
         if (approximate) ...[const SizedBox(height: 8), Notice(l.sosApproximate, tone: NoticeTone.warning)],
         if (pollFailed) ...[const SizedBox(height: 8), Text(l.sosStatusStale, style: AnbessaType.caption.copyWith(color: c.muted))],
@@ -261,11 +301,11 @@ class _AlertStatus extends StatelessWidget {
   }
 
   static String _outcome(AppLocalizations l, SosOutcome? o) => switch (o) {
-        SosOutcome.falseAlarm => l.sosOutcomeFalseAlarm,
-        SosOutcome.assisted => l.sosOutcomeAssisted,
-        SosOutcome.escalated => l.sosOutcomeEscalated,
-        _ => l.sosResolvedBody,
-      };
+    SosOutcome.falseAlarm => l.sosOutcomeFalseAlarm,
+    SosOutcome.assisted => l.sosOutcomeAssisted,
+    SosOutcome.escalated => l.sosOutcomeEscalated,
+    _ => l.sosResolvedBody,
+  };
 }
 
 class _Sending extends StatelessWidget {
@@ -275,14 +315,21 @@ class _Sending extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.colors;
     return Container(
-      height: 64,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      decoration: BoxDecoration(color: c.dangerSoft, borderRadius: BorderRadius.circular(AnbessaRadius.md), border: Border.all(color: c.danger, width: 2)),
+      height: AnbessaSize.button,
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      decoration: BoxDecoration(
+        color: c.dangerSoft,
+        borderRadius: BorderRadius.circular(AnbessaRadius.pill),
+        border: Border.all(color: c.danger, width: 1.5),
+      ),
       child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
           SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.5, color: c.danger)),
           const SizedBox(width: 12),
-          Expanded(child: Text(label, style: AnbessaType.title.copyWith(color: c.danger))),
+          Flexible(
+            child: Text(label, style: AnbessaType.button.copyWith(color: c.danger)),
+          ),
         ],
       ),
     );
@@ -333,12 +380,26 @@ class _HoldToConfirmState extends State<HoldToConfirm> with SingleTickerProvider
     final on = widget.enabled;
     final fg = on ? c.danger : c.faint;
     Widget face(Color text, Color fill) => Container(
-          height: 64,
-          alignment: Alignment.center,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          color: fill,
-          child: Text(widget.label, textAlign: TextAlign.center, maxLines: 2, style: AnbessaType.title.copyWith(color: text)),
-        );
+      height: AnbessaSize.button,
+      alignment: Alignment.center,
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      color: fill,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.touch_app_outlined, size: 20, color: text),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              widget.label,
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              style: AnbessaType.button.copyWith(color: text),
+            ),
+          ),
+        ],
+      ),
+    );
     return Semantics(
       button: true,
       enabled: on,
@@ -351,9 +412,12 @@ class _HoldToConfirmState extends State<HoldToConfirm> with SingleTickerProvider
         onPointerUp: _up,
         onPointerCancel: _up,
         child: Container(
-          decoration: BoxDecoration(borderRadius: BorderRadius.circular(AnbessaRadius.md), border: Border.all(color: fg, width: 2)),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(AnbessaRadius.pill),
+            border: Border.all(color: fg, width: 1.5),
+          ),
           child: ClipRRect(
-            borderRadius: BorderRadius.circular(AnbessaRadius.md - 2),
+            borderRadius: BorderRadius.circular(AnbessaRadius.pill),
             child: LayoutBuilder(
               builder: (context, box) => AnimatedBuilder(
                 animation: _hold,

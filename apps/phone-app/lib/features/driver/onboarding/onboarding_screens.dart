@@ -17,6 +17,7 @@ import '../../../core/l10n/l10n.dart';
 import '../../../core/network/providers.dart';
 import '../../../core/router/routes.dart';
 import '../../../core/session/session_controller.dart';
+import '../../../core/ux/kit_group.dart';
 import '../../config/client_config_provider.dart';
 import '../shift/shift_controller.dart';
 
@@ -75,6 +76,8 @@ class OnboardingHubScreen extends ConsumerWidget {
     final p = OnboardingProgress.of(home, canDrive: session?.canDrive == true);
     final approved = d?.status == DriverStatus.active;
     return Scaffold(
+      backgroundColor: c.page,
+      appBar: AppTopBar(title: l.onboardingTitle, leadingKind: Navigator.of(context).canPop() ? TopBarLeading.back : TopBarLeading.none),
       body: RefreshIndicator(
         onRefresh: () async {
           await ref.read(driverHomeProvider.notifier).refresh();
@@ -82,16 +85,14 @@ class OnboardingHubScreen extends ConsumerWidget {
         },
         child: CustomScrollView(
           slivers: [
-            SliverAppBar(pinned: true, title: Text(l.onboardingTitle)),
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+              padding: const EdgeInsets.fromLTRB(AnbessaSpace.page, 4, AnbessaSpace.page, 32),
               sliver: SliverList.list(
                 children: [
                   if (homeAsync.hasError) Problem(homeAsync.error, describe: (e) => describeError(l, e), onRetry: () => ref.read(driverHomeProvider.notifier).refresh(), retryLabel: l.retry),
                   if (home == null && !homeAsync.hasError) const SkeletonList(rows: 4),
                   if (home != null) ...[
-                    FloatingCard(
-                      radius: AnbessaRadius.lg,
+                    AppCard(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -108,32 +109,30 @@ class OnboardingHubScreen extends ConsumerWidget {
                     ),
                     if (d != null) ...[
                       if (d.reviewNote != null) Padding(padding: const EdgeInsets.only(top: 12), child: Notice(l.reviewNote(d.reviewNote!), tone: NoticeTone.warning)),
-                      const SizedBox(height: 16),
-                      SectionGroup(
+                      const SizedBox(height: 20),
+                      KitGroup(
                         title: l.yourApplication,
-                        margin: EdgeInsets.zero,
                         children: [
-                          SettingsTile(icon: Icons.badge_rounded, title: d.fullName, subtitle: '${l.licenseNumber} ${d.licenseNumber}', chevron: false, trailing: StatusPill(driverStatusLabel(l, d.status), tone: _driverTone(d.status))),
+                          ListRowTile(leading: const KitRowIcon(Icons.badge_outlined), title: d.fullName, subtitle: '${l.licenseNumber} ${d.licenseNumber}', valueSub: driverStatusLabel(l, d.status), valueSubColor: kitToneText(context, _driverTone(d.status))),
                         ],
                       ),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 20),
                       _ChecklistGroup(title: l.driverDocuments, items: d.checklist.items, onOpen: () => context.push(Routes.driverDocuments('DRIVER', d.userId))),
-                      const SizedBox(height: 16),
-                      SectionGroup(
+                      const SizedBox(height: 20),
+                      KitGroup(
                         title: l.vehiclesTitle,
-                        margin: EdgeInsets.zero,
                         children: [
-                          if (home.allVehicles.isEmpty) Padding(padding: const EdgeInsets.fromLTRB(16, 14, 16, 14), child: Text(l.noVehicles, style: AnbessaType.body2.copyWith(color: c.muted))),
+                          if (home.allVehicles.isEmpty) Padding(padding: const EdgeInsets.symmetric(vertical: 14), child: Text(l.noVehicles, style: AnbessaType.body2.copyWith(color: c.muted))),
                           for (final v in home.allVehicles)
-                            SettingsTile(
-                              icon: Icons.directions_car_rounded,
+                            ListRowTile(
+                              leading: KitRowIcon(vehicleIcon(v.vehicleType)),
                               title: '${v.plateNumber} · ${v.label}',
-                              subtitle: v.isFleet ? l.fleetCar : vehicleStatusLabel(l, v.status),
-                              trailing: StatusPill(vehicleStatusLabel(l, v.status), tone: _vehicleTone(v.status)),
+                              subtitle: v.isFleet ? l.fleetCar : null,
+                              valueSub: vehicleStatusLabel(l, v.status), valueSubColor: kitToneText(context, _vehicleTone(v.status)),
                               chevron: !v.isFleet,
                               onTap: v.isFleet ? null : () => context.push(Routes.driverVehicle(v.id)),
                             ),
-                          SettingsTile(icon: Icons.add_rounded, title: l.addVehicle, iconTone: c.accentStrong, onTap: () => context.push(Routes.driverVehicleNew)),
+                          ListRowTile(leading: const KitRowIcon(Icons.add_rounded), title: l.addVehicle, titleColor: c.accentText, onTap: () => context.push(Routes.driverVehicleNew)),
                         ],
                       ),
                     ],
@@ -237,17 +236,20 @@ class _ChecklistGroup extends StatelessWidget {
   Widget build(BuildContext context) {
     final l = context.l10n;
     final c = context.colors;
-    return SectionGroup(
+    return KitGroup(
       title: title,
-      margin: EdgeInsets.zero,
       children: [
         for (final i in items)
-          SettingsTile(
-            icon: i.document?.status == DocumentStatus.approved ? Icons.check_circle_rounded : i.document == null ? Icons.radio_button_unchecked_rounded : Icons.pending_rounded,
-            iconTone: i.document?.status == DocumentStatus.approved ? c.success : i.document == null ? c.muted : c.warning,
+          ListRowTile(
+            leading: KitRowIcon(
+              i.document?.status == DocumentStatus.approved ? Icons.check_rounded : i.document == null ? Icons.upload_file_outlined : Icons.hourglass_top_rounded,
+              color: i.document?.status == DocumentStatus.approved ? c.success : i.document == null ? c.muted : c.warning,
+            ),
             title: documentKindLabel(l, i.kind),
             subtitle: i.required ? null : l.optional,
-            trailing: i.document == null ? null : StatusPill(_docLabel(l, i.document!), tone: _docTone(i.document!.status)),
+            valueSub: i.document == null ? null : _docLabel(l, i.document!),
+            valueSubColor: i.document == null ? null : kitToneText(context, _docTone(i.document!.status)),
+            chevron: true,
             onTap: onOpen,
           ),
       ],
@@ -340,28 +342,30 @@ class _ApplyScreenState extends ConsumerState<ApplyScreen> {
     final cfg = ref.watch(configProvider);
     final city = _city ?? ref.watch(currentCityProvider).id;
     return Scaffold(
-      appBar: AppBar(title: Text(l.applyTitle)),
+      backgroundColor: c.page,
+      appBar: AppTopBar(title: l.applyTitle),
+      bottomNavigationBar: BottomActionBar(child: PillButton(label: l.apply, busy: _busy, onPressed: _name.text.trim().length < 3 || _licence.text.trim().length < 4 ? null : _apply)),
       body: ListView(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.fromLTRB(AnbessaSpace.page, 8, AnbessaSpace.page, 24),
         children: [
           StepperHeader(steps: [l.stepApply, l.stepDocuments, l.stepVehicle, l.stepReview], current: 0),
-          const SizedBox(height: 18),
+          const SizedBox(height: 20),
           Text(l.applyLede, style: AnbessaType.body2.copyWith(color: c.text2)),
-          const SizedBox(height: 18),
-          TextField(controller: _name, textCapitalization: TextCapitalization.words, autofillHints: const [AutofillHints.name], decoration: InputDecoration(labelText: l.fullName), onChanged: (_) => setState(() {})),
-          const SizedBox(height: 12),
-          TextField(controller: _licence, textCapitalization: TextCapitalization.characters, decoration: InputDecoration(labelText: l.licenseNumber), onChanged: (_) => setState(() {})),
-          const SizedBox(height: 12),
+          const SizedBox(height: 24),
+          FilledField(label: l.fullName, controller: _name, icon: Icons.person_outline_rounded, textCapitalization: TextCapitalization.words, autofillHints: const [AutofillHints.name], onChanged: (_) => setState(() {})),
+          const SizedBox(height: 24),
+          FilledField(label: l.licenseNumber, controller: _licence, icon: Icons.badge_outlined, textCapitalization: TextCapitalization.characters, onChanged: (_) => setState(() {})),
+          const SizedBox(height: 24),
+          FieldLabel(l.cityLabel),
           DropdownButtonFormField<String>(
             initialValue: city,
-            decoration: InputDecoration(labelText: l.cityLabel),
+            icon: const Icon(Icons.keyboard_arrow_down_rounded),
+            decoration: const InputDecoration(prefixIcon: Icon(Icons.location_city_outlined)),
             items: [for (final c in cfg.cities) DropdownMenuItem(value: c.id, child: Text(c.name))],
             onChanged: (v) => setState(() => _city = v),
           ),
           const SizedBox(height: 16),
           Problem(_error, describe: (e) => describeError(l, e)),
-          const SizedBox(height: 8),
-          PrimaryButton(label: l.apply, busy: _busy, onPressed: _name.text.trim().length < 3 || _licence.text.trim().length < 4 ? null : _apply),
         ],
       ),
     );
@@ -389,29 +393,18 @@ class _DocumentsScreenState extends ConsumerState<DocumentsScreen> {
   Future<void> _pick(ChecklistItem item) async {
     final l = context.l10n;
     final c = context.colors;
-    final choice = await showModalBottomSheet<String>(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(documentKindLabel(l, item.kind), style: AnbessaType.h2.copyWith(color: c.text)),
-              const SizedBox(height: 4),
-              Text(documentHint(l, item.kind), style: AnbessaType.body2.copyWith(color: c.text2)),
-              const SizedBox(height: 12),
-              SectionGroup(
-                margin: EdgeInsets.zero,
-                children: [
-                  SettingsTile(icon: Icons.photo_camera_rounded, title: l.takePhoto, onTap: () => Navigator.pop(ctx, 'camera')),
-                  SettingsTile(icon: Icons.photo_library_rounded, title: l.chooseFromGallery, onTap: () => Navigator.pop(ctx, 'gallery')),
-                ],
-              ),
-            ],
-          ),
-        ),
+    final choice = await showHandleSheet<String>(
+      context,
+      title: documentKindLabel(l, item.kind),
+      builder: (ctx) => Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(documentHint(l, item.kind), textAlign: TextAlign.center, style: AnbessaType.body2.copyWith(color: c.text2)),
+          const SizedBox(height: 8),
+          ListRowTile(leading: const KitRowIcon(Icons.photo_camera_outlined), title: l.takePhoto, chevron: true, divider: true, onTap: () => Navigator.pop(ctx, 'camera')),
+          ListRowTile(leading: const KitRowIcon(Icons.photo_library_outlined), title: l.chooseFromGallery, chevron: true, onTap: () => Navigator.pop(ctx, 'gallery')),
+        ],
       ),
     );
     if (choice == null) return;
@@ -459,7 +452,8 @@ class _DocumentsScreenState extends ConsumerState<DocumentsScreen> {
   Widget build(BuildContext context) {
     final l = context.l10n;
     return Scaffold(
-      appBar: AppBar(title: Text(widget.subjectType == 'DRIVER' ? l.driverDocuments : l.vehicleDocuments)),
+      backgroundColor: context.colors.page,
+      appBar: AppTopBar(title: widget.subjectType == 'DRIVER' ? l.driverDocuments : l.vehicleDocuments),
       body: FutureBuilder(
         future: _items,
         builder: (context, snap) {
@@ -467,7 +461,7 @@ class _DocumentsScreenState extends ConsumerState<DocumentsScreen> {
           final items = snap.data;
           if (items == null) return const Padding(padding: EdgeInsets.all(16), child: SkeletonList(rows: 4));
           return ListView(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.fromLTRB(AnbessaSpace.page, 8, AnbessaSpace.page, 24),
             children: [
               Problem(_error, describe: (e) => describeError(l, e)),
               for (final (n, i) in items.indexed)
@@ -496,9 +490,9 @@ class _DocumentCard extends StatelessWidget {
     final c = context.colors;
     final d = item.document;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: FloatingCard(
-        padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.only(bottom: 12),
+      child: AppCard(
+        padding: const EdgeInsets.all(14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -533,7 +527,7 @@ class _DocumentCard extends StatelessWidget {
                 ),
               ],
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
             if (uploading) ...[
               LinearProgressIndicator(value: progress <= 0 ? null : progress, minHeight: 6, borderRadius: BorderRadius.circular(3)),
               const SizedBox(height: 6),
@@ -542,13 +536,13 @@ class _DocumentCard extends StatelessWidget {
               Row(
                 children: [
                   if (d != null) ...[
-                    Expanded(child: OutlinedButton(onPressed: enabled ? () => _view(context, d) : null, child: Text(l.viewDocument))),
+                    Expanded(child: PillButton(label: l.viewDocument, variant: PillVariant.outlineNeutral, compact: true, onPressed: enabled ? () => _view(context, d) : null)),
                     const SizedBox(width: 8),
                   ],
                   Expanded(
                     child: item.needsUpload
-                        ? PrimaryButton(label: l.upload, icon: Icons.upload_file_rounded, onPressed: enabled ? onPick : null)
-                        : OutlinedButton(onPressed: enabled ? onPick : null, child: Text(l.replace)),
+                        ? PillButton(label: l.upload, icon: Icons.upload_file_rounded, compact: true, onPressed: enabled ? onPick : null)
+                        : PillButton(label: l.replace, variant: PillVariant.tonal, compact: true, onPressed: enabled ? onPick : null),
                   ),
                 ],
               ),
@@ -672,18 +666,19 @@ class _VehicleFormScreenState extends ConsumerState<VehicleFormScreen> {
     final type = _type ?? cfg.vehicleTypes.firstOrNull?.code;
     final ok = _plate.text.trim().length >= 4 && _make.text.trim().isNotEmpty && _model.text.trim().isNotEmpty && _color.text.trim().isNotEmpty;
     return Scaffold(
-      appBar: AppBar(title: Text(l.addVehicle)),
+      backgroundColor: c.page,
+      appBar: AppTopBar(title: l.addVehicle),
+      bottomNavigationBar: BottomActionBar(child: PillButton(label: l.registerVehicle, busy: _busy, onPressed: ok ? _save : null)),
       body: ListView(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.fromLTRB(AnbessaSpace.page, 8, AnbessaSpace.page, 24),
         children: [
           Text(l.vehicleFormLede, style: AnbessaType.body2.copyWith(color: c.text2)),
-          const SizedBox(height: 18),
-          TextField(controller: _plate, textCapitalization: TextCapitalization.characters, decoration: InputDecoration(labelText: l.plateNumber, hintText: '3-A40402'), onChanged: (_) => setState(() {})),
-          const SizedBox(height: 14),
-          Text(l.vehicleType, style: AnbessaType.label.copyWith(color: c.muted, letterSpacing: 0.4)),
-          const SizedBox(height: 8),
+          const SizedBox(height: 24),
+          FilledField(label: l.plateNumber, hint: '3-A40402', controller: _plate, icon: Icons.pin_outlined, textCapitalization: TextCapitalization.characters, onChanged: (_) => setState(() {})),
+          const SizedBox(height: 24),
+          FieldLabel(l.vehicleType),
           SizedBox(
-            height: 92,
+            height: 104,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               itemCount: cfg.vehicleTypes.length,
@@ -701,17 +696,19 @@ class _VehicleFormScreenState extends ConsumerState<VehicleFormScreen> {
                     },
                     child: AnimatedContainer(
                       duration: AnbessaMotion.of(context, AnbessaMotion.base),
-                      width: 104,
+                      width: 112,
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: c.surface,
+                        color: sel ? c.selectedFill : c.cardFill,
                         borderRadius: BorderRadius.circular(AnbessaRadius.md),
-                        border: Border.all(color: sel ? c.text : c.border, width: sel ? 2 : 1),
+                        border: Border.all(color: sel ? c.accent : c.cardBorder, width: sel ? 1.5 : 1),
                       ),
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Text(t.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: AnbessaType.label.copyWith(color: c.text)),
+                          ExcludeSemantics(child: VehicleArt(t.code, width: 72)),
+                          const SizedBox(height: 6),
+                          Text(t.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: AnbessaType.body2.copyWith(color: c.text, fontWeight: FontWeight.w700)),
                         ],
                       ),
                     ),
@@ -720,29 +717,30 @@ class _VehicleFormScreenState extends ConsumerState<VehicleFormScreen> {
               },
             ),
           ),
-          const SizedBox(height: 14),
-          Row(children: [
-            Expanded(child: TextField(controller: _make, decoration: InputDecoration(labelText: l.make), onChanged: (_) => setState(() {}))),
-            const SizedBox(width: 10),
-            Expanded(child: TextField(controller: _model, decoration: InputDecoration(labelText: l.model), onChanged: (_) => setState(() {}))),
+          const SizedBox(height: 24),
+          // two fields side by side, as on the kit's card form
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Expanded(child: FilledField(label: l.make, controller: _make, onChanged: (_) => setState(() {}))),
+            const SizedBox(width: 12),
+            Expanded(child: FilledField(label: l.model, controller: _model, onChanged: (_) => setState(() {}))),
           ]),
-          const SizedBox(height: 12),
-          Row(children: [
-            Expanded(child: TextField(controller: _year, keyboardType: TextInputType.number, decoration: InputDecoration(labelText: l.year))),
-            const SizedBox(width: 10),
-            Expanded(child: TextField(controller: _color, decoration: InputDecoration(labelText: l.color), onChanged: (_) => setState(() {}))),
+          const SizedBox(height: 24),
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Expanded(child: FilledField(label: l.year, controller: _year, keyboardType: TextInputType.number)),
+            const SizedBox(width: 12),
+            Expanded(child: FilledField(label: l.color, controller: _color, onChanged: (_) => setState(() {}))),
           ]),
-          const SizedBox(height: 14),
-          Text(l.seats, style: AnbessaType.label.copyWith(color: c.muted, letterSpacing: 0.4)),
-          const SizedBox(height: 8),
+          const SizedBox(height: 24),
+          FieldLabel(l.seats),
           Wrap(
             spacing: 8,
+            runSpacing: 8,
             children: [
               for (var s = 2; s <= 8; s++)
-                ChoiceChip(
-                  label: Text('$s'),
+                OutlineChip(
+                  label: '$s',
                   selected: _seats == s,
-                  onSelected: (_) {
+                  onTap: () {
                     Haptics.selection();
                     setState(() => _seats = s);
                   },
@@ -751,8 +749,6 @@ class _VehicleFormScreenState extends ConsumerState<VehicleFormScreen> {
           ),
           const SizedBox(height: 16),
           Problem(_error, describe: (e) => describeError(l, e)),
-          const SizedBox(height: 8),
-          PrimaryButton(label: l.registerVehicle, busy: _busy, onPressed: ok ? _save : null),
         ],
       ),
     );
@@ -801,7 +797,8 @@ class _VehicleScreenState extends ConsumerState<VehicleScreen> {
     final l = context.l10n;
     final c = context.colors;
     return Scaffold(
-      appBar: AppBar(title: Text(l.vehicleLabel)),
+      backgroundColor: c.page,
+      appBar: AppTopBar(title: l.vehicleLabel),
       body: FutureBuilder(
         future: _data,
         builder: (context, snap) {
@@ -812,12 +809,13 @@ class _VehicleScreenState extends ConsumerState<VehicleScreen> {
           final req = cl.items.where((i) => i.required).toList();
           final done = req.where((i) => !i.needsUpload).length;
           return ListView(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.fromLTRB(AnbessaSpace.page, 8, AnbessaSpace.page, 24),
             children: [
-              FloatingCard(
-                radius: AnbessaRadius.lg,
+              AppCard(
                 child: Row(
                   children: [
+                    ExcludeSemantics(child: VehicleArt(v.vehicleType, width: 88)),
+                    const SizedBox(width: 14),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -833,14 +831,14 @@ class _VehicleScreenState extends ConsumerState<VehicleScreen> {
                 ),
               ),
               if (v.reviewNote != null) Padding(padding: const EdgeInsets.only(top: 12), child: Notice(l.reviewNote(v.reviewNote!), tone: NoticeTone.warning)),
-              const SizedBox(height: 16),
+              const SizedBox(height: 20),
               Row(
                 children: [
-                  Expanded(child: Text(l.vehicleDocuments, style: AnbessaType.label.copyWith(color: c.muted, letterSpacing: 0.4))),
+                  Expanded(child: Text(l.vehicleDocuments, style: AnbessaType.title.copyWith(color: c.text))),
                   Text(l.checklistProgress(done, req.length), style: AnbessaType.caption.copyWith(color: c.muted)),
                 ],
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 10),
               _ChecklistGroup(items: cl.items, onOpen: () => context.push(Routes.driverDocuments('VEHICLE', v.id)).then((_) => setState(() => _data = _load()))),
               const SizedBox(height: 16),
               if (v.status == VehicleStatus.draft || v.status == VehicleStatus.rejected) ...[

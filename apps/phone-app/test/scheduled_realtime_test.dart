@@ -54,10 +54,13 @@ void main() {
           ..on('GET', '/api/trips/scheduled', (_) => {'scheduled': [fixture('scheduled_trip.json')]})
           ..on('POST', '/api/trips/scheduled/$sid/cancel', (_) => {...fixture('scheduled_trip.json'), 'status': 'CANCELLED'});
         await pumpWithBackend(tester, backend, HistoryScreen(as: 'rider', receiptRoute: (id) => '/rider/trip/$id'), flags: {'scheduledRides': true}, brightness: b);
-        expect(find.text('Upcoming'), findsOneWidget);
+        // the fixture trip is in progress, so Ongoing opens first; Scheduled lists the booking with
+        // the pickup time on the right
+        expect(find.widgetWithText(OutlineChip, 'Scheduled'), findsOneWidget);
+        await tapText(tester, 'Scheduled');
         expect(find.text('Booked'), findsOneWidget);
         expect(find.text('Bole International Airport'), findsWidgets);
-        expect(find.text(dayAndTime(DateTime.utc(2026, 10, 28, 5, 30))), findsOneWidget);
+        expect(find.text(clockOf(DateTime.utc(2026, 10, 28, 5, 30))), findsOneWidget);
         expect(tester.takeException(), isNull);
 
         await tapText(tester, 'Cancel booking');
@@ -72,7 +75,7 @@ void main() {
     testWidgets('with the flag off nothing is asked for', (tester) async {
       final backend = FakeBackend()..on('GET', '/api/trips', (_) => {'trips': [], 'next': null});
       await pumpWithBackend(tester, backend, HistoryScreen(as: 'rider', receiptRoute: (id) => '/rider/trip/$id'));
-      expect(find.text('Upcoming'), findsNothing);
+      expect(find.widgetWithText(OutlineChip, 'Scheduled'), findsNothing);
       expect(backend.requests.where((r) => r.uri.path == '/api/trips/scheduled'), isEmpty);
     });
   });
@@ -176,7 +179,7 @@ void main() {
   });
 
   group('marketing preferences', () {
-    Finder switchOf(String title) => find.descendant(of: find.widgetWithText(SettingsSwitchTile, title), matching: find.byType(Switch));
+    Finder switchOf(String title) => find.descendant(of: find.widgetWithText(SwitchRow, title), matching: find.byType(Switch));
 
     testWidgets('the SMS switch is saved on the account', (tester) async {
       final backend = FakeBackend()

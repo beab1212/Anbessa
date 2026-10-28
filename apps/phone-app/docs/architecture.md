@@ -36,7 +36,7 @@ apps/phone-app/
   test/                           testing.md
   env/                            dev-host, dev-emulator, dev-kong, stack, staging (.json)
   android/ ios/ linux/            platforms-and-release.md
-  assets/fonts/                   Inter and Noto Sans Ethiopic (+ their OFL licences)
+  assets/fonts/                   Noto Sans Ethiopic (+ its OFL licence); Urbanist comes from ride_app_core
 ```
 
 ## Boot
@@ -271,8 +271,8 @@ The comment in `transitions.dart` says the slide-up is also for pay and rating; 
 | **Rider map shell** (`riderMapShellRoute`, a `ShellRoute` in branch 0; `RiderMapShell` draws one map and one sheet, the stage pages are empty `NoTransitionPage`s) | | | |
 | `/rider/home` | home stage (`HomeSheet`) | none (the shell animates) | branch 0 (Home) |
 | `/rider/home/book/pickup` | redirect | | → `/rider/book/pickup` |
-| `/rider/book/route` | search stage (`SearchHeader`, `SearchSuggestions`, `PinCard`) | none | query: `focus=pickup|dropoff` (default dropoff); `mode=savedPlace&label=…` redirects to `/account/places/pick?label=…` |
-| `/rider/book/quote` | choose-ride stage (`QuoteHeader`, `QuoteSheet`, `QuoteFooter`) | none | |
+| `/rider/book/route` | search stage (`SearchPage` over the shell, `PinCard`) | none | query: `focus=pickup|dropoff` (default dropoff); `mode=savedPlace&label=…` redirects to `/account/places/pick?label=…` |
+| `/rider/book/quote` | choose-ride stage (`QuoteRouteCard` over the map, `QuoteSheet`, `QuoteFooter`) | none | |
 | `/rider/trip/:id` | trip stage (`TripSheet`, `TripTopBar`) | none | |
 | `/rider/trip/:id/pay` | `PayScreen` | slide-up | on the root navigator, over the shell |
 | `/rider/trip/:id/rate` | `RatingScreen(asDriver: false, doneRoute: /rider/home)` | slide-up | on the root navigator, over the shell |

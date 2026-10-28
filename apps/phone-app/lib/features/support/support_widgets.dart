@@ -211,3 +211,25 @@ class _ReplyComposerState extends State<ReplyComposer> {
     );
   }
 }
+
+/// The kit's "Whoops!" sheet: a red ✕ badge over the sheet's edge, what went wrong, OK.
+Future<void> showWhoops(BuildContext context, String message) => showResultSheet<void>(
+      context,
+      builder: (ctx) => ResultSheet(
+        title: ctx.l10n.actWhoops,
+        message: message,
+        icon: Icons.close_rounded,
+        danger: true,
+        actions: PillButton(label: ctx.l10n.ok, onPressed: () => Navigator.of(ctx).pop()),
+      ),
+    );
+
+/// The kit's success sheet ("Promo Code Applied!"): an amber ✓ badge, a title, a line, OK.
+Future<void> showSuccessSheet(BuildContext context, {required String title, String? message}) => showResultSheet<void>(
+      context,
+      builder: (ctx) => ResultSheet(
+        title: title,
+        message: message,
+        actions: PillButton(label: ctx.l10n.ok, onPressed: () => Navigator.of(ctx).pop()),
+      ),
+    );

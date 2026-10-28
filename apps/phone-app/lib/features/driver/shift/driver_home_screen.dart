@@ -163,8 +163,10 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> with Single
           ),
           if (o == null)
             AppSheet(
-              snaps: const [0.32, 0.6],
+              snaps: const [0.42, 0.66],
               onHeightChanged: (h) => _sheetHeight.value = h,
+              // the slide stays at the bottom; the headline, the numbers and the car scroll above it
+              footer: shift.online ? _onlineFooter(context, shift) : _offlineFooter(context, shift, vehicles, chosen),
               builder: (context, _) => AnimatedSwitcherX(
                 child: KeyedSubtree(
                   key: ValueKey(shift.online),
@@ -178,21 +180,23 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> with Single
     );
   }
 
+  /// Today's numbers as the kit's three circle stats (earned, trips, time online).
   Widget _stats(BuildContext context, ShiftState shift, EarningsSummary? today) {
     final l = context.l10n;
     final loc = context.localeTag;
     if (today == null) return const SizedBox.shrink();
     final since = shift.session?.startedAt;
+    StatTriple triple(DateTime now) => StatTriple(
+          items: [
+            StatTriple.item(Icons.account_balance_wallet_outlined, birr(today.netMinor, locale: loc), l.earningsToday),
+            StatTriple.item(Icons.route_outlined, '${today.trips}', l.tripsToday),
+            StatTriple.item(Icons.schedule_rounded, since == null ? '—' : onlineFor(now.toUtc().difference(since.toUtc())), l.timeOnline),
+          ],
+        );
     return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
-      child: StatRow(
-        children: [
-          StatTile(label: l.earningsToday, icon: Icons.payments_rounded, value: AnimatedMoney(today.netMinor, locale: loc)),
-          StatTile(label: l.tripsToday, icon: Icons.route_rounded, value: AnimatedCounter(value: today.trips, format: (v) => v.round().toString())),
-          // ticks on its own, once a minute is enough
-          if (since != null) StatTile(label: l.timeOnline, icon: Icons.schedule_rounded, value: TickingBuilder(interval: const Duration(seconds: 30), builder: (_, now) => Text(onlineFor(now.toUtc().difference(since.toUtc()))))),
-        ],
-      ),
+      padding: const EdgeInsets.only(bottom: 16),
+      // ticks on its own, once every 30 s is enough
+      child: since == null ? triple(DateTime.now()) : TickingBuilder(interval: const Duration(seconds: 30), builder: (_, now) => triple(now)),
     );
   }
 
@@ -202,45 +206,89 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> with Single
     return h > 0 ? '${h}h ${m}m' : '${m}m';
   }
 
+  /// The sheet's headline: a big title, a grey line under it, the status pill on the right.
+  Widget _headline(BuildContext context, {required String title, required String sub, required bool online, Widget? lead}) {
+    final l = context.l10n;
+    final c = context.colors;
+    return Padding(
+      padding: const EdgeInsets.only(top: 4, bottom: 14),
+      child: Row(
+        children: [
+          if (lead != null) ...[lead, const SizedBox(width: 12)],
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: AnbessaType.h2.copyWith(color: c.text)),
+                const SizedBox(height: 4),
+                Text(sub, maxLines: 2, overflow: TextOverflow.ellipsis, style: AnbessaType.caption.copyWith(color: c.muted)),
+              ],
+            ),
+          ),
+          if (online) ...[const SizedBox(width: 8), StatusPill(l.online, tone: Tone.green, pulse: true)],
+        ],
+      ),
+    );
+  }
+
   Widget _offline(BuildContext context, ShiftState shift, List<Vehicle> vehicles, Vehicle? chosen, EarningsSummary? today) {
     final l = context.l10n;
     final c = context.colors;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _headline(context, title: l.youAreOffline, sub: l.drv2OfflineLede, online: false),
+        if (shift.endedReason != null && shift.endedReason != 'DRIVER') Padding(padding: const EdgeInsets.only(bottom: 12), child: Notice(l.forcedOffline(offlineReasonLabel(l, shift.endedReason)), tone: NoticeTone.warning)),
+        _stats(context, shift, today),
+        if (vehicles.isEmpty)
+          Notice(l.noVehicles, tone: NoticeTone.info)
+        else ...[
+          Text(l.drv2YourCar, style: AnbessaType.title.copyWith(color: c.text)),
+          const SizedBox(height: 8),
+          AppCard(
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            child: ListRowTile(
+              leading: ExcludeSemantics(child: CircleIcon(chosen == null ? Icons.directions_car_outlined : vehicleIcon(chosen.vehicleType), color: c.accentText)),
+              title: chosen == null ? l.chooseVehicle : '${chosen.plateNumber} · ${chosen.label}',
+              subtitle: chosen == null ? null : (chosen.canDrive == false ? (chosen.denialMessage != null ? describeError(l, AppError(status: 403, code: chosen.denial ?? '', message: chosen.denialMessage!)) : l.notEligible) : (chosen.isFleet ? l.fleetCar : l.ready)),
+              trailing: chosen == null ? null : StatusPill(chosen.canDrive == false ? l.notEligible : l.ready, tone: chosen.canDrive == false ? Tone.red : Tone.green),
+              chevron: true,
+              onTap: () async {
+                final v = await showVehiclePicker(context, vehicles: vehicles, selectedId: chosen?.id);
+                if (v != null) setState(() => _vehicleId = v.id);
+              },
+            ),
+          ),
+        ],
+        if (Env.fakeLocationOn) Padding(padding: const EdgeInsets.only(top: 8), child: Text('${l.devTools}: ${l.youAreHere} ${ref.watch(lastPositionProvider)?.let((p) => '${p.lat.toStringAsFixed(4)}, ${p.lng.toStringAsFixed(4)}') ?? '—'}', style: AnbessaType.caption.copyWith(color: c.faint))),
+      ],
+    );
+  }
+
+  /// Offline: why going online failed, then the amber slide (or "Add a car").
+  Widget _offlineFooter(BuildContext context, ShiftState shift, List<Vehicle> vehicles, Vehicle? chosen) {
+    final l = context.l10n;
     final error = shift.error;
     String? errorText;
     if (error is AppError && error.code == 'location_denied') errorText = l.locationNeededToDrive;
     if (error is AppError && error.code == 'location_off') errorText = l.locationServiceOff;
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (shift.endedReason != null && shift.endedReason != 'DRIVER') Padding(padding: const EdgeInsets.only(bottom: 10), child: Notice(l.forcedOffline(offlineReasonLabel(l, shift.endedReason)), tone: NoticeTone.warning)),
-        _stats(context, shift, today),
+        if (errorText != null)
+          Padding(padding: const EdgeInsets.only(bottom: 12), child: Notice(errorText, tone: NoticeTone.error, action: TextButton(onPressed: () => ref.read(locationSourceProvider).openSettings(), child: Text(l.openSettings))))
+        else if (error != null)
+          Padding(padding: const EdgeInsets.only(bottom: 12), child: Problem(error, describe: (e) => describeError(l, e))),
         if (vehicles.isEmpty)
-          Notice(l.noVehicles, tone: NoticeTone.info, action: TextButton(onPressed: () => context.go(Routes.driverOnboarding), child: Text(l.addVehicle)))
-        else ...[
-          SectionGroup(
-            margin: const EdgeInsets.only(bottom: 12),
-            children: [
-              SettingsTile(
-                icon: chosen == null ? Icons.directions_car_outlined : vehicleIcon(chosen.vehicleType),
-                title: chosen == null ? l.chooseVehicle : '${chosen.plateNumber} · ${chosen.label}',
-                subtitle: chosen == null ? null : (chosen.canDrive == false ? (chosen.denialMessage != null ? describeError(l, AppError(status: 403, code: chosen.denial ?? '', message: chosen.denialMessage!)) : l.notEligible) : (chosen.isFleet ? l.fleetCar : l.ready)),
-                trailing: chosen == null ? null : StatusPill(chosen.canDrive == false ? l.notEligible : l.ready, tone: chosen.canDrive == false ? Tone.red : Tone.green),
-                onTap: () async {
-                  final v = await showVehiclePicker(context, vehicles: vehicles, selectedId: chosen?.id);
-                  if (v != null) setState(() => _vehicleId = v.id);
-                },
-              ),
-            ],
-          ),
-          if (errorText != null)
-            Padding(padding: const EdgeInsets.only(bottom: 10), child: Notice(errorText, tone: NoticeTone.error, action: TextButton(onPressed: () => ref.read(locationSourceProvider).openSettings(), child: Text(l.openSettings))))
-          else if (error != null)
-            Padding(padding: const EdgeInsets.only(bottom: 10), child: Problem(error, describe: (e) => describeError(l, e))),
+          PillButton(label: l.addVehicle, icon: Icons.add_rounded, onPressed: () => context.go(Routes.driverOnboarding))
+        else
           SwipeToConfirm(
             label: l.slideToGoOnline,
             icon: Icons.power_settings_new_rounded,
             tone: Tone.amber,
+            height: AnbessaSize.button,
             busy: shift.busy,
             enabled: chosen != null && chosen.canDrive != false,
             onConfirmed: () async {
@@ -248,8 +296,6 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> with Single
               await ref.read(shiftProvider.notifier).goOnline(chosen!);
             },
           ),
-        ],
-        if (Env.fakeLocationOn) Padding(padding: const EdgeInsets.only(top: 8), child: Text('${l.devTools}: ${l.youAreHere} ${ref.watch(lastPositionProvider)?.let((p) => '${p.lat.toStringAsFixed(4)}, ${p.lng.toStringAsFixed(4)}') ?? '—'}', style: AnbessaType.caption.copyWith(color: c.faint))),
       ],
     );
   }
@@ -262,25 +308,28 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> with Single
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
-        Row(
-          children: [
-            Container(width: 44, height: 44, decoration: BoxDecoration(color: c.successSoft, shape: BoxShape.circle), child: const RadarPulse(color: Color(0xFF22C55E), size: 44, rings: 2)),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(l.waitingForOffers, style: AnbessaType.title.copyWith(color: c.text)),
-                  Text(v == null ? l.online : '${v.plateNumber} · ${v.label}', style: AnbessaType.caption.copyWith(color: c.muted)),
-                ],
-              ),
-            ),
-          ],
+        _headline(
+          context,
+          title: l.waitingForOffers,
+          sub: v == null ? l.drv2OnlineLede : '${v.plateNumber} · ${v.label}',
+          online: true,
+          lead: ExcludeSemantics(child: SizedBox(width: 48, height: 48, child: RadarPulse(color: c.accent, size: 48, rings: 2))),
         ),
-        const SizedBox(height: 14),
         _stats(context, shift, today),
+      ],
+    );
+  }
+
+  /// Online: the grey slide to stop.
+  Widget _onlineFooter(BuildContext context, ShiftState shift) {
+    final l = context.l10n;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
         Problem(shift.error, describe: (e) => describeError(l, e)),
-        SwipeToConfirm(label: l.slideToGoOffline, icon: Icons.power_settings_new, tone: Tone.grey, busy: shift.busy, onConfirmed: () => ref.read(shiftProvider.notifier).goOffline()),
+        if (shift.error != null) const SizedBox(height: 8),
+        SwipeToConfirm(label: l.slideToGoOffline, icon: Icons.power_settings_new, tone: Tone.grey, height: AnbessaSize.button, busy: shift.busy, onConfirmed: () => ref.read(shiftProvider.notifier).goOffline()),
       ],
     );
   }

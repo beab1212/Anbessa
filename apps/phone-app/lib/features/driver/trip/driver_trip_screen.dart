@@ -33,6 +33,7 @@ import '../../maps/scene/route_track.dart';
 import '../../profile/settings_controllers.dart';
 import '../../rider/trip/active_trip_controller.dart';
 import '../../rider/trip/cancel_sheet.dart';
+import '../../rider/history/history_screens.dart' show HairlineRouteCard;
 import '../shift/driver_home_screen.dart';
 
 const _noShowAfter = Duration(minutes: 5);
@@ -273,7 +274,7 @@ class _DriverTripScreenState extends ConsumerState<DriverTripScreen> with Single
     final tripAsync = ref.watch(tripProvider(widget.tripId));
     final t = tripAsync.value;
     if (t == null) {
-      return Scaffold(appBar: AppBar(), body: tripAsync.hasError ? Padding(padding: const EdgeInsets.all(16), child: Problem(tripAsync.error, describe: (e) => describeError(l, e))) : const Padding(padding: EdgeInsets.all(16), child: SkeletonList(rows: 3)));
+      return Scaffold(appBar: const AppTopBar(), body: tripAsync.hasError ? Padding(padding: const EdgeInsets.all(16), child: Problem(tripAsync.error, describe: (e) => describeError(l, e))) : const Padding(padding: EdgeInsets.all(16), child: SkeletonList(rows: 3)));
     }
     final stage = driverStageOf(t);
     final sosOn = ref.watch(featureProvider(Feature.sos));
@@ -382,9 +383,12 @@ class _DriverTripScreenState extends ConsumerState<DriverTripScreen> with Single
             ),
           ),
           AppSheet(
-            snaps: const [0.34, 0.74],
+            snaps: const [0.42, 0.8],
             onHeightChanged: (h) => _sheetHeight.value = h,
-            padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
+            padding: const EdgeInsets.fromLTRB(AnbessaSpace.page, 4, AnbessaSpace.page, 16),
+            // the stage's headline stays on top and its actions at the bottom; the rest scrolls
+            header: _headline(context, t, stage),
+            footer: _actions(context, t, stage),
             builder: (context, _) => AnimatedSwitcherX(
               child: KeyedSubtree(
                 key: ValueKey(stage),
@@ -410,44 +414,72 @@ class _DriverTripScreenState extends ConsumerState<DriverTripScreen> with Single
     return [LatLng(p.lat, p.lng), for (final q in t.points.skip(i + 1)) LatLng(q.lat, q.lng)];
   }
 
-  Widget _sheet(BuildContext context, Trip t, DriverStage stage, NavTarget? navTarget, bool toPickup) {
+  /// The kit's "Driver is heading to your location…" headline, for the driver's side.
+  Widget _headline(BuildContext context, Trip t, DriverStage stage) {
     final l = context.l10n;
     final c = context.colors;
-    final parties = ref.watch(tripPartiesProvider(t.id)).value;
+    final (title, sub) = switch (stage) {
+      DriverStage.accepted => (l.drv2TripAccepted, t.pickup.address ?? l.pickupLabel),
+      DriverStage.toPickup => (l.drv2HeadToPickup, t.pickup.address ?? l.pickupLabel),
+      DriverStage.waitingAtPickup => (l.drv2AtPickup, t.pickup.address ?? l.pickupLabel),
+      DriverStage.inTrip => (l.drv2ToDestination, t.dropoff.address ?? l.dropoffLabel),
+      DriverStage.completed => (l.tripDone, t.dropoff.address ?? l.dropoffLabel),
+      DriverStage.cancelled => (l.tripCancelled, l.cancelledBy(t.cancellation?.by.name ?? '')),
+      DriverStage.unknown => (tripStatusLabel(l, t.status), ''),
+    };
+    return Padding(
+      padding: const EdgeInsets.only(top: 4, bottom: 12),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(title, textAlign: TextAlign.center, style: AnbessaType.h2.copyWith(color: c.text)),
+          if (sub.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(sub, textAlign: TextAlign.center, maxLines: 1, overflow: TextOverflow.ellipsis, style: AnbessaType.caption.copyWith(color: c.muted)),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// What the driver does next, as pills (the slides kept for the steps a stray tap shouldn't fire).
+  Widget _actions(BuildContext context, Trip t, DriverStage stage) {
+    final l = context.l10n;
     final pinOn = ref.watch(featureProvider(Feature.tripPin));
+    void backToDriving() {
+      ref.read(activeTripProvider.notifier).clearIfEnded();
+      context.go(Routes.driverHome);
+    }
+
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _RiderCard(trip: t, parties: parties, toPickup: toPickup),
-        if (navTarget != null) ...[
-          const SizedBox(height: 12),
-          _NavSheetSummary(target: navTarget, toPickup: toPickup),
-        ],
-        const SizedBox(height: 14),
         Problem(_error, describe: (e) => describeError(l, e)),
         if (_error != null) const SizedBox(height: 8),
         ...switch (stage) {
           DriverStage.accepted => [
-              SwipeToConfirm(label: l.slideOnMyWay, icon: Icons.near_me_rounded, busy: _busy, onConfirmed: () => _do(() => ref.read(apisProvider).trips.enRoute(t.id))),
-              TextButton(onPressed: _busy ? null : () => _cancel(t), child: Text(l.cancelTripDriver)),
+              SwipeToConfirm(label: l.slideOnMyWay, icon: Icons.near_me_rounded, height: AnbessaSize.button, busy: _busy, onConfirmed: () => _do(() => ref.read(apisProvider).trips.enRoute(t.id))),
+              const SizedBox(height: 10),
+              PillButton(label: l.cancelTripDriver, variant: PillVariant.outlineDanger, onPressed: _busy ? null : () => _cancel(t)),
             ],
           DriverStage.toPickup => [
-              _PickupDistance(trip: t),
-              SwipeToConfirm(label: l.slideArrived, icon: Icons.place_rounded, busy: _busy, onConfirmed: () => _do(() => ref.read(apisProvider).trips.arrive(t.id))),
-              TextButton(onPressed: _busy ? null : () => _cancel(t), child: Text(l.cancelTripDriver)),
+              SwipeToConfirm(label: l.slideArrived, icon: Icons.place_rounded, height: AnbessaSize.button, busy: _busy, onConfirmed: () => _do(() => ref.read(apisProvider).trips.arrive(t.id))),
+              const SizedBox(height: 10),
+              PillButton(label: l.cancelTripDriver, variant: PillVariant.outlineDanger, onPressed: _busy ? null : () => _cancel(t)),
             ],
           DriverStage.waitingAtPickup => [
-              _WaitingTimer(trip: t),
-              const SizedBox(height: 14),
-              SwipeToConfirm(label: l.slideStart, icon: Icons.play_arrow_rounded, busy: _busy, onConfirmed: () => _start(t, pinOn)),
+              SwipeToConfirm(label: l.slideStart, icon: Icons.play_arrow_rounded, height: AnbessaSize.button, busy: _busy, onConfirmed: () => _start(t, pinOn)),
+              const SizedBox(height: 10),
               // enabled once the rider is 5 min late; only this button ticks
               TickingBuilder(
                 builder: (context, now) {
                   final waiting = waitingAtPickup(t, now.toUtc());
-                  return TextButton(
+                  return PillButton(
+                    label: waiting < _noShowAfter ? l.noShowIn(mmss(_noShowAfter - waiting)) : l.noShow,
+                    variant: PillVariant.outlineDanger,
                     onPressed: _busy || waiting < _noShowAfter ? null : () => _cancel(t, noShow: true),
-                    child: Text(waiting < _noShowAfter ? l.noShowIn(mmss(_noShowAfter - waiting)) : l.noShow),
                   );
                 },
               ),
@@ -456,6 +488,7 @@ class _DriverTripScreenState extends ConsumerState<DriverTripScreen> with Single
               SwipeToConfirm(
                 label: l.slideComplete,
                 icon: Icons.flag_rounded,
+                height: AnbessaSize.button,
                 busy: _busy,
                 onConfirmed: () {
                   _completeKey ??= newIdempotencyKey();
@@ -464,104 +497,99 @@ class _DriverTripScreenState extends ConsumerState<DriverTripScreen> with Single
               ),
             ],
           DriverStage.completed => [
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(color: t.paymentMethod == PaymentMethod.cash ? c.warningSoft : c.successSoft, borderRadius: BorderRadius.circular(AnbessaRadius.lg)),
-                child: Row(
-                  children: [
-                    Icon(t.paymentMethod == PaymentMethod.cash ? Icons.payments_rounded : Icons.verified_rounded, size: 32, color: t.paymentMethod == PaymentMethod.cash ? c.warning : c.success),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(t.paymentMethod == PaymentMethod.cash ? l.collectCashTitle : t.paymentMethod == PaymentMethod.corporate ? l.companyPays : l.riderPaysDigital, style: AnbessaType.label.copyWith(color: t.paymentMethod == PaymentMethod.cash ? c.warning : c.success)),
-                          const SizedBox(height: 4),
-                          AnimatedMoney(t.fare.chargedMinor, locale: context.localeTag, style: AnbessaType.display.copyWith(color: c.text)),
-                          if (t.paymentMethod == PaymentMethod.cash) Text(l.collectCash(birr(t.fare.payableMinor, locale: context.localeTag)), style: AnbessaType.body2.copyWith(color: c.text2)),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 12),
-              PrimaryButton(label: l.rateRider, icon: Icons.star_rounded, onPressed: () => context.go('${Routes.driverTrip(t.id)}/rate')),
-              TextButton(
-                onPressed: () {
-                  ref.read(activeTripProvider.notifier).clearIfEnded();
-                  context.go(Routes.driverHome);
-                },
-                child: Text(l.backToDriving),
+              PillButtonPair(
+                first: PillButton(label: l.backToDriving, variant: PillVariant.tonal, onPressed: backToDriving),
+                second: PillButton(label: l.rateRider, onPressed: () => context.go('${Routes.driverTrip(t.id)}/rate')),
               ),
             ],
-          DriverStage.cancelled => [
-              Notice(l.cancelledBy(t.cancellation?.by.name ?? ''), tone: NoticeTone.warning),
-              if ((t.cancellation?.driverCompensationMinor ?? 0) > 0)
-                Padding(padding: const EdgeInsets.only(top: 8), child: Text('${l.youEarn} +${birr(t.cancellation!.driverCompensationMinor, locale: context.localeTag)}', style: AnbessaType.body.copyWith(color: c.success, fontWeight: FontWeight.w600))),
-              const SizedBox(height: 12),
-              PrimaryButton(
-                label: l.backToDriving,
-                onPressed: () {
-                  ref.read(activeTripProvider.notifier).clearIfEnded();
-                  context.go(Routes.driverHome);
-                },
-              ),
-            ],
-          DriverStage.unknown => [Text(tripStatusLabel(l, t.status))],
+          DriverStage.cancelled => [PillButton(label: l.backToDriving, onPressed: backToDriving)],
+          DriverStage.unknown => const <Widget>[],
         },
+      ],
+    );
+  }
+
+  Widget _sheet(BuildContext context, Trip t, DriverStage stage, NavTarget? navTarget, bool toPickup) {
+    final l = context.l10n;
+    final c = context.colors;
+    final loc = context.localeTag;
+    final parties = ref.watch(tripPartiesProvider(t.id)).value;
+    final cash = t.paymentMethod == PaymentMethod.cash;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (navTarget != null) ...[
+          _NavSheetSummary(target: navTarget, toPickup: toPickup),
+          const SizedBox(height: 12),
+        ],
+        if (stage == DriverStage.toPickup) _PickupDistance(trip: t),
+        if (stage == DriverStage.waitingAtPickup) ...[_WaitingTimer(trip: t), const SizedBox(height: 12)],
+        Divider(height: 1, color: c.border),
+        const SizedBox(height: 12),
+        _RiderCard(trip: t, parties: parties),
+        if (stage == DriverStage.completed) ...[
+          const SizedBox(height: 16),
+          // what to collect: the kit's result card, amber for cash, a check when it's paid
+          AppCard(
+            color: cash ? c.selectedFill : null,
+            child: Row(
+              children: [
+                ExcludeSemantics(child: ResultBadge(icon: cash ? Icons.payments_rounded : Icons.check_rounded, size: 52)),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(cash ? l.collectCashTitle : t.paymentMethod == PaymentMethod.corporate ? l.companyPays : l.riderPaysDigital, style: AnbessaType.body2.copyWith(color: c.muted)),
+                      const SizedBox(height: 2),
+                      FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft, child: AnimatedMoney(t.fare.chargedMinor, locale: loc, style: AnbessaType.display.copyWith(color: c.text))),
+                      if (cash) Text(l.collectCash(birr(t.fare.payableMinor, locale: loc)), style: AnbessaType.body2.copyWith(color: c.text, fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+        if (stage == DriverStage.cancelled && (t.cancellation?.driverCompensationMinor ?? 0) > 0) ...[
+          const SizedBox(height: 16),
+          KeyValueCard(rows: [KeyValueCard.row(l.youEarn, '+${birr(t.cancellation!.driverCompensationMinor, locale: loc)}', valueColor: c.success)]),
+        ],
+        // the details: the route and the fare
+        const SizedBox(height: 16),
+        HairlineRouteCard(pickup: t.pickup.address ?? l.pickupLabel, dropoff: t.dropoff.address ?? l.dropoffLabel),
+        const SizedBox(height: 12),
+        KeyValueCard(
+          rows: [
+            KeyValueCard.row(l.drv2Fare, birr(t.fare.chargedMinor, locale: loc)),
+            if (t.fare.promoDiscountMinor > 0) KeyValueCard.row(promoLabel(l, t.fare), birr(-t.fare.promoDiscountMinor, locale: loc)),
+            KeyValueCard.row(l.paymentMethod, paymentMethodLabel(l, t.paymentMethod)),
+            KeyValueCard.row(l.drv2TripLength, l.tripOf(km(t.route.distanceMeters ?? t.route.estDistanceMeters), minutesOf(t.route.durationSeconds ?? t.route.estDurationSeconds))),
+          ],
+        ),
       ],
     );
   }
 }
 
-/// The rider, where to, the fare and how it's paid.
+/// The rider: avatar, name, how they pay, and the call button when masked calls are on (the
+/// kit's driver row, seen from the driver's seat).
 class _RiderCard extends StatelessWidget {
-  const _RiderCard({required this.trip, required this.parties, required this.toPickup});
+  const _RiderCard({required this.trip, required this.parties});
   final Trip trip;
   final TripParties? parties;
-  final bool toPickup;
   @override
   Widget build(BuildContext context) {
     final l = context.l10n;
-    final c = context.colors;
     final t = trip;
-    final cash = t.paymentMethod == PaymentMethod.cash;
-    return Row(
-      children: [
-        AvatarImage(src: parties?.riderPhoto, name: parties?.riderName ?? l.riderLabel, size: 52),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(parties?.riderName ?? l.riderLabel, style: AnbessaType.title.copyWith(color: c.text), maxLines: 1, overflow: TextOverflow.ellipsis),
-              const SizedBox(height: 2),
-              Row(
-                children: [
-                  Icon(toPickup ? Icons.trip_origin_rounded : Icons.flag_rounded, size: 14, color: c.muted),
-                  const SizedBox(width: 4),
-                  Expanded(child: Text(toPickup ? (t.pickup.address ?? l.pickupLabel) : (t.dropoff.address ?? l.dropoffLabel), maxLines: 1, overflow: TextOverflow.ellipsis, style: AnbessaType.caption.copyWith(color: c.text2))),
-                ],
-              ),
-            ],
-          ),
-        ),
-        // calls go through masked numbers only (off until the telephony provider is live)
-        if (kMaskedCallsEnabled) ...[const SizedBox(width: 8), RoundIconButton(icon: Icons.call_rounded, tooltip: l.drvCallRider, onTap: () {})],
-        const SizedBox(width: 10),
-        // the fare never squeezes the rider's name away at large text sizes
-        ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 128),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              FittedBox(fit: BoxFit.scaleDown, child: MoneyText(t.fare.chargedMinor, locale: context.localeTag, style: AnbessaType.h2.copyWith(color: c.text))),
-              FittedBox(fit: BoxFit.scaleDown, child: StatusPill(paymentMethodLabel(l, t.paymentMethod), tone: cash ? Tone.amber : Tone.blue, icon: cash ? Icons.payments_outlined : Icons.phone_iphone_rounded)),
-            ],
-          ),
-        ),
-      ],
+    return DriverRow(
+      name: parties?.riderName ?? l.riderLabel,
+      photo: parties?.riderPhoto,
+      subtitle: '${paymentMethodLabel(l, t.paymentMethod)} · ${birr(t.fare.payableMinor, locale: context.localeTag)}',
+      // calls go through masked numbers only (off until the telephony provider is live)
+      onCall: kMaskedCallsEnabled ? () {} : null,
+      callTooltip: l.drvCallRider,
     );
   }
 }

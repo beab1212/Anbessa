@@ -11,6 +11,7 @@ import 'package:ride_app_core/ride_app_core.dart';
 import '../../../core/l10n/l10n.dart';
 import '../../config/client_config_provider.dart';
 import '../../maps/nav/navigation_controller.dart';
+import '../../rider/history/history_screens.dart' show HairlineRouteCard;
 import 'offer_controller.dart';
 
 /// The road between the offer's pickup and drop-off (for the trip's length and the map line).
@@ -63,90 +64,94 @@ class _OfferSheetState extends ConsumerState<OfferSheet> {
           key: ValueKey(o?.offerId ?? widget.state.notice),
           child: Container(
             width: double.infinity,
-            decoration: BoxDecoration(color: c.surface, borderRadius: const BorderRadius.vertical(top: Radius.circular(AnbessaRadius.sheet)), boxShadow: AnbessaElevation.sheet(c.brightness)),
+            decoration: BoxDecoration(color: c.page, borderRadius: const BorderRadius.vertical(top: Radius.circular(AnbessaRadius.sheet)), boxShadow: AnbessaElevation.sheet(c.brightness)),
             child: SafeArea(
               top: false,
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 18, 20, 16),
+                padding: const EdgeInsets.fromLTRB(AnbessaSpace.page, 0, AnbessaSpace.page, 16),
                 child: o == null
-                    ? Row(
+                    ? Column(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(widget.state.notice == 'cancelled' ? Icons.cancel_outlined : Icons.timer_off_outlined, color: c.muted),
-                          const SizedBox(width: 10),
-                          Expanded(child: Text(widget.state.notice == 'cancelled' ? l.offerCancelled : l.offerExpired, style: AnbessaType.body.copyWith(color: c.text))),
+                          const SheetHandle(),
+                          const SizedBox(height: 8),
+                          ListRowTile(
+                            leading: ExcludeSemantics(child: CircleIcon(widget.state.notice == 'cancelled' ? Icons.cancel_outlined : Icons.timer_off_outlined, color: c.muted)),
+                            title: widget.state.notice == 'cancelled' ? l.offerCancelled : l.offerExpired,
+                          ),
                         ],
                       )
-                    : Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          // the fare, the class and the ring
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(l.newTrip, style: AnbessaType.label.copyWith(color: c.muted)),
-                                    const SizedBox(height: 2),
-                                    FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft, child: AnimatedMoney(o.fareEstimateMinor, locale: context.localeTag, style: AnbessaType.display.copyWith(fontSize: 34, color: c.text))),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              OfferRing(
-                                key: ValueKey(o.offerId),
-                                expiresAt: o.expiresAt,
-                                now: widget.now,
-                                onDone: () {
-                                  if (mounted && !_expired) setState(() => _expired = true);
-                                },
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          Wrap(
-                            spacing: 6,
-                            runSpacing: 6,
-                            children: [
-                              StatusPill(paymentMethodLabel(l, o.paymentMethod), tone: cash ? Tone.amber : Tone.blue, icon: cash ? Icons.payments_outlined : Icons.phone_iphone_rounded),
-                              if (o.etaToPickupSeconds != null) EtaBadge(seconds: o.etaToPickupSeconds, minuteLabel: (m) => l.pickupIn(m), icon: Icons.near_me_outlined),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          // the car class and the trip's length
-                          Container(
-                            padding: const EdgeInsets.fromLTRB(12, 8, 14, 8),
-                            decoration: BoxDecoration(color: c.surface2, borderRadius: BorderRadius.circular(AnbessaRadius.md)),
-                            child: Row(
+                    : SingleChildScrollView(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            const SheetHandle(),
+                            const SizedBox(height: 8),
+                            // the headline: "New trip", the fare big, the ring
+                            Row(
                               children: [
-                                VehicleArt(o.vehicleType, width: 76),
-                                const SizedBox(width: 12),
                                 Expanded(
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      Text(vehicleName, maxLines: 1, overflow: TextOverflow.ellipsis, style: AnbessaType.title.copyWith(color: c.text)),
-                                      route == null
-                                          ? const Padding(padding: EdgeInsets.only(top: 4), child: Skeleton.line(width: 90, height: 12))
-                                          : Text(l.tripOf(km(route.distanceMeters), minutesOf(route.durationSeconds)), style: AnbessaType.caption.copyWith(color: c.muted, fontFeatures: AnbessaType.tabular), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                      Text(l.newTrip, style: AnbessaType.h2.copyWith(color: c.text)),
+                                      const SizedBox(height: 4),
+                                      FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft, child: AnimatedMoney(o.fareEstimateMinor, locale: context.localeTag, style: AnbessaType.display.copyWith(fontSize: 32, color: c.text))),
                                     ],
                                   ),
                                 ),
+                                const SizedBox(width: 12),
+                                OfferRing(
+                                  key: ValueKey(o.offerId),
+                                  expiresAt: o.expiresAt,
+                                  now: widget.now,
+                                  onDone: () {
+                                    if (mounted && !_expired) setState(() => _expired = true);
+                                  },
+                                ),
                               ],
                             ),
-                          ),
-                          const SizedBox(height: 14),
-                          _Place(color: c.accent, text: o.pickup.address ?? l.pickupLabel),
-                          Padding(padding: const EdgeInsets.only(left: 7), child: Container(width: 2, height: 10, color: c.border)),
-                          _Place(square: true, color: c.text, text: o.dropoff.address ?? l.dropoffLabel),
-                          const SizedBox(height: 16),
-                          Problem(widget.state.error, describe: (e) => describeError(l, e)),
-                          SwipeToConfirm(label: l.slideToAccept, icon: Icons.check_rounded, busy: widget.state.busy, enabled: !_expired, onConfirmed: () => ref.read(offerProvider.notifier).accept()),
-                          const SizedBox(height: 4),
-                          TextButton(onPressed: widget.state.busy ? null : () => ref.read(offerProvider.notifier).decline(), child: Text(l.decline)),
-                        ],
+                            const SizedBox(height: 16),
+                            // the route, as on the kit's choose-ride sheet
+                            HairlineRouteCard(pickup: o.pickup.address ?? l.pickupLabel, dropoff: o.dropoff.address ?? l.dropoffLabel),
+                            const SizedBox(height: 12),
+                            // the car class, the trip's length and the way to the pickup; how the rider pays
+                            AppCard(
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                              child: Row(
+                                children: [
+                                  ExcludeSemantics(child: VehicleArt(o.vehicleType, width: 56)),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(vehicleName, maxLines: 1, overflow: TextOverflow.ellipsis, style: AnbessaType.title.copyWith(color: c.text)),
+                                        const SizedBox(height: 4),
+                                        route == null
+                                            ? const Skeleton.line(width: 90, height: 12)
+                                            : Text(l.tripOf(km(route.distanceMeters), minutesOf(route.durationSeconds)), style: AnbessaType.caption.copyWith(fontSize: 12, color: c.muted, fontFeatures: AnbessaType.tabular), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                        if (o.etaToPickupSeconds != null) ...[
+                                          const SizedBox(height: 2),
+                                          Text(l.pickupIn((o.etaToPickupSeconds! / 60).ceil()), style: AnbessaType.caption.copyWith(fontSize: 12, color: c.muted, fontFeatures: AnbessaType.tabular), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  StatusPill(paymentMethodLabel(l, o.paymentMethod), tone: cash ? Tone.amber : Tone.blue, icon: cash ? Icons.payments_outlined : Icons.phone_iphone_rounded),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 20),
+                            Problem(widget.state.error, describe: (e) => describeError(l, e)),
+                            if (widget.state.error != null) const SizedBox(height: 8),
+                            SwipeToConfirm(label: l.slideToAccept, icon: Icons.check_rounded, height: AnbessaSize.button, busy: widget.state.busy, enabled: !_expired, onConfirmed: () => ref.read(offerProvider.notifier).accept()),
+                            const SizedBox(height: 12),
+                            PillButton(label: l.decline, variant: PillVariant.tonal, onPressed: widget.state.busy ? null : () => ref.read(offerProvider.notifier).decline()),
+                          ],
+                        ),
                       ),
               ),
             ),
@@ -280,18 +285,4 @@ class _SpringSlideInState extends State<SpringSlideIn> with SingleTickerProvider
           child: Opacity(opacity: _c.value.clamp(0.0, 1.0), child: child),
         ),
       );
-}
-
-class _Place extends StatelessWidget {
-  const _Place({required this.color, required this.text, this.square = false});
-  final Color color;
-  final String text;
-  final bool square;
-  @override
-  Widget build(BuildContext context) => Row(children: [
-        // the same plain dot / square the map uses for pickup and drop-off
-        SizedBox(width: 16, child: Center(child: Container(width: 10, height: 10, decoration: BoxDecoration(color: color, shape: square ? BoxShape.rectangle : BoxShape.circle)))),
-        const SizedBox(width: 10),
-        Expanded(child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: AnbessaType.body.copyWith(fontWeight: FontWeight.w500)))
-      ]);
 }

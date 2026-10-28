@@ -232,15 +232,15 @@ void main() {
       await _reveal(tester, find.text('Thanks, we\'re checking with telebirr.'));
       expect(find.text('Thanks, we\'re checking with telebirr.'), findsOneWidget);
       expect(find.byType(ReplyComposer), findsNothing);
-      await _reveal(tester, find.widgetWithText(OutlinedButton, 'Reopen'));
-      await tester.tap(find.widgetWithText(OutlinedButton, 'Reopen'));
+      await _reveal(tester, find.widgetWithText(PillButton, 'Reopen'));
+      await tester.tap(find.widgetWithText(PillButton, 'Reopen'));
       await _frames(tester);
       await tester.enterText(find.descendant(of: find.byType(AlertDialog), matching: find.byType(TextField)), 'Still charged twice');
       await tester.tap(find.widgetWithText(FilledButton, 'Reopen'));
       await _frames(tester);
       expect(repo.calls.single, 'reopen ${resolved.id} Still charged twice');
       expect(repo.threads[resolved.id]!.ticket.status, TicketStatus.open);
-      expect(find.widgetWithText(OutlinedButton, 'Reopen'), findsNothing);
+      expect(find.widgetWithText(PillButton, 'Reopen'), findsNothing);
       expect(find.byType(ReplyComposer), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
@@ -248,7 +248,7 @@ void main() {
     testWidgets('an answered ticket past the window: closed, start a new one', (tester) async {
       final old = _ticket('RESOLVED', resolvedAt: DateTime.now().toUtc().subtract(const Duration(days: 9)));
       await pumpSupport(tester, Routes.supportTicket(old.id), support: FakeSupportRepository(tickets: [old]));
-      expect(find.widgetWithText(OutlinedButton, 'Reopen'), findsNothing);
+      expect(find.widgetWithText(PillButton, 'Reopen'), findsNothing);
       await _reveal(tester, find.textContaining('This request is closed'));
       expect(find.textContaining('This request is closed'), findsOneWidget);
       expect(tester.takeException(), isNull);
@@ -326,8 +326,9 @@ void main() {
         await _frames(tester);
         await _reveal(tester, find.text("It's not in the car"));
         expect(find.text('I found it'), findsOneWidget);
-        await _reveal(tester, find.widgetWithText(TextField, 'Note for the rider (optional)'));
-        await tester.enterText(find.widgetWithText(TextField, 'Note for the rider (optional)'), 'At Bole Medhanialem at 8');
+        final note = find.descendant(of: find.widgetWithText(FilledField, 'Note for the rider (optional)'), matching: find.byType(TextField));
+        await _reveal(tester, note);
+        await tester.enterText(note, 'At Bole Medhanialem at 8');
         await _reveal(tester, find.text('I found it'));
         await tester.tap(find.text('I found it'));
         await _frames(tester);
