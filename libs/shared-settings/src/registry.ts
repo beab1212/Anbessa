@@ -56,7 +56,7 @@ export const SETTINGS: readonly SettingDef[] = [
   { key: "match.radiiMeters", group: "Matching", label: "Search radius steps", description: "Drivers are searched within each radius in turn.", type: "intList", default: [2000, 4000, 6000], min: 100, max: 20_000, unit: "m", scope: "global", owner: "trip-service" },
 
   // ── trip rules (workflow 06) ────────────────────────────────────────────────
-  { key: "trip.pinRequired", group: "Trip rules", label: "Driver must enter the rider's PIN to start", description: "Anti-fraud: the rider reads a 4-digit code to the driver.", type: "bool", default: false, scope: "global", owner: "trip-service" },
+  { key: "trip.pinRequired", group: "Trip rules", label: "Driver must enter the rider's PIN to start", description: "Anti-fraud: the rider reads a 4-digit code to the driver.", type: "bool", default: true, scope: "global", sensitive: true, owner: "trip-service" },
   { key: "trip.arrivalRadiusMeters", group: "Trip rules", label: "Arrival radius", description: "The driver must be this close to the pickup to tap Arrived or start.", type: "int", default: 150, min: 30, max: 1000, unit: "m", scope: "city", owner: "trip-service" },
   { key: "trip.freeWaitingSeconds", group: "Trip rules", label: "Free waiting at the pickup", description: "Waiting after this is charged per started minute.", type: "int", default: 180, min: 0, max: 1800, unit: "s", scope: "city", owner: "trip-service" },
   { key: "trip.noShowAfterSeconds", group: "Trip rules", label: "Driver may report a no-show after", description: "Counted from arrival at the pickup.", type: "int", default: 300, min: 60, max: 3600, unit: "s", scope: "city", owner: "trip-service" },
@@ -79,7 +79,7 @@ export const SETTINGS: readonly SettingDef[] = [
   { key: "payments.cardProvider", group: "Payments", label: "Card payments go through", description: "The card provider (hosted checkout).", type: "enum", options: ["chapa"], default: "chapa", scope: "global", owner: "payment-service" },
 
   // ── sign-in (Auth.md §9.7) ──────────────────────────────────────────────────
-  { key: "otp.channels", group: "Sign-in and OTP", label: "Login code channels, in order", description: "Telegram first is cheaper; SMS reaches everyone.", type: "enumList", options: ["telegram", "sms"], default: ["telegram", "sms"], scope: "global", owner: "notification-service" },
+  { key: "otp.channels", group: "Sign-in and OTP", label: "Login code channels, in order", description: "Telegram first is cheaper; SMS reaches everyone.", type: "enumList", options: ["telegram", "sms"], default: ["telegram", "sms"], scope: "global", sensitive: true, owner: "notification-service" },
   { key: "otp.fallbackSeconds", group: "Sign-in and OTP", label: "Send by SMS if Telegram hasn't delivered after", description: "Shorter costs more SMS; longer keeps people waiting.", type: "int", default: 20, min: 5, max: 120, unit: "s", scope: "global", sensitive: true, owner: "notification-service" },
 
   // ── documents (workflow 02) ─────────────────────────────────────────────────
@@ -88,7 +88,7 @@ export const SETTINGS: readonly SettingDef[] = [
 
   // ── apps and maintenance ────────────────────────────────────────────────────
   { key: "maintenance.newTrips", group: "Apps and maintenance", label: "Pause new trip requests", description: "Trips in progress continue. Riders and the call center see the maintenance message.", type: "bool", default: false, scope: "global", sensitive: true, owner: "trip-service" },
-  { key: "maintenance.message", group: "Apps and maintenance", label: "Maintenance message", description: "Shown in the apps and the web while new trips are paused.", type: "string", default: "Anbessa is briefly unavailable for maintenance. Please try again in a few minutes.", max: 300, scope: "global", owner: "platform-service" },
+  { key: "maintenance.message", group: "Apps and maintenance", label: "Maintenance message", description: "Shown in the apps and the web while new trips are paused.", type: "string", default: "Anbessa is briefly unavailable for maintenance. Please try again in a few minutes.", max: 300, scope: "global", sensitive: true, owner: "platform-service" },
   ...(["rider", "driver"] as const).flatMap((app) => (["android", "ios"] as const).map((os): SettingDef => ({
     key: `apps.minVersion.${app}.${os}`, group: "Apps and maintenance", label: `Minimum ${app} app version (${os === "ios" ? "iOS" : "Android"})`,
     description: "Older apps are asked to update before they can continue.", type: "string", default: "1.0.0", max: 20, scope: "global", sensitive: true, owner: "platform-service",
@@ -99,7 +99,7 @@ export const SETTINGS: readonly SettingDef[] = [
   { key: "features.corporateBooking", group: "Feature flags", label: "Company accounts can book rides", description: "Off: company coordinators can't book; existing trips continue.", type: "bool", default: true, scope: "global", owner: "trip-service" },
   // phone-app modules built ahead of their services: the app hides them while these are off
   { key: "features.scheduledRides", group: "Feature flags", label: "Riders can schedule rides", description: "Phone app: the Scheduled rides screens. Turn on once trip scheduling is live.", type: "bool", default: false, scope: "global", owner: "platform-service" },
-  { key: "features.sos", group: "Feature flags", label: "SOS button during trips", description: "Phone app: call the police and alert the safety team from an active trip.", type: "bool", default: false, scope: "global", owner: "platform-service" },
+  { key: "features.sos", group: "Feature flags", label: "SOS button during trips", description: "Phone app: call the police and alert the safety team from an active trip.", type: "bool", default: false, scope: "global", sensitive: true, owner: "platform-service" },
   { key: "features.support", group: "Feature flags", label: "In-app support tickets", description: "Phone app: open and follow support tickets.", type: "bool", default: false, scope: "global", owner: "platform-service" },
   { key: "features.promos", group: "Feature flags", label: "Promo codes", description: "Phone app: redeem promo codes and apply them at the quote.", type: "bool", default: false, scope: "global", owner: "platform-service" },
   { key: "features.accountDeletion", group: "Feature flags", label: "Self-service account deletion", description: "Phone app: people can ask to delete their account from Account settings.", type: "bool", default: false, scope: "global", owner: "platform-service" },

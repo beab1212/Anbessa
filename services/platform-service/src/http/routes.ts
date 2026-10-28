@@ -39,9 +39,15 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
   }
 
   // ── public ────────────────────────────────────────────────────────────────
+  // Staff-audience announcements are internal: they come back only with a valid staff (ride-admin)
+  // token. Anyone else (no token, a rider or driver token) gets the public audiences only.
   app.get("/api/platform/client-config", async (req, reply) => {
     const q = z.object({ audience: z.enum(AUDIENCES).optional(), cityId: cityIdParam.optional() }).parse(req.query);
-    return reply.header("cache-control", "public, max-age=15").send(await catalog.clientConfig(q));
+    const token = bearerToken(req.headers.authorization);
+    const isStaff = token ? await deps.verifyAccessToken(token, "ride-admin").then(() => true, () => false) : false;
+    reply.header("vary", "authorization");
+    reply.header("cache-control", isStaff ? "private, no-store" : "public, max-age=15");
+    return reply.send(await catalog.clientConfig({ ...q, staff: isStaff }));
   });
 
   // ── settings ──────────────────────────────────────────────────────────────

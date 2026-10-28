@@ -88,11 +88,14 @@ model Campaign {
   channel        String // PUSH | SMS
   title          String?
   body           String
-  status         String             @default("DRAFT") // DRAFT | SCHEDULED | SENDING | SENT | CANCELLED
+  status         String             @default("DRAFT") // DRAFT | AWAITING_APPROVAL | SCHEDULED | SENDING | SENT | CANCELLED
   scheduledAt    DateTime?          @map("scheduled_at") @db.Timestamptz
   startedAt      DateTime?          @map("started_at") @db.Timestamptz
   finishedAt     DateTime?          @map("finished_at") @db.Timestamptz
   targeted       Int                @default(0)
+  /// second staff member who approved a large campaign (CAMPAIGN_APPROVAL_THRESHOLD); never the maker
+  approvedBy     String?            @map("approved_by") @db.Uuid
+  approvedAt     DateTime?          @map("approved_at") @db.Timestamptz
   createdBy      String             @map("created_by") @db.Uuid
   updatedBy      String             @map("updated_by") @db.Uuid
   createdAt      DateTime           @default(now()) @map("created_at") @db.Timestamptz

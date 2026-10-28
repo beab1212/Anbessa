@@ -24,8 +24,15 @@ backend "s3" {
   key            = "production/terraform.tfstate"
   region         = "us-east-1"
   dynamodb_table = "ride-app-tfstate-lock"
+  encrypt        = true
 }
 ```
+
+- `encrypt = true`: the state (which contains RDS passwords and other secrets) is encrypted at rest.
+  To use a customer-managed KMS key, pass it at init; a backend block cannot read Terraform
+  variables, so there is no `kms_key_id` variable:
+  `terraform init -backend-config="kms_key_id=arn:aws:kms:us-east-1:<account>:key/<id>"`.
+  The key policy must let every deployer role `kms:Encrypt`, `kms:Decrypt` and `kms:GenerateDataKey`.
 
 - The bucket and the DynamoDB lock table must exist before `terraform init`; nothing in repo creates them.
 - The state `key` is fixed to `production/terraform.tfstate`, while `var.environment` selects the

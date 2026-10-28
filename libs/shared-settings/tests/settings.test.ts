@@ -19,6 +19,13 @@ describe("settings registry", () => {
     expect(settingDef("cancel.feeMinor")).toMatchObject({ sensitive: true, scope: "city" });
   });
 
+  it("safety and sign-in switches need a second approver; the trip PIN is on by default", () => {
+    for (const key of ["features.sos", "trip.pinRequired", "otp.channels", "maintenance.message"]) {
+      expect(settingDef(key), key).toMatchObject({ sensitive: true });
+    }
+    expect(settingDef("trip.pinRequired")?.default).toBe(true);
+  });
+
   it("resolves city override → global → service default → registry default", () => {
     const snap: SettingsSnapshot = { version: 3, global: { "cancel.freeSeconds": 90 }, cities: { hawassa: { "cancel.freeSeconds": 60, "match.offerSeconds": 5 } }, cityList: [], vehicleTypes: [] };
     expect(resolveSetting(snap, "cancel.freeSeconds", "hawassa")).toBe(60);

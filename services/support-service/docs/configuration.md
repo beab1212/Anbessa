@@ -4,7 +4,9 @@ Read by `src/config/index.ts` (zod). A blank value (`KEY=`) counts as unset. `.e
 
 | Variable | Purpose | Default | Required | Notes |
 |---|---|---|---|---|
-| `NODE_ENV` | `development` \| `test` \| `production` | `development` | | production refuses a missing `REDIS_URL` or `KAFKA_BROKERS` |
+| `NODE_ENV` | `development` \| `test` \| `production` | none: **required** (`nodeEnvSchema`) | yes | production refuses a missing `REDIS_URL` or `KAFKA_BROKERS` |
+| `TRUST_PROXY` | hop count, or comma-separated proxy IPs/CIDRs | `1` (Kong) |  | `true` refused (`trustProxyFromEnv`) |
+| `KAFKA_SSL`, `KAFKA_SSL_CA`, `KAFKA_SASL_MECHANISM`, `KAFKA_SASL_USERNAME`, `KAFKA_SASL_PASSWORD` | Kafka TLS/SASL (`kafkaClientConfig`) | off / unset | in production | TLS and SASL required in production; see infra/docs/data-stores.md |
 | `PORT` | HTTP port | `3009` | | |
 | `LOG_LEVEL` | pino level | from `NODE_ENV` | | |
 | `DATABASE_URL` | Postgres `support_service` | | yes | also read by `prisma.config.ts` |

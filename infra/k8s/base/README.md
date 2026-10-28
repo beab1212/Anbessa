@@ -15,3 +15,9 @@ Images are built by `.github/workflows/deploy.yml` from each service's
 
 `overlays/staging` and `overlays/production` patch replica counts and resource
 limits per environment without duplicating the base manifests.
+
+Hardening: both Deployments run as a non-root numeric UID with a read-only root filesystem
+(`/tmp` is an `emptyDir`), no capabilities, no privilege escalation and the RuntimeDefault seccomp
+profile. `networkpolicy.yaml` denies all traffic by default and allows only DNS, Kong → services,
+service ↔ service, the data stores and (for pods labelled `egress: internet`) outbound HTTPS. See
+`infra/docs/kubernetes.md` §1.

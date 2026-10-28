@@ -49,10 +49,14 @@ Query:
 
 | Param | Type | Notes |
 |---|---|---|
-| `audience` | `rider \| driver \| partner \| staff`, optional | Filters announcements by audience. Without it, all audiences' announcements are returned |
+| `audience` | `rider \| driver \| partner \| staff`, optional | Filters announcements by audience. Without it: every audience with a staff token, otherwise only announcements for riders, drivers or partners |
 | `cityId` | city id, optional | Filters announcements to those for this city or for every city |
 
-Response header `cache-control: public, max-age=15`. Body:
+Staff-audience announcements are internal: they are returned only with a valid staff
+(`ride-admin`) bearer token. No token, an invalid one or a rider/driver token gets no staff
+announcements (`audience=staff` returns an empty list). Response headers `vary: authorization` and
+`cache-control: public, max-age=15` (`private, no-store` with a staff token). The web app's staff
+banners need the request to carry the staff token (`apps/web/src/lib/platform.tsx`). Body:
 
 ```ts
 {

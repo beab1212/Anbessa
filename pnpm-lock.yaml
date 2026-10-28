@@ -144,6 +144,10 @@ importers:
       pino-pretty:
         specifier: ^13.2.0
         version: 13.2.0
+    devDependencies:
+      vitest:
+        specifier: ^5.0.5
+        version: 5.0.5(@types/node@26.6.5)(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
   services/audit-service:
     dependencies:

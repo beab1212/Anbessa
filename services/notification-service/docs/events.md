@@ -33,7 +33,7 @@ Fields listed are the ones the handler reads. Field types and full payloads are 
 
 | Topic | Producer | Key | Fields used | Condition | Channel / recipient | `template` value |
 |---|---|---|---|---|---|---|
-| `org.member_invited` | auth-service (`src/auth/hooks.ts`) | `orgId` | `phoneNumber`, `orgName`, `role` | skipped if no `phoneNumber` (invite by real email) | SMS to `phoneNumber` | `org_invite` |
+| `org.member_invited` | auth-service (`src/auth/hooks.ts`) | `orgId` | `phoneNumber`, `orgName`, `role` | skipped if no `phoneNumber` (invite by real email) | SMS to `phoneNumber`: `Anbessa: "<org name>" invited you …`, Anbessa's text first; the org name is quoted, cut to 40 characters and stripped of links, domains, 4+ digit runs, quotes and control characters (`safeOrgName`) | `org_invite` |
 | `role.granted` | auth-service | `userId` | `userId`, `role` | only `role === "DRIVER"` | push to `userId` | `driver_activated` |
 | `payment.action_required` | payment-service | `riderId` | `riderId`, `amountMinor`, `provider`, `purpose`, `checkoutUrl`, `tripId` | needs `riderId` | push to rider | `payment_approve` |
 | `trip.settled` | payment-service | `tripId` | `riderId`, `fareMinor`, `paymentMethod`, `purpose`, `tripId` | needs `riderId` | push to rider | `trip_receipt` |
@@ -44,6 +44,7 @@ Fields listed are the ones the handler reads. Field types and full payloads are 
 | `balance.payment_due` | payment-service | beneficiary owner id | `beneficiary`, `amountMinor`, `minimumMinor`, `dueAt` | `INDIVIDUAL` and `dueAt` set | push | `payment_due` |
 | `payout.sent` | payment-service | beneficiary owner id | `beneficiary`, `amountMinor`, `provider` | `INDIVIDUAL` only | push | `payout_sent` |
 | `payout.failed` | payment-service | beneficiary owner id | `beneficiary`, `amountMinor`, `provider` | `INDIVIDUAL` only | push | `payout_failed` |
+| `payout_method.changed` | payment-service | beneficiary owner id | `beneficiary`, `destinationMasked`, `payoutsResumeAt` | `INDIVIDUAL` only; SMS only when auth-service has a phone number (looked up per event; a lookup failure throws and Kafka redelivers) | push + SMS: "Your payout account was changed to the account ending 1234. Payouts resume <time>. If this wasn't you, contact support." (English; Amharic templates exist, `lang: "am"`, but events carry no locale) | `payout_method_changed` |
 | `trip.scheduled` | trip-service | `scheduledTripId` | `scheduledTripId`, `riderId`, `bookedById`, `scheduledFor`, `updated` | needs id and `scheduledFor` | push to the rider ("booked for you" when someone else booked) and to a different booker | `scheduled_booked` / `scheduled_updated` |
 | `trip.schedule_cancelled` | trip-service | `scheduledTripId` | `scheduledTripId`, `riderId`, `bookedById`, `by`, `byUserId`, `scheduledFor` | whoever cancelled (`byUserId`) is skipped | push to rider / booker | `scheduled_cancelled` |
 | `trip.schedule_failed` | trip-service | `scheduledTripId` | `scheduledTripId`, `riderId`, `bookedById`, `reason`, `scheduledFor` | `RIDER_HAS_ACTIVE_TRIP` gets its own wording | push to rider and booker | `scheduled_failed` |
@@ -57,7 +58,7 @@ Notes:
 
 - Numeric fields that are missing or not numbers become `0` (`num()` in `src/notify/handlers.ts`); missing strings become `""` or are omitted.
 - Fleet-company balances (`beneficiary.type = "ORGANIZATION"`) are skipped on purpose: they are for the fleet portal.
-- Push `data` payloads: `driver.activated`, `payment.action_required` (+ `tripId`, `checkoutUrl`), `trip.receipt` (+ `tripId`), `payment.failed` (+ `tripId`), `balance.state_changed` (+ `state`), `balance.topped_up`, `balance.payment_due`, `payout.sent`, `payout.failed`, `refund.succeeded`, `trip.scheduled` / `trip.schedule_cancelled` / `trip.schedule_failed` (+ `scheduledTripId`), `trip.dispatch_escalated` (+ `tripId`), `trip.reassigned` (rider) / `trip.reassigned_away` (old driver) (+ `tripId`), `sos.triggered` / `sos.acknowledged` / `sos.resolved` (+ `alertId`, `tripId`), each as `data.type`.
+- Push `data` payloads: `driver.activated`, `payment.action_required` (+ `tripId`, `checkoutUrl`), `trip.receipt` (+ `tripId`), `payment.failed` (+ `tripId`), `balance.state_changed` (+ `state`), `balance.topped_up`, `balance.payment_due`, `payout.sent`, `payout.failed`, `payout_method.changed`, `refund.succeeded`, `trip.scheduled` / `trip.schedule_cancelled` / `trip.schedule_failed` (+ `scheduledTripId`), `trip.dispatch_escalated` (+ `tripId`), `trip.reassigned` (rider) / `trip.reassigned_away` (old driver) (+ `tripId`), `sos.triggered` / `sos.acknowledged` / `sos.resolved` (+ `alertId`, `tripId`), each as `data.type`.
 - Times in scheduled-ride pushes are Addis Ababa time, 24-hour (`addisTime` in `src/notify/templates.ts`, e.g. "Tue 3 Nov, 14:30").
 - Not built: a scheduled-ride **reminder** (no event announces one; dispatch at `matchAt` publishes a plain `trip.requested` without `scheduledTripId`), and SOS SMS to emergency contacts (no contact store).
 

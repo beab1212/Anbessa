@@ -37,7 +37,7 @@ export async function registerCampaignRoutes(app: FastifyInstance, deps: { db: D
 
   app.get("/api/notifications/campaigns", async (req, reply) => {
     const q = z.object({
-      cityId: city.optional(), status: z.enum(["DRAFT", "SCHEDULED", "SENDING", "SENT", "CANCELLED"]).optional(),
+      cityId: city.optional(), status: z.enum(["DRAFT", "AWAITING_APPROVAL", "SCHEDULED", "SENDING", "SENT", "CANCELLED"]).optional(),
       limit: z.coerce.number().int().min(1).max(200).default(50),
     }).parse(req.query);
     return noStore(reply).send(await campaigns.list(await staff(req), q));
@@ -68,6 +68,9 @@ export async function registerCampaignRoutes(app: FastifyInstance, deps: { db: D
     const { at } = z.object({ at: z.string().datetime({ offset: true }).optional() }).parse(req.body ?? {});
     return { campaign: await campaigns.schedule(await staff(req), id.parse(req.params).id, at) };
   });
+
+  // maker-checker: a campaign over CAMPAIGN_APPROVAL_THRESHOLD recipients waits for a second staff member
+  app.post("/api/notifications/campaigns/:id/approve", async (req) => ({ campaign: await campaigns.approve(await staff(req), id.parse(req.params).id) }));
 
   app.post("/api/notifications/campaigns/:id/cancel", async (req) => ({ campaign: await campaigns.cancel(await staff(req), id.parse(req.params).id) }));
 

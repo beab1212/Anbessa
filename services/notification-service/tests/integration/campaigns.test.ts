@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import pino from "pino";
+import { createCampaignService } from "../../src/campaigns/service.js";
 import { createHarness, type Harness } from "./harness.js";
 
 let h: Harness;
@@ -168,5 +170,33 @@ describe("campaigns", () => {
     await h.c.campaigns.tick();
     expect(h.pushes.length).toBe(pushes);
     expect((await call("POST", `/api/notifications/campaigns/${id}/cancel`, mk, {})).json()).toMatchObject({ error: "invalid_transition" });
+  });
+
+  it("a large campaign needs a second staff member's approval (maker-checker)", async () => {
+    h.clock.now = NOON + 4 * DAY;
+    const city = "bahir-dar";
+    await Promise.all([0, 1, 2].map(() => person("RIDER", { cityId: city, device: true })));
+    // same database, a threshold of 2 recipients
+    const svc = createCampaignService({
+      db: h.c.db, push: { send: async () => "sent" }, sms: { send: async () => ({}) }, contacts: { phoneOf: async () => null },
+      logger: pino({ level: "silent" }), now: h.now, sendPerSecond: 100, quietHours: { from: 0, to: 0 }, approvalThreshold: 2,
+    });
+    const principal = async () => { const s = await marketing(city); return { id: s.id, p: await h.verifyAccessToken(s.token, "ride-admin") }; };
+    const maker = await principal();
+    const checker = await principal();
+    const c = await svc.create(maker.p, { cityId: city, audience: "RIDER", channel: "PUSH", title: "Big", body: "Everyone" });
+    expect((await svc.schedule(maker.p, c.id)).status).toBe("AWAITING_APPROVAL");
+    await svc.tick();
+    expect((await h.c.db.campaign.findUniqueOrThrow({ where: { id: c.id } })).status).toBe("AWAITING_APPROVAL");
+    await expect(svc.approve(maker.p, c.id)).rejects.toMatchObject({ statusCode: 403, code: "second_approver_required" });
+    const approved = await svc.approve(checker.p, c.id);
+    expect(approved).toMatchObject({ status: "SCHEDULED", approvedBy: checker.id });
+    await expect(svc.approve(checker.p, c.id)).rejects.toMatchObject({ code: "invalid_transition" });
+    await svc.tick();
+    expect((await h.c.db.campaign.findUniqueOrThrow({ where: { id: c.id } })).status).toMatch(/SENDING|SENT/);
+
+    // under the threshold: no approval step
+    const small = await svc.create(maker.p, { cityId: city, audience: "DRIVER", channel: "PUSH", title: "Small", body: "Few" });
+    expect((await svc.schedule(maker.p, small.id)).status).toBe("SCHEDULED");
   });
 });

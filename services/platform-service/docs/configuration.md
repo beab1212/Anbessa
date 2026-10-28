@@ -6,7 +6,9 @@ Source: `src/config/index.ts` (zod). `loadConfig()` drops variables that are emp
 
 | Variable | Meaning | Default | Required in production | Validation |
 |---|---|---|---|---|
-| `NODE_ENV` | `development`, `test`, `production` | `development` | set to `production` | enum |
+| `NODE_ENV` | `development`, `test`, `production` | none: **required** | yes | enum (`nodeEnvSchema`) |
+| `TRUST_PROXY` | hop count, or comma-separated proxy IPs/CIDRs | `1` (Kong) |  | `true` refused (`trustProxyFromEnv`) |
+| `KAFKA_SSL`, `KAFKA_SSL_CA`, `KAFKA_SASL_MECHANISM`, `KAFKA_SASL_USERNAME`, `KAFKA_SASL_PASSWORD` | Kafka TLS/SASL (`kafkaClientConfig`) | off / unset | in production | TLS and SASL required in production; see infra/docs/data-stores.md |
 | `PORT` | HTTP port | `3011` | no | coerced number |
 | `LOG_LEVEL` | pino level override | logger default from `createLogger` | no | string |
 | `DATABASE_URL` | Postgres connection URL (`platform_service`) | none | **yes** (always) | URL |

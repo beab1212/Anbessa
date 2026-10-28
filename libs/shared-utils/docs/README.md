@@ -1,17 +1,20 @@
 # `@ride-app/shared-utils`
 
-A small lib: a logger factory and two error classes. Source: [`src/logger.ts`](../src/logger.ts), [`src/errors.ts`](../src/errors.ts), re-exported from [`src/index.ts`](../src/index.ts).
+A small lib: a logger factory with redaction, the shared Kafka client options, the `trustProxy` parser and two error classes. Source: [`src/logger.ts`](../src/logger.ts), [`src/kafka.ts`](../src/kafka.ts), [`src/proxy.ts`](../src/proxy.ts), [`src/errors.ts`](../src/errors.ts), re-exported from [`src/index.ts`](../src/index.ts). Tests: `tests/` (run with vitest from this folder; the package has no vitest dependency of its own yet, e.g. `../shared-settings/node_modules/.bin/vitest run`).
 
 ## What is (and isn't) here
 
 | Exported | File |
 |---|---|
-| `createLogger(serviceName, environment)` | `logger.ts` |
+| `createLogger(serviceName, environment)`, `loggerOptions(...)` | `logger.ts` |
+| `safeLogUrl`, `serializeRequest`, `serializeResponse`, `REDACT_PATHS` | `logger.ts` |
+| `kafkaClientConfig(base)`, `kafkaSecurityFromEnv()` | `kafka.ts` |
+| `trustProxyFromEnv()` | `proxy.ts` |
 | `Logger` (type, re-exported from pino) | `logger.ts` |
 | `AppError` | `errors.ts` |
 | `NotFoundError` | `errors.ts` |
 
-**Not in this lib** (not found in `libs/shared-utils/src`): outbox helpers, audit helpers, Kafka helpers, idempotency, retries, ids. Each service has its own copy:
+**Not in this lib** (not found in `libs/shared-utils/src`): outbox helpers, audit helpers, Kafka producers/consumers (only the client options are shared), idempotency, retries, ids. Each service has its own copy:
 
 | Helper | Where it lives today |
 |---|---|
@@ -43,7 +46,17 @@ pino({
 
 - `environment` is compared with the exact string `"production"`. Anything else (`development`, `test`, a typo) gives `debug` level and the `pino-pretty` transport (human-readable output).
 - Production: `info` level, newline-delimited JSON on stdout, each line with `"name": "<serviceName>"`.
-- No redaction, no base fields beyond pino's defaults (`pid`, `hostname`), no request-id handling (Fastify adds that on its own child loggers).
+- Serializers: `req` → `{ method, url, id, host, remoteAddress }` where `url` has its query string replaced by `?[redacted]` and token path segments masked (`/api/trips/shared/<token>` and `/t/<token>` → `[redacted]`; add new token-in-path routes to `SECRET_PATH_PATTERNS`); `res` → `{ statusCode }` (no headers, so no `Set-Cookie`); `err` → pino's standard serializer. Fastify picks these up for its "incoming request" / "request completed" lines.
+- `redact` (censor `[redacted]`): `authorization`, `cookie`, `set-cookie`, `password`, `passwordHash`, `token`, `accessToken`, `refreshToken`, `idToken`, `secret`, `apiKey`, `otp`, `otpCode`, `smsCode`, `verificationCode`, `pin`, `phone`, `phoneNumber` at the top level and one level down (`*.phone`), plus `req.headers.authorization`/`cookie`/`x-internal-token`. Error codes (`err.code`) stay readable. Deeper nesting is not covered: log masked values (e.g. `maskPhone`) rather than relying on redaction.
+- No base fields beyond pino's defaults (`pid`, `hostname`), no request-id handling (Fastify adds that on its own child loggers).
+
+## `kafkaClientConfig(base, env = process.env)`
+
+`new Kafka(kafkaClientConfig({ clientId, brokers, logLevel }))` in every service. Adds `ssl` / `sasl` from `KAFKA_SSL` (`on`/`off`), `KAFKA_SSL_CA` (PEM path, implies TLS), `KAFKA_SASL_MECHANISM` (`plain` | `scram-sha-256` | `scram-sha-512`), `KAFKA_SASL_USERNAME`, `KAFKA_SASL_PASSWORD`. Throws on half-set or unknown values, and with `NODE_ENV=production` unless both TLS and SASL are set. It has no kafkajs import; the result is structurally a kafkajs `KafkaConfig`. Per-service principals and topic ACLs: [infra/docs/data-stores.md](../../../infra/docs/data-stores.md).
+
+## `trustProxyFromEnv(raw = process.env.TRUST_PROXY)`
+
+Fastify's `trustProxy` option for every service except auth-service (which has `TRUSTED_PROXIES`). Unset → trust 1 hop (Kong); a number → that many hops (a function `hop < n`, because Fastify's types no longer accept a number); `false`/`0` → none; a comma list of IPs/CIDRs (or `loopback`, `linklocal`, `uniquelocal`) → those proxies. `true` / `*` throw: trusting every hop means believing whatever `X-Forwarded-For` a client sends.
 
 Every service wraps it in `src/utils/logger.ts` to allow a level override:
 

@@ -191,7 +191,7 @@ describe("devices and event notifications", () => {
     const event = { eventId: crypto.randomUUID(), version: 1, at: new Date().toISOString(), invitationId: "i1", orgId: "o1", orgName: "Abebe Transport PLC", role: "fleet_driver", phoneNumber: p };
     await h.c.handlers["org.member_invited"]!(event);
     await h.c.handlers["org.member_invited"]!(event);
-    expect(h.smsSent).toEqual([{ to: p, body: expect.stringContaining("Abebe Transport PLC invites you to drive") }]);
+    expect(h.smsSent).toEqual([{ to: p, body: expect.stringContaining("Anbessa: \"Abebe Transport PLC\" invited you to drive") }]);
   });
 
   it("role.granted DRIVER → push to the user's devices; skipped without devices", async () => {

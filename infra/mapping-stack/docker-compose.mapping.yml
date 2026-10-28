@@ -6,7 +6,7 @@ services:
   tileserver:
     image: maptiler/tileserver-gl:v5.7.0
     volumes: ["./data/tiles:/data"]
-    ports: ["8081:8080"]
+    ports: ["127.0.0.1:8081:8080"]
 
   nominatim:
     image: mediagis/nominatim:5.3
@@ -14,11 +14,11 @@ services:
       PBF_URL: https://download.geofabrik.de/africa/ethiopia-latest.osm.pbf
       REPLICATION_URL: https://download.geofabrik.de/africa/ethiopia-updates/
     volumes: ["./data/nominatim:/var/lib/postgresql/16/main"]
-    ports: ["8080:8080"]
+    ports: ["127.0.0.1:8080:8080"]
     shm_size: 1g
 
   osrm:
     image: osrm/osrm-backend:v5.25.0
     volumes: ["./data/osrm:/data"]
     command: osrm-routed --algorithm mld /data/region.osrm
-    ports: ["5000:5000"]
+    ports: ["127.0.0.1:5000:5000"]

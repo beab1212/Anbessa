@@ -5,3 +5,4 @@ resources:
   - pricing-service.deployment.yaml
   - pricing-service.service.yaml
   - pricing-service.hpa.yaml
+  - networkpolicy.yaml

@@ -110,7 +110,7 @@ export async function createHarness() {
   };
 
   return {
-    app, c, clock, store, telegram, smsSent, pushes, pushState, internal, report, appToken, staffToken, phones,
+    app, c, clock, store, telegram, smsSent, pushes, pushState, internal, report, appToken, staffToken, phones, verifyAccessToken, now,
     close: async () => { await app.close(); await c.close(); },
   };
 }

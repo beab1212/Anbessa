@@ -264,6 +264,8 @@ model LostItemMessage {
   lostItemId   String         @map("lost_item_id") @db.Uuid
   authorUserId String         @map("author_user_id") @db.Uuid
   authorKind   LostItemAuthor @map("author_kind")
+  /// staff-only note (a status change without share: true); never shown to the rider, driver or fleet
+  internal     Boolean        @default(false)
   body         String
   createdAt    DateTime       @default(now()) @map("created_at") @db.Timestamptz
 

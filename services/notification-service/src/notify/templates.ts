@@ -10,10 +10,36 @@ const ROLE_INVITE: Record<string, string> = {
   corporate_admin: "as an account admin",
 };
 
-/** org.member_invited → SMS to the invited phone (workflow 03, step 10). */
+const ORG_NAME_MAX = 40;
+
+/**
+ * An organisation name made safe to quote inside an SMS. Org names are chosen by
+ * whoever registers the org, so they must not be able to pass for Anbessa's own
+ * words or carry a phishing payload: links, domains and phone/account numbers are
+ * stripped, quotes and control characters removed, and the result truncated.
+ */
+export function safeOrgName(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  const cleaned = raw
+    .normalize("NFKC")
+    // control / bidi characters (Unicode Cc, plus zero-width and direction overrides)
+    .replace(/[\p{Cc}\u200b-\u200f\u2028-\u202e\u2066-\u2069]/gu, " ")
+    .replace(/\b(?:https?:\/\/|www\.)\S*/gi, " ") // URLs
+    .replace(/\S+\.[a-z]{2,}(?:\/\S*)?/gi, " ") // bare domains: evil.com, bit.ly/x
+    .replace(/\+?\d[\d\s().-]{2,}\d/g, " ") // digit runs of 4+ (phone, account and code numbers)
+    .replace(/["'`\u2018-\u201f<>]/g, "") // quotes, so the name can't close ours
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return undefined;
+  return cleaned.length > ORG_NAME_MAX ? `${cleaned.slice(0, ORG_NAME_MAX - 1).trimEnd()}…` : cleaned;
+}
+
+/** org.member_invited → SMS to the invited phone (workflow 03, step 10). Anbessa's fixed text
+ *  comes first and the org name is only ever quoted, never the opening words. */
 export function inviteSms(orgName: string | undefined, role: string): string {
-  const who = orgName?.trim() ? orgName.trim().slice(0, 60) : "A company";
-  return `${who} invites you ${ROLE_INVITE[role] ?? "to join them"} on Anbessa. Open the Anbessa app to accept.`;
+  const name = safeOrgName(orgName);
+  const who = name ? `"${name}"` : "a company";
+  return `Anbessa: ${who} invited you ${ROLE_INVITE[role] ?? "to join them"}. Accept in the Anbessa app. Ignore if unexpected.`;
 }
 
 /** role.granted DRIVER → push (workflow 02, driver activated). */
@@ -92,6 +118,41 @@ export function payoutPush(sent: boolean, amountMinor: number, provider: string)
   return sent
     ? { title: "Earnings sent", body: `${etb(amountMinor)} is on its way to your ${PROVIDER[provider] ?? provider} account.`, data: { type: "payout.sent" } }
     : { title: "Payout failed", body: `We couldn't send ${etb(amountMinor)}. Check your payout details in the app; the money stays in your balance.`, data: { type: "payout.failed" } };
+}
+
+// ── payout method changed (account-takeover warning) ───────────────────────────
+
+export type Lang = "en" | "am";
+
+/** Only the last digits of the masked destination ("•••1234") ever go into the message; the
+ *  English text says "ending 1234" so the SMS stays in the GSM alphabet (one segment). */
+export function last4(destinationMasked: string | undefined): string | undefined {
+  return destinationMasked?.match(/(\d{2,4})\s*$/)?.[1];
+}
+const accountEn = (masked: string | undefined) => (last4(masked) ? `the account ending ${last4(masked)}` : "a new account");
+const accountAm = (masked: string | undefined) => (last4(masked) ? `በ${last4(masked)} የሚያልቅ ሂሳብ` : "አዲስ ሂሳብ");
+
+/** "3 Nov, 14:30" in Addis Ababa time. */
+function resumeTime(iso: string, lang: Lang): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return lang === "am" ? "ከጥቂት ጊዜ በኋላ" : "shortly";
+  return d.toLocaleString(lang === "am" ? "am-ET" : "en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: "Africa/Addis_Ababa" });
+}
+
+/** payout_method.changed → SMS to the balance owner. Fixed Anbessa text first; fits one SMS in English. */
+export function payoutMethodChangedSms(destinationMasked: string | undefined, payoutsResumeAt: string, lang: Lang = "en"): string {
+  const when = resumeTime(payoutsResumeAt, lang);
+  return lang === "am"
+    ? `አንበሳ: የክፍያ መቀበያ ሂሳብዎ ወደ ${accountAm(destinationMasked)} ተቀይሯል። ክፍያዎች ከ${when} ጀምሮ ይቀጥላሉ። ይህን ያላደረጉት እርስዎ ካልሆኑ ድጋፍን ያግኙ።`
+    : `Anbessa: Your payout account was changed to ${accountEn(destinationMasked)}. Payouts resume ${when}. If this wasn't you, contact support.`;
+}
+
+/** payout_method.changed → push to the balance owner. */
+export function payoutMethodChangedPush(destinationMasked: string | undefined, payoutsResumeAt: string, lang: Lang = "en"): PushMessage {
+  const when = resumeTime(payoutsResumeAt, lang);
+  return lang === "am"
+    ? { title: "የክፍያ መቀበያ ሂሳብ ተቀይሯል", body: `የክፍያ መቀበያ ሂሳብዎ ወደ ${accountAm(destinationMasked)} ተቀይሯል። ክፍያዎች ከ${when} ጀምሮ ይቀጥላሉ። ይህን ያላደረጉት እርስዎ ካልሆኑ ድጋፍን ያግኙ።`, data: { type: "payout_method.changed" } }
+    : { title: "Payout account changed", body: `Your payout account was changed to ${accountEn(destinationMasked)}. Payouts resume ${when}. If this wasn't you, contact support.`, data: { type: "payout_method.changed" } };
 }
 
 /** refund.succeeded → push to the rider. */

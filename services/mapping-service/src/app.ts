@@ -4,6 +4,7 @@ import type { VerifyAccessToken } from "@ride-app/shared-authz";
 import { registerRoutes } from "./http/routes.js";
 import type { Maps } from "./maps.js";
 import { registerErrorHandler } from "./middlewares/error-handler.js";
+import { trustProxyFromEnv } from "@ride-app/shared-utils";
 
 export interface AppDeps {
   maps: Maps;
@@ -17,7 +18,7 @@ export interface AppDeps {
 export async function buildApp(deps: AppDeps) {
   const app = Fastify({
     ...(deps.logger ? { loggerInstance: deps.logger } : { logger: false }),
-    trustProxy: true,
+    trustProxy: trustProxyFromEnv(), // TRUST_PROXY: hop count (default 1 = Kong) or proxy CIDRs; never `true`
     bodyLimit: 32 * 1024,
   });
 

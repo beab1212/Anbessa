@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { nodeEnvSchema } from "@ride-app/shared-config";
 
 const csv = z
   .string()
@@ -17,7 +18,7 @@ const toTargets = (s: string) =>
 
 export const envSchema = z
   .object({
-    NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+    NODE_ENV: nodeEnvSchema, // required: no silent development default
     PORT: z.coerce.number().default(3011),
     LOG_LEVEL: z.string().optional(),
     DATABASE_URL: z.string().url(),

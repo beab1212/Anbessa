@@ -9,10 +9,11 @@
 // The notifier dedupes on eventId:channel, so an event that tells several people uses
 // `<eventId>:<userId>` per recipient (still stable across redeliveries).
 
+import type { ContactLookup } from "../campaigns/contacts.js";
 import type { Notifier } from "./notifier.js";
 import type { PushMessage } from "../channels/push.js";
 import {
-  approvePaymentPush, balanceStatePush, dispatchEscalatedPush, driverActivatedPush, inviteSms, paymentDuePush, paymentFailedPush, payoutPush,
+  approvePaymentPush, balanceStatePush, payoutMethodChangedPush, payoutMethodChangedSms, dispatchEscalatedPush, driverActivatedPush, inviteSms, paymentDuePush, paymentFailedPush, payoutPush,
   reassignedDriverPush, reassignedRiderPush, receiptPush, refundPush, scheduleCancelledPush, scheduledPush, scheduleFailedPush,
   sosAcknowledgedPush, sosResolvedPush, sosTriggeredPush, toppedUpPush,
 } from "./templates.js";
@@ -35,7 +36,7 @@ function balanceOwner(e: EventEnvelope): string | undefined {
   return b?.type === "INDIVIDUAL" ? str(b.id) : undefined;
 }
 
-export function createHandlers(notifier: Notifier): Record<string, Handler> {
+export function createHandlers(notifier: Notifier, deps: { contacts?: ContactLookup } = {}): Record<string, Handler> {
   /** One push per distinct user, each deduped on its own key. */
   async function pushEach(e: EventEnvelope, template: string, messages: [string | undefined, PushMessage][]) {
     const seen = new Set<string>();
@@ -105,6 +106,21 @@ export function createHandlers(notifier: Notifier): Record<string, Handler> {
       const owner = balanceOwner(e);
       if (!owner) return;
       return notifier.push(e.eventId, "payout_sent", owner, payoutPush(true, num(e.amountMinor), str(e.provider) ?? ""));
+    },
+    // payment-service: where payouts go was set or changed. Push + SMS to the owner-driver so a
+    // takeover is noticed during the cooling-off (payouts wait until payoutsResumeAt). Both deduped
+    // on the event id (notifier: eventId:channel). The phone number comes from auth-service; if it
+    // can't answer the handler throws and Kafka redelivers (the push isn't sent twice).
+    // English for now: events carry no locale (the Amharic templates are ready, lang "am").
+    "payout_method.changed": async (e) => {
+      const owner = balanceOwner(e);
+      const resumeAt = str(e.payoutsResumeAt);
+      if (!owner || !resumeAt) return;
+      const masked = str(e.destinationMasked);
+      const push = await notifier.push(e.eventId, "payout_method_changed", owner, payoutMethodChangedPush(masked, resumeAt));
+      const phone = deps.contacts ? await deps.contacts.phoneOf(owner) : null;
+      const sms = phone ? await notifier.sms(e.eventId, "payout_method_changed", phone, payoutMethodChangedSms(masked, resumeAt)) : undefined;
+      return { push, sms };
     },
     "payout.failed": async (e) => {
       const owner = balanceOwner(e);

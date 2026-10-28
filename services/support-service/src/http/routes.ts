@@ -153,7 +153,8 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
   });
 
   app.post("/api/support/lost-items/:id/status", async (req) => {
-    const body = z.object({ status: z.enum(["FOUND", "NOT_FOUND", "RETURNED", "CLOSED"]), note: text(2000).optional() }).parse(req.body);
+    // note: internal (staff only) unless share: true sends it to the rider and driver
+    const body = z.object({ status: z.enum(["FOUND", "NOT_FOUND", "RETURNED", "CLOSED"]), note: text(2000).optional(), share: z.boolean().optional() }).parse(req.body);
     return { lostItem: await lostItems.setStatus(await principal(req), id.parse(req.params).id, body) };
   });
 

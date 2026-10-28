@@ -183,9 +183,17 @@ Source: `src/campaigns/routes.ts` (registered from `src/http/routes.ts`). Kong a
 | `GET /api/notifications/campaigns/:id` | `campaign:send` in its city | `200 { campaign }` plus `audienceEstimate` (DRAFT/SCHEDULED) and `quietNow` |
 | `PUT /api/notifications/campaigns/:id` | same; drafts only (`409 not_draft`) | `200 { campaign }` |
 | `POST /api/notifications/campaigns/:id/schedule` `{ at? }` | same; DRAFT only | `200 { campaign }` (SCHEDULED; without `at`, now). `at` in the past → `400 in_past`; > 90 days → `400 too_far` |
-| `POST /api/notifications/campaigns/:id/cancel` | same; DRAFT, SCHEDULED or SENDING | `200 { campaign }` (CANCELLED; unsent deliveries → SKIPPED `cancelled`) |
+| `POST /api/notifications/campaigns/:id/approve` | `campaign:send` in the city, **not** the campaign's creator or scheduler; AWAITING_APPROVAL only | `200 { campaign }` (SCHEDULED, `approvedBy`, `approvedAt`); `403 second_approver_required`; `409 invalid_transition` |
+| `POST /api/notifications/campaigns/:id/cancel` | same; DRAFT, AWAITING_APPROVAL, SCHEDULED or SENDING | `200 { campaign }` (CANCELLED; unsent deliveries → SKIPPED `cancelled`) |
 | `GET /api/notifications/me/marketing` | `ride-app` token | `200 { push: boolean, sms: boolean }` (true = receives marketing) |
 | `PUT /api/notifications/me/marketing` `{ push?, sms? }` | `ride-app` token | `200 { push, sms }` |
+
+Maker-checker: scheduling a campaign whose audience is larger than `CAMPAIGN_APPROVAL_THRESHOLD`
+(default 1000) moves it to `AWAITING_APPROVAL` instead of `SCHEDULED`; a second staff member
+approves it. When sending starts the sender checks again against the fixed recipient list and
+sends an unapproved campaign back to `AWAITING_APPROVAL` if the segment grew past the threshold.
+The database also refuses `approved_by = created_by`. The web campaign page does not have an
+Approve button yet.
 
 `Campaign`: `{ id, cityId, audience, lastActiveDays, channel, title, body, status: DRAFT | SCHEDULED | SENDING | SENT | CANCELLED, scheduledAt, startedAt, finishedAt, targeted, counts: { pending, sent, skipped, failed }, createdBy, updatedBy, createdAt, updatedAt }`.
 

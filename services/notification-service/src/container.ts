@@ -74,13 +74,15 @@ export function createContainer(config: Config, logger: Logger, opts: ContainerO
   });
 
   const notifier = createNotifier({ db, sms, push, logger });
+  const contacts = opts.contacts ?? authContacts(config.AUTH_INTERNAL_URL, config.INTERNAL_SERVICE_TOKEN);
   const campaigns = createCampaignService({
     db, push, sms, logger, now: opts.now ?? (() => new Date()),
-    contacts: opts.contacts ?? authContacts(config.AUTH_INTERNAL_URL, config.INTERNAL_SERVICE_TOKEN),
+    contacts,
     sendPerSecond: config.CAMPAIGN_SEND_PER_SECOND, quietHours: config.CAMPAIGN_QUIET_HOURS,
+    approvalThreshold: config.CAMPAIGN_APPROVAL_THRESHOLD,
   });
   // event notifications, plus the campaign audience directory (distinct topics)
-  const handlers = { ...createHandlers(notifier), ...createAudienceHandlers(campaigns) };
+  const handlers = { ...createHandlers(notifier, { contacts }), ...createAudienceHandlers(campaigns) };
 
   return {
     config, db, redis, store, otp, notifier, handlers, settingsClient, campaigns,

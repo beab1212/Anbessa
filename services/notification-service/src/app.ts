@@ -4,6 +4,7 @@ import rateLimit from "@fastify/rate-limit";
 import type { Db } from "./db.js";
 import { registerRoutes, type RouteDeps } from "./http/routes.js";
 import { registerErrorHandler } from "./middlewares/error-handler.js";
+import { trustProxyFromEnv } from "@ride-app/shared-utils";
 
 export interface AppDeps extends RouteDeps {
   db: Db;
@@ -13,7 +14,7 @@ export interface AppDeps extends RouteDeps {
 export async function buildApp(deps: AppDeps) {
   const app = Fastify({
     ...(deps.logger ? { loggerInstance: deps.logger } : { logger: false }),
-    trustProxy: true, // behind Kong / the load balancer
+    trustProxy: trustProxyFromEnv(), // TRUST_PROXY: hop count (default 1 = Kong) or proxy CIDRs; never `true`
     bodyLimit: 16 * 1024,
   });
 

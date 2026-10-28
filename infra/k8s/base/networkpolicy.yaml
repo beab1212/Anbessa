@@ -1,0 +1,149 @@
+# Network policies for the app namespace: deny everything, then allow only what the services need.
+#
+#   1. default-deny            no pod accepts or opens any connection unless a rule below allows it
+#   2. allow-dns               every pod may resolve names (kube-dns / CoreDNS, UDP+TCP 53)
+#   3. allow-from-kong         public services accept traffic from Kong (the only ingress)
+#   4. allow-backend-internal  services call each other (/internal/*, JWKS, settings snapshot)
+#   5. allow-data-stores       services reach Postgres (RDS), Redis (ElastiCache), Kafka (MSK)
+#   6. allow-internet-https    only pods labelled `egress: internet` (notification-service: Twilio,
+#                              FCM, Telegram; payment-service: telebirr, CBE Birr, Chapa) reach
+#                              HTTPS outside the VPC
+#
+# Kong runs in the `kong` namespace with the label app.kubernetes.io/name: kong (the Kong Helm
+# chart's default). The data stores are managed AWS services outside the cluster, so they are
+# matched by the VPC's private data subnets: replace 10.0.32.0/20 with the real CIDR(s) from
+# Terraform. Each new service Deployment gets the `tier: backend` label (see deployment.yaml).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: kube-system }
+          podSelector:
+            matchLabels: { k8s-app: kube-dns }
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+---
+# Public services: the ones Kong routes to (infra/kong/kong.yml). Every HTTP service is behind
+# Kong today, so the rule covers every backend pod; narrow the selector if one becomes internal-only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-from-kong
+spec:
+  podSelector:
+    matchLabels: { tier: backend }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: kong }
+          podSelector:
+            matchLabels: { app.kubernetes.io/name: kong }
+      ports:
+        - { protocol: TCP, port: 3000 }
+        - { protocol: TCP, port: 3001 }
+        - { protocol: TCP, port: 3002 }
+        - { protocol: TCP, port: 3003 }
+        - { protocol: TCP, port: 3004 }
+        - { protocol: TCP, port: 3005 }
+        - { protocol: TCP, port: 3006 }
+        - { protocol: TCP, port: 3007 }
+        - { protocol: TCP, port: 3008 }
+        - { protocol: TCP, port: 3009 }
+        - { protocol: TCP, port: 3010 }
+        - { protocol: TCP, port: 3011 }
+---
+# Service to service (internal token today, mTLS later): backend pods may call each other on
+# the service ports, and nothing else in the cluster may.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-backend-internal
+spec:
+  podSelector:
+    matchLabels: { tier: backend }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { tier: backend }
+      ports:
+        - { protocol: TCP, port: 3000 }
+        - { protocol: TCP, port: 3001 }
+        - { protocol: TCP, port: 3002 }
+        - { protocol: TCP, port: 3003 }
+        - { protocol: TCP, port: 3004 }
+        - { protocol: TCP, port: 3005 }
+        - { protocol: TCP, port: 3006 }
+        - { protocol: TCP, port: 3007 }
+        - { protocol: TCP, port: 3008 }
+        - { protocol: TCP, port: 3009 }
+        - { protocol: TCP, port: 3010 }
+        - { protocol: TCP, port: 3011 }
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: { tier: backend }
+      ports:
+        - { protocol: TCP, port: 3000 }
+        - { protocol: TCP, port: 3001 }
+        - { protocol: TCP, port: 3002 }
+        - { protocol: TCP, port: 3003 }
+        - { protocol: TCP, port: 3004 }
+        - { protocol: TCP, port: 3005 }
+        - { protocol: TCP, port: 3006 }
+        - { protocol: TCP, port: 3007 }
+        - { protocol: TCP, port: 3008 }
+        - { protocol: TCP, port: 3009 }
+        - { protocol: TCP, port: 3010 }
+        - { protocol: TCP, port: 3011 }
+---
+# Postgres 5432, Redis 6379 (TLS on ElastiCache uses the same port), Kafka on MSK: 9094 (TLS)
+# and 9096 (SASL/SCRAM over TLS). Plaintext 9092 is deliberately not allowed.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-data-stores
+spec:
+  podSelector:
+    matchLabels: { tier: backend }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock: { cidr: 10.0.32.0/20 }
+      ports:
+        - { protocol: TCP, port: 5432 }
+        - { protocol: TCP, port: 6379 }
+        - { protocol: TCP, port: 9094 }
+        - { protocol: TCP, port: 9096 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-internet-https
+spec:
+  podSelector:
+    matchLabels: { tier: backend, egress: internet }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16]
+      ports:
+        - { protocol: TCP, port: 443 }

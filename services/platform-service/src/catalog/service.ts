@@ -43,6 +43,9 @@ export interface AnnouncementInput {
   endsAt?: Date | null;
 }
 
+/** Announcement audiences anyone may read; "staff" ones need a staff token. */
+const PUBLIC_AUDIENCES = ["rider", "driver", "partner"];
+
 const BUILT_IN_CITY_NAMES: Record<string, string> = { "addis-ababa": "Addis Ababa", hawassa: "Hawassa" };
 const BUILT_IN_TYPES = [
   { code: "economy", name: "Economy", seatsMin: 3, seatsMax: 4, sortOrder: 1 },
@@ -158,13 +161,22 @@ export function createCatalogService(deps: { db: Db; identity: IdentitySync; pub
     },
 
     /** Public: what the apps and the web need before anyone signs in. */
-    async clientConfig(q: { audience?: string; cityId?: string }) {
+    async clientConfig(q: { audience?: string; cityId?: string; staff?: boolean }) {
+      // without a staff token: never staff announcements (audience=staff returns none, and no
+      // audience returns only those meant for riders, drivers or partners)
+      const audienceFilter = q.staff
+        ? (q.audience ? { audiences: { has: q.audience } } : {})
+        : q.audience === "staff"
+          ? { id: { in: [] as string[] } }
+          : q.audience
+            ? { audiences: { has: q.audience } }
+            : { audiences: { hasSome: PUBLIC_AUDIENCES } };
       const [snap, announcements] = await Promise.all([
         loadSnapshot(db),
         db.announcement.findMany({
           where: {
             archived: false, startsAt: { lte: now() }, OR: [{ endsAt: null }, { endsAt: { gt: now() } }],
-            ...(q.audience ? { audiences: { has: q.audience } } : {}),
+            ...audienceFilter,
           },
           orderBy: { startsAt: "desc" },
           take: 20,

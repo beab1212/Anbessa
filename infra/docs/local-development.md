@@ -104,6 +104,22 @@ payment-service and trip-service do use Postgres and their postgres is behind a 
 `default`. fleet-service, audit-service and platform-service need Redis in production but their
 dev stacks have none (their config treats `REDIS_URL` as optional outside production).
 
+### Published ports are localhost-only
+
+Every published port in `infra/docker/docker-compose.yml`, `infra/kong/docker-compose.dev.yml`,
+`infra/mapping-stack/docker-compose.mapping.yml` and `services/*/docker-compose.dev.yml` is bound
+to `127.0.0.1` (`"127.0.0.1:5432:5432"`). Postgres runs with a default password, Redis and
+Redpanda without auth, and the services with development settings, so none of them should be
+reachable from the café Wi-Fi. Containers still reach each other over the compose network.
+
+A phone needs the API: use `adb reverse tcp:8000 tcp:8000` (and `tcp:3000` for the realtime
+gateway, or the per-service ports in host mode) over USB, as the phone-app README describes; that
+works with the localhost binding. To expose **one** port to the LAN on purpose (an iPhone, a
+second laptop), override only that port in a local, uncommitted file, e.g.
+`docker-compose.override.yml` next to the compose file with
+`services: { kong: { ports: !override ["0.0.0.0:8000:8000"] } }`, and stop it when done. Never
+open Postgres, Redis or Kafka that way.
+
 ## 2. Makefile targets
 
 `Makefile` uses `SHELL := /bin/bash`. Two lists drive the loops:

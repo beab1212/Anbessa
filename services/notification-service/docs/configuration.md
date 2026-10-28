@@ -6,7 +6,9 @@ Parsed once at start by `loadConfig()` in `src/config/index.ts` (Zod). A blank v
 
 | Variable | Meaning | Default | Required | Validation |
 |---|---|---|---|---|
-| `NODE_ENV` | `development`, `test` or `production` | `development` | no | enum |
+| `NODE_ENV` | `development`, `test` or `production` | none: **required** | yes | enum (`nodeEnvSchema`) |
+| `TRUST_PROXY` | hop count, or comma-separated proxy IPs/CIDRs | `1` (Kong) |  | `true` refused (`trustProxyFromEnv`) |
+| `KAFKA_SSL`, `KAFKA_SSL_CA`, `KAFKA_SASL_MECHANISM`, `KAFKA_SASL_USERNAME`, `KAFKA_SASL_PASSWORD` | Kafka TLS/SASL (`kafkaClientConfig`) | off / unset | in production | TLS and SASL required in production; see infra/docs/data-stores.md |
 | `PORT` | HTTP port | `3006` | no | number |
 | `LOG_LEVEL` | pino level override | `info` in production, `debug` otherwise (`libs/shared-utils/src/logger.ts`) | no | string |
 | `DATABASE_URL` | Postgres URL (`notification_service`) | — | **yes** | URL |
@@ -66,6 +68,7 @@ Resolution: stored global value → this service's env value (`OTP_CHANNELS`, `O
 | Variable | Meaning | Default |
 |---|---|---|
 | `CAMPAIGN_SEND_PER_SECOND` | campaign recipients sent per second, all campaigns together (1–1000) | `20` |
+| `CAMPAIGN_APPROVAL_THRESHOLD` | recipients above which a campaign needs a second staff member's approval; `0` = every campaign | `1000` |
 | `CAMPAIGN_QUIET_HOURS` | `from-to` local hours (Africa/Addis_Ababa) when nothing is sent; `0-0` = none | `21-8` |
 
 `AUTH_INTERNAL_URL` is now also used for SMS campaign phone numbers (`GET /internal/users/:id/contact`, 2.5 s). `KAFKA_BROKERS` also feeds the outbox relay (audit events).

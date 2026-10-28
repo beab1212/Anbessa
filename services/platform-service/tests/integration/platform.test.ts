@@ -84,7 +84,11 @@ describe("cities, vehicle types, client configuration", () => {
     const res = await h.req("PUT", "/api/platform/vehicle-types/electric", a, { name: "Electric", seatsMin: 3, seatsMax: 4, enabled: true, cities: ["addis-ababa"] });
     expect(res.statusCode, res.body).toBe(200);
     await h.req("PUT", "/api/platform/settings/features.phoneBooking", a, { value: false, reason: "call center closed today" });
-    await h.req("PUT", "/api/platform/settings/features.sos", a, { value: true, reason: "safety desk staffed" });
+    // features.sos is sensitive: it waits for a second super admin
+    const sos = await h.req("PUT", "/api/platform/settings/features.sos", a, { value: true, reason: "safety desk staffed" });
+    expect(sos.statusCode, sos.body).toBe(202);
+    const checker = await h.superAdmin();
+    expect((await h.req("POST", `/api/platform/settings/changes/${sos.json<{ change: { id: string } }>().change.id}/approve`, checker, {})).statusCode).toBe(200);
     const cfg = (await h.app.inject({ method: "GET", url: "/api/platform/client-config" })).json<{ vehicleTypes: { code: string }[]; features: Record<string, boolean>; maintenance: { newTripsPaused: boolean } }>();
     expect(cfg.vehicleTypes.map((t) => t.code)).toContain("electric");
     expect(cfg.features.phoneBooking).toBe(false);
@@ -100,11 +104,17 @@ describe("cities, vehicle types, client configuration", () => {
     expect(res.statusCode, res.body).toBe(201);
     const later = await h.req("POST", "/api/platform/announcements", a, { title: "Coming soon", body: "Electric cars next month.", audiences: ["rider"], startsAt: new Date(h.clock.now + 86_400_000).toISOString() });
     expect(later.statusCode).toBe(201);
-    const staffView = (await h.app.inject({ method: "GET", url: "/api/platform/client-config?audience=staff" })).json<{ announcements: { title: string }[] }>();
+    const staffView = (await h.req("GET", "/api/platform/client-config?audience=staff", a)).json<{ announcements: { title: string }[] }>();
     expect(staffView.announcements.map((x) => x.title)).toEqual(["Holiday hours"]);
+    expect((await h.req("GET", "/api/platform/client-config", a)).json<{ announcements: { title: string }[] }>().announcements.map((x) => x.title)).toEqual(["Holiday hours"]);
+    // staff-only announcements never reach anyone without a staff token
+    const anon = await h.app.inject({ method: "GET", url: "/api/platform/client-config?audience=staff" });
+    expect(anon.json<{ announcements: unknown[] }>().announcements).toEqual([]);
+    expect((await h.app.inject({ method: "GET", url: "/api/platform/client-config" })).json<{ announcements: unknown[] }>().announcements).toEqual([]);
+    expect((await h.app.inject({ method: "GET", url: "/api/platform/client-config?audience=staff", headers: { authorization: "Bearer not-a-token" } })).json<{ announcements: unknown[] }>().announcements).toEqual([]);
     expect((await h.app.inject({ method: "GET", url: "/api/platform/client-config?audience=rider" })).json<{ announcements: unknown[] }>().announcements).toEqual([]);
     await h.req("POST", `/api/platform/announcements/${res.json<{ id: string }>().id}/archive`, a, {});
-    expect((await h.app.inject({ method: "GET", url: "/api/platform/client-config?audience=staff" })).json<{ announcements: unknown[] }>().announcements).toEqual([]);
+    expect((await h.req("GET", "/api/platform/client-config?audience=staff", a)).json<{ announcements: unknown[] }>().announcements).toEqual([]);
   });
 
   it("the system page reports unreachable services as down", async () => {

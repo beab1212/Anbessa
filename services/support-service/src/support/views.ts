@@ -104,7 +104,7 @@ export function lostItemView(l: LostItem, viewer: LostItemViewer, driverNotFound
   return { ...base, riderUserId: l.riderUserId, driverUserId: l.driverUserId, fleetOrgId: l.fleetOrgId, driverNotFoundCount };
 }
 
-export const lostItemMessageView = (m: LostItemMessage) => ({ id: m.id, authorKind: m.authorKind, body: m.body, createdAt: m.createdAt.toISOString() });
+export const lostItemMessageView = (m: LostItemMessage) => ({ id: m.id, authorKind: m.authorKind, internal: m.internal, body: m.body, createdAt: m.createdAt.toISOString() });
 
 export function sosView(a: SosAlert, now: Date) {
   return {

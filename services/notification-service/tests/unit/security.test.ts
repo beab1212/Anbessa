@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { phoneHasher, sealer } from "../../src/lib/crypto.js";
 import { reportVerifier } from "../../src/otp/telegram-gateway.js";
 import { loadConfig } from "../../src/config/index.js";
-import { inviteSms } from "../../src/notify/templates.js";
+import { inviteSms, safeOrgName } from "../../src/notify/templates.js";
 import { smsText } from "../../src/otp/otp-service.js";
 
 const TOKEN = "telegram-gateway-test-token-123456";
@@ -63,20 +63,46 @@ describe("templates", () => {
   it("fits one SMS", () => {
     expect(smsText("123456", 300)).toMatch(/123456.*5 minutes/);
     expect(smsText("123456", 300).length).toBeLessThanOrEqual(160);
-    expect(inviteSms("Abebe Transport PLC", "fleet_driver")).toBe("Abebe Transport PLC invites you to drive with them on Anbessa. Open the Anbessa app to accept.");
+    expect(inviteSms("Abebe Transport PLC", "fleet_driver")).toBe('Anbessa: "Abebe Transport PLC" invited you to drive with them. Accept in the Anbessa app. Ignore if unexpected.');
     expect(inviteSms("x".repeat(200), "employee").length).toBeLessThanOrEqual(160);
-    expect(inviteSms(undefined, "unknown")).toMatch(/^A company invites you to join them/);
+    expect(inviteSms(undefined, "unknown")).toMatch(/^Anbessa: a company invited you to join them/);
+    for (const role of ["fleet_driver", "employee", "corporate_coordinator", "corporate_admin", "x"]) {
+      expect(inviteSms("w".repeat(500), role).length).toBeLessThanOrEqual(160);
+    }
+  });
+
+  it("can't be turned into a phishing SMS through the org name", () => {
+    const sms = inviteSms('Anbessa Security: your account is locked, call +251 911 223 344 or visit https://anbessa-verify.com/x "', "employee");
+    expect(sms.startsWith("Anbessa: \"")).toBe(true);
+    expect(sms).not.toMatch(/https?:|anbessa-verify|\.com/);
+    expect(sms).not.toMatch(/\d{4}/);
+    expect(sms.match(/"/g)).toHaveLength(2); // only our own quotes
+  });
+
+  it("sanitises org names", () => {
+    expect(safeOrgName("  Abebe   Transport\nPLC ")).toBe("Abebe Transport PLC");
+    expect(safeOrgName("Go to bit.ly/abc now")).toBe("Go to now");
+    expect(safeOrgName("Pay 1000123456789 today")).toBe("Pay today");
+    expect(safeOrgName("Fleet 24")).toBe("Fleet 24"); // short numbers stay
+    expect(safeOrgName("https://x.y")).toBeUndefined();
+    expect(safeOrgName("a".repeat(100))!.length).toBe(40);
   });
 });
 
 describe("config", () => {
   const base = {
+    NODE_ENV: "test",
     DATABASE_URL: "postgresql://x@localhost/db",
     REDIS_URL: "redis://localhost:6379",
     INTERNAL_SERVICE_TOKEN: "t".repeat(64),
     PHONE_HASH_KEY: "a".repeat(64),
     OTP_ENCRYPTION_KEY: "b".repeat(64),
   };
+
+  it("requires NODE_ENV (no silent development default)", () => {
+    const { NODE_ENV: _drop, ...rest } = base;
+    expect(() => loadConfig(rest)).toThrow(/NODE_ENV is required/);
+  });
 
   it("drops telegram without a token, and treats blank values as unset", () => {
     const c = loadConfig({ ...base, TELEGRAM_GATEWAY_TOKEN: "", KAFKA_BROKERS: "" });
@@ -106,5 +132,17 @@ describe("config", () => {
   it("requires provider credentials", () => {
     expect(() => loadConfig({ ...base, SMS_PROVIDER: "twilio" })).toThrow(/TWILIO/);
     expect(() => loadConfig({ ...base, PUSH_PROVIDER: "fcm" })).toThrow(/FCM/);
+  });
+});
+
+describe("campaign maker-checker", () => {
+  it("needs a second approver above the threshold, and never the maker", async () => {
+    const { needsSecondApprover, canApprove } = await import("../../src/campaigns/service.js");
+    expect(needsSecondApprover(1000, 1000)).toBe(false);
+    expect(needsSecondApprover(1001, 1000)).toBe(true);
+    expect(needsSecondApprover(1, 0)).toBe(true);
+    expect(canApprove("a", { createdBy: "a", updatedBy: "b" })).toBe(false);
+    expect(canApprove("b", { createdBy: "a", updatedBy: "b" })).toBe(false);
+    expect(canApprove("c", { createdBy: "a", updatedBy: "b" })).toBe(true);
   });
 });

@@ -3,6 +3,7 @@
 // object storage). Checked in parallel with short timeouts and cached for 10 s.
 
 import { Kafka, logLevel, type Admin } from "kafkajs";
+import { kafkaClientConfig } from "@ride-app/shared-utils";
 import type { Redis } from "ioredis";
 import { authorize, type Principal } from "@ride-app/shared-authz";
 import type { Db } from "../db.js";
@@ -76,7 +77,7 @@ export function createSystemHealth(deps: { db: Db; redis?: Redis; targets: Targe
   async function kafkaLag() {
     if (!deps.kafkaBrokers?.length) return { configured: false as const, groups: [] };
     try {
-      if (!admin) admin = new Kafka({ clientId: "platform-service-health", brokers: deps.kafkaBrokers, logLevel: logLevel.NOTHING }).admin();
+      if (!admin) admin = new Kafka(kafkaClientConfig({ clientId: "platform-service-health", brokers: deps.kafkaBrokers, logLevel: logLevel.NOTHING })).admin();
       if (!adminConnected) {
         await admin.connect();
         adminConnected = true;

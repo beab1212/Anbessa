@@ -3,6 +3,7 @@
 // Malformed messages are logged and skipped, so one bad event can't block a partition.
 
 import { Kafka, logLevel, type Consumer } from "kafkajs";
+import { kafkaClientConfig } from "@ride-app/shared-utils";
 import type { Logger } from "@ride-app/shared-utils";
 import type { EventEnvelope, Handler } from "./handlers.js";
 
@@ -13,7 +14,7 @@ export function createEventConsumer(opts: {
   /** dev/test: create missing topics (in production topics are provisioned). */
   createTopics?: boolean;
 }) {
-  const kafka = new Kafka({ clientId: "notification-service", brokers: opts.brokers, logLevel: logLevel.WARN });
+  const kafka = new Kafka(kafkaClientConfig({ clientId: "notification-service", brokers: opts.brokers, logLevel: logLevel.WARN }));
   const consumer: Consumer = kafka.consumer({ groupId: "notification-service" });
   const topics = Object.keys(opts.handlers);
 

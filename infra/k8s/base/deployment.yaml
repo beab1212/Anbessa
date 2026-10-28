@@ -11,12 +11,32 @@ spec:
     matchLabels: { app: trip-service }
   template:
     metadata:
-      labels: { app: trip-service }
+      # tier: backend lets the NetworkPolicies (networkpolicy.yaml) allow service-to-service calls
+      labels: { app: trip-service, tier: backend }
     spec:
+      automountServiceAccountToken: false
+      # Pod hardening. The image's `app` user has no fixed UID, so a numeric one is set here
+      # (runAsNonRoot can only verify a numeric user); the image files are root-owned, read-only.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 64Mi }
       containers:
         - name: trip-service
           image: registry.example.com/ride-app/trip-service:latest
           ports: [{ containerPort: 3002 }]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            privileged: false
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
           envFrom:
             - configMapRef: { name: trip-service-config }
             - secretRef: { name: trip-service-secrets }

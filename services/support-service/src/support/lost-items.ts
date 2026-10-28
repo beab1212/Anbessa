@@ -21,7 +21,10 @@ export interface LostItemQuery {
 }
 
 /** Organisations whose trips the caller may read (fleet owners). */
-const fleetOrgs = (p: Principal) => p.roles.filter((a) => a.scope === "ORG" && a.orgId && can(p, "trip:read", { orgId: a.orgId })).map((a) => a.orgId!);
+/** Fleets whose cars' reports this user may see. A role in an organisation that isn't verified
+ *  yet (`pending`) never counts, whatever the matrix says. */
+export const fleetOrgs = (p: Principal) =>
+  p.roles.filter((a) => a.scope === "ORG" && a.orgId && !a.pending && can(p, "trip:read", { orgId: a.orgId })).map((a) => a.orgId!);
 
 export function createLostItemService(deps: SupportDeps) {
   const { db, trips, realtime, now } = deps;
@@ -148,7 +151,8 @@ export function createLostItemService(deps: SupportDeps) {
 
     async get(p: Principal, id: string) {
       const { l, viewer } = await readable(p, id);
-      const messages = await db.lostItemMessage.findMany({ where: { lostItemId: id }, orderBy: { createdAt: "asc" } });
+      // internal staff notes stay with staff
+      const messages = await db.lostItemMessage.findMany({ where: { lostItemId: id, ...(viewer === "STAFF" ? {} : { internal: false }) }, orderBy: { createdAt: "asc" } });
       return { lostItem: await view(l, viewer), messages: messages.map(lostItemMessageView) };
     },
 
@@ -157,9 +161,11 @@ export function createLostItemService(deps: SupportDeps) {
       const { l, viewer } = await readable(p, id);
       if (viewer === "RIDER") throw forbidden("only the driver or their fleet answers");
       const to: LostItemStatus = body.found ? "FOUND" : "NOT_FOUND";
-      const updated = await move(l, to, p.userId, { found: body.found, driverNote: body.note ?? null, respondedAt: now() },
-        viewer === "STAFF" ? [audit({ actorId: p.userId, action: "lost_item:manage", resource: { type: "lost_item", id }, outcome: "EXECUTED", reason: to })] : []);
-      if (body.note) await db.lostItemMessage.create({ data: { lostItemId: id, authorUserId: p.userId, authorKind: viewer, body: body.note, createdAt: now() } });
+      const staff = viewer === "STAFF";
+      // driverNote is the driver's (or fleet's) own words; a staff answer never replaces it and stays internal
+      const updated = await move(l, to, p.userId, { found: body.found, ...(staff ? {} : { driverNote: body.note ?? null }), respondedAt: now() },
+        staff ? [audit({ actorId: p.userId, action: "lost_item:manage", resource: { type: "lost_item", id }, outcome: "EXECUTED", reason: to })] : []);
+      if (body.note) await db.lostItemMessage.create({ data: { lostItemId: id, authorUserId: p.userId, authorKind: viewer, internal: staff, body: body.note, createdAt: now() } });
       return view(updated, viewer);
     },
 
@@ -175,15 +181,19 @@ export function createLostItemService(deps: SupportDeps) {
       return lostItemMessageView(m);
     },
 
-    /** Staff move it anywhere the rules allow; the rider may confirm the return. */
-    async setStatus(p: Principal, id: string, body: { status: LostItemStatus; note?: string }) {
+    /** Staff move it anywhere the rules allow; the rider may confirm the return.
+     *  A staff note is internal (staff only, like a ticket's status-change note) unless `share: true`;
+     *  it never replaces the driver's own note. */
+    async setStatus(p: Principal, id: string, body: { status: LostItemStatus; note?: string; share?: boolean }) {
       const { l, viewer } = await readable(p, id);
       if (viewer !== "STAFF" && !(viewer === "RIDER" && body.status === "RETURNED")) throw forbidden("missing permission lost_item:manage");
+      const internal = viewer === "STAFF" && body.share !== true;
       const data: Prisma.LostItemUncheckedUpdateManyInput =
-        body.status === "FOUND" || body.status === "NOT_FOUND" ? { found: body.status === "FOUND", respondedAt: now(), ...(body.note ? { driverNote: body.note } : {}) } : {};
+        body.status === "FOUND" || body.status === "NOT_FOUND" ? { found: body.status === "FOUND", respondedAt: now() } : {};
       const extra = viewer === "STAFF" ? [audit({ actorId: p.userId, action: "lost_item:manage", resource: { type: "lost_item", id }, outcome: "EXECUTED", reason: `${l.status} → ${body.status}${body.note ? `: ${body.note}` : ""}` })] : [];
-      const updated = await move(l, body.status, p.userId, data, extra, body.note);
-      if (body.note) await db.lostItemMessage.create({ data: { lostItemId: id, authorUserId: p.userId, authorKind: viewer, body: body.note, createdAt: now() } });
+      // the ticket's resolution note is shown to the rider, so only a shared note goes there
+      const updated = await move(l, body.status, p.userId, data, extra, internal ? undefined : body.note);
+      if (body.note) await db.lostItemMessage.create({ data: { lostItemId: id, authorUserId: p.userId, authorKind: viewer, internal, body: body.note, createdAt: now() } });
       return view(updated, viewer);
     },
 

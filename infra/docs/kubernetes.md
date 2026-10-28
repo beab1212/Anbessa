@@ -62,6 +62,30 @@ ClusterIP (default type) `trip-service`, port 3002 → targetPort 3002, selector
 `autoscaling/v2`, target Deployment `trip-service`, `minReplicas: 2`, `maxReplicas: 10`, CPU
 utilization target 70 %.
 
+### Pod hardening (`deployment.yaml`, `pricing-service.deployment.yaml`)
+
+- Pod `securityContext`: `runAsNonRoot`, `runAsUser`/`runAsGroup`/`fsGroup` `10001` (the image's
+  `app` user has no fixed UID, and `runAsNonRoot` can only verify a numeric one; the image files
+  are root-owned and world-readable), `seccompProfile: RuntimeDefault`,
+  `automountServiceAccountToken: false`.
+- Container `securityContext`: `allowPrivilegeEscalation: false`, `readOnlyRootFilesystem: true`,
+  `capabilities.drop: [ALL]`, with an `emptyDir` (64 Mi) on `/tmp` for anything that needs scratch
+  space. fleet-service with `STORAGE=local` (development only) would need a writable volume.
+- Pods carry `tier: backend`, which the NetworkPolicies select on. Copy all of this into every new
+  service's manifests.
+
+### `networkpolicy.yaml`
+
+Default deny (ingress and egress) for every pod in the namespace, then: DNS to kube-dns; ingress
+from Kong (namespace `kong`, label `app.kubernetes.io/name: kong`) to `tier: backend` on the
+service ports 3000–3011; backend ↔ backend on those ports (internal calls); egress to the data
+subnets (placeholder `10.0.32.0/20`: replace with the Terraform data-subnet CIDRs) on 5432
+(Postgres), 6379 (Redis), 9094/9096 (MSK TLS / SASL-SCRAM; plaintext 9092 is not allowed); and
+HTTPS to the internet only for pods labelled `egress: internet` (notification-service for
+Twilio/FCM/Telegram, payment-service for the payment providers). The CNI must enforce
+NetworkPolicy (VPC CNI with network policy enabled, Calico or Cilium). Validated as YAML only;
+nothing was applied.
+
 ## 2. Overlays
 
 | Overlay | `namePrefix` | Patches (JSON 6902, target Deployment `trip-service`) |

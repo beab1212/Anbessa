@@ -102,3 +102,12 @@ import { createSettingsClient, fetchSettingsSnapshotFrom, type SettingsReader } 
 |---|---|
 | [`src/registry.ts`](../src/registry.ts) | `SettingType`, `SettingDef`, `SETTING_GROUPS`, `SettingGroup`, `SETTINGS`, `settingDef`, `validateSetting` |
 | [`src/client.ts`](../src/client.ts) | `SETTINGS_CHANNEL`, `CityInfo`, `VehicleTypeInfo`, `SettingsSnapshot`, `emptySnapshot`, `fetchSettingsSnapshotFrom`, `SettingsReader`, `resolveSetting`, `staticSettings`, `createSettingsClient`, `SettingsClient` |
+
+## Sensitive switches
+
+Besides fares, fees, payment methods and the like, these need a second super admin (`sensitive:
+true`): `features.sos`, `trip.pinRequired`, `otp.channels`, `maintenance.message` (a fake
+maintenance message is a phishing channel to every user). `trip.pinRequired` defaults to `true`;
+note that trip-service passes its own `TRIP_PIN_REQUIRED` env value (default `false`) as the
+service default, which wins over the registry default until a value is saved in platform-service.
+

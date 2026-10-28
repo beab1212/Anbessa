@@ -24,11 +24,25 @@ taken from the config code.
 | audit-service | missing `KAFKA_BROKERS` | `DATABASE_URL`, `INTERNAL_SERVICE_TOKEN` |
 | support-service | missing `REDIS_URL`; missing `KAFKA_BROKERS` | `DATABASE_URL`, `INTERNAL_SERVICE_TOKEN` |
 | platform-service | missing `REDIS_URL`; missing `KAFKA_BROKERS` | `DATABASE_URL`, `INTERNAL_SERVICE_TOKEN` |
+| all services using Kafka | `KAFKA_SSL` not `on`; `KAFKA_SASL_MECHANISM` + `KAFKA_SASL_USERNAME` + `KAFKA_SASL_PASSWORD` missing (checked when the Kafka client is built at start, see [data-stores.md](data-stores.md) "Kafka security") | — |
+| auth-service | missing `TRUSTED_PROXIES` (comma-separated IPs/CIDRs of Kong / the ingress whose `X-Forwarded-For` is believed) | — |
 | realtime-gateway | none (no production checks in `src/config/index.ts`) | `REDIS_URL`. `KAFKA_BROKERS` optional: without it `driver.location` is not published (a warning is logged) |
 
 **payment-service cannot start in production today.** `GATEWAY_MODE` is `z.enum(["simulated"])`,
 the only value, and `simulated` is refused in production. Real provider adapters
 (`services/payment-service/src/gateways/*.ts`) and a new mode are needed first.
+
+`NODE_ENV` itself has **no default** in notification-, support-, platform- and audit-service
+(`nodeEnvSchema` from `@ride-app/shared-config`): a pod without it stops at start instead of
+running in development mode. The images set `ENV NODE_ENV=production`; the other services still
+default to `development` in their own `src/config/index.ts`.
+
+Client addresses (`req.ip`, used by rate limits, audit entries and login throttling):
+`TRUST_PROXY` on every Fastify service except auth-service (shared parser
+`trustProxyFromEnv()` in `@ride-app/shared-utils`): unset = trust **one** hop (Kong), a number =
+that many hops (e.g. `2` with a cloud load balancer in front of Kong), or a comma-separated list of
+the proxies' IPs/CIDRs. `true` is refused. auth-service uses its own `TRUSTED_PROXIES` (IPs/CIDRs,
+required in production).
 
 Other production behaviour in code:
 
@@ -52,6 +66,7 @@ Other production behaviour in code:
 | `FCM_PRIVATE_KEY` (with `FCM_PROJECT_ID`, `FCM_CLIENT_EMAIL`) | notification | PEM, `\n` escapes accepted |
 | `PII_ENCRYPTION_KEY`, `PII_BLIND_INDEX_KEY`, `UPLOAD_SIGNING_KEY` | fleet | 32 bytes hex, all different |
 | `TELEBIRR_WEBHOOK_SECRET`, `CBEBIRR_WEBHOOK_SECRET`, `CHAPA_WEBHOOK_SECRET` | payment | ≥ 32 chars, all different |
+| `KAFKA_SASL_PASSWORD` | every service using Kafka (one principal and password **per service**) | from the MSK SCRAM secret |
 | `REGISTRY_USER`, `REGISTRY_TOKEN` | GitHub Actions (`deploy.yml`) | |
 
 Not read by any service, although they appear in the root `.env.example`: `STRIPE_SECRET_KEY`,
@@ -64,6 +79,7 @@ environment: `infra/README.md` ("Secrets management") and [kubernetes.md](kubern
   plain HTTP `:8000` in both compose files.
 - What the code enforces: `AUTH_BASE_URL` must be `https://` (auth-service) and `TELEGRAM_CALLBACK_URL`
   must be `https://` when Telegram is enabled (notification-service).
+- Kafka: TLS and SASL are enforced in production by the shared client factory (section 1).
 - Service-to-service traffic uses plain HTTP with `INTERNAL_SERVICE_TOKEN`; config comments call it
   interim "until mTLS".
 - `REDIS_URL` accepts `rediss://` (any URL passes the schema); `DATABASE_URL` TLS is set through the
@@ -91,7 +107,12 @@ What exists in code:
 
 - Logging: pino, via `libs/shared-utils/src/logger.ts`. With `NODE_ENV=production` the output is JSON
   on stdout at `info`; otherwise `pino-pretty` at `debug`. Each service's `src/utils/logger.ts`
-  applies `LOG_LEVEL` on top; realtime-gateway ignores `LOG_LEVEL`. Kong in `make dev-gateway` logs
+  applies `LOG_LEVEL` on top; realtime-gateway ignores `LOG_LEVEL`. Request logs carry the path
+  without its query string (`?[redacted]`), share-link tokens are masked
+  (`/api/trips/shared/[redacted]`, `/t/[redacted]`), no request or response headers are logged,
+  and pino `redact` blanks `authorization`, `cookie`, `password`, `token`, `otp`, `pin`, `phone`
+  and similar fields up to one level deep. New token-in-path routes must be added to
+  `SECRET_PATH_PATTERNS` in the logger. Kong in `make dev-gateway` logs
   access to stdout; the `stack-up` Kong uses Kong's defaults.
 - Health: `/health`, `/health/live`, `/health/ready` on every service ([kubernetes.md](kubernetes.md) section 4).
 - platform-service system page: polls every service's `/health/ready` (`SERVICE_URLS`), outbox
@@ -107,6 +128,13 @@ log shipper config.
 ## 6. Checklist
 
 - [ ] `NODE_ENV=production` in every service's ConfigMap.
+- [ ] Kafka: `KAFKA_SSL=on`, `KAFKA_SASL_MECHANISM=scram-sha-512`, a principal and secret per service,
+      topic ACLs as in [data-stores.md](data-stores.md), `allow.everyone.if.no.acl.found=false`.
+- [ ] `TRUSTED_PROXIES` on auth-service and, where more than Kong sits in front, `TRUST_PROXY` on the
+      other services (hop count or proxy CIDRs; never `true`).
+- [ ] NetworkPolicies from `infra/k8s/base/networkpolicy.yaml` applied, with the real data-subnet
+      CIDR and `egress: internet` on notification-service and payment-service.
+- [ ] Terraform state bucket encrypted (`encrypt = true`, KMS key via `-backend-config`).
 - [ ] Every value in section 1 set, and none of the refused ones.
 - [ ] `SHARE_BASE_URL` set on trip-service to the public web app URL.
 - [ ] Real payment adapters and a non-simulated `GATEWAY_MODE` (payment-service won't start otherwise).

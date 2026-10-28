@@ -10,12 +10,12 @@ services:
       POSTGRES_USER: ride
       POSTGRES_PASSWORD: ride
       POSTGRES_DB: ride_app
-    ports: ["5432:5432"]
+    ports: ["127.0.0.1:5432:5432"]
     volumes: ["pg-data:/var/lib/postgresql"]
 
   redis:
     image: redis:8-alpine
-    ports: ["6379:6379"]
+    ports: ["127.0.0.1:6379:6379"]
 
   redpanda:
     image: redpandadata/redpanda:v26.2.6
@@ -24,7 +24,7 @@ services:
     command: ["redpanda", "start", "--smp", "1", "--memory", "512M", "--overprovisioned",
               "--kafka-addr", "internal://0.0.0.0:29092,external://0.0.0.0:9092",
               "--advertise-kafka-addr", "internal://redpanda:29092,external://localhost:9092"]
-    ports: ["9092:9092"]
+    ports: ["127.0.0.1:9092:9092"]
 
   kong:
     image: kong:3.9
@@ -33,7 +33,7 @@ services:
       KONG_DECLARATIVE_CONFIG: /kong/kong.yml
       KONG_PROXY_LISTEN: "0.0.0.0:8000"
     volumes: ["../kong/kong.yml:/kong/kong.yml:ro"]
-    ports: ["8000:8000"]
+    ports: ["127.0.0.1:8000:8000"]
     depends_on: [auth-service, trip-service]
 
   auth-service:
@@ -41,19 +41,19 @@ services:
     env_file: ../../.env
     environment: { DATABASE_URL: postgresql://ride:ride@postgres:5432/ride_app }
     depends_on: [postgres, redpanda]
-    ports: ["3001:3001"]
+    ports: ["127.0.0.1:3001:3001"]
 
   trip-service:
     build: { context: ../.., dockerfile: services/trip-service/Dockerfile }
     env_file: ../../.env
     depends_on: [postgres, redis, redpanda]
-    ports: ["3002:3002"]
+    ports: ["127.0.0.1:3002:3002"]
 
   location-service:
     build: { context: ../.., dockerfile: services/location-service/Dockerfile }
     env_file: ../../.env
     depends_on: [redis, redpanda]
-    ports: ["3003:3003"]
+    ports: ["127.0.0.1:3003:3003"]
 
   pricing-service:
     build: { context: ../.., dockerfile: services/pricing-service/Dockerfile }
@@ -71,13 +71,13 @@ services:
       LOCATION_INTERNAL_URL: http://location-service:3003
       PLATFORM_INTERNAL_URL: http://platform-service:3011
     depends_on: [postgres, redis, redpanda]
-    ports: ["3004:3004"]
+    ports: ["127.0.0.1:3004:3004"]
 
   payment-service:
     build: { context: ../.., dockerfile: services/payment-service/Dockerfile }
     env_file: ../../.env
     depends_on: [postgres, redis, redpanda]
-    ports: ["3005:3005"]
+    ports: ["127.0.0.1:3005:3005"]
 
   notification-service:
     build: { context: ../.., dockerfile: services/notification-service/Dockerfile }
@@ -87,37 +87,37 @@ services:
   mapping-service:
     build: { context: ../.., dockerfile: services/mapping-service/Dockerfile }
     env_file: ../../.env
-    ports: ["3007:3007"]
+    ports: ["127.0.0.1:3007:3007"]
 
   fleet-service:
     build: { context: ../.., dockerfile: services/fleet-service/Dockerfile }
     env_file: ../../.env
     depends_on: [postgres, redis, redpanda]
-    ports: ["3008:3008"]
+    ports: ["127.0.0.1:3008:3008"]
 
   platform-service:
     build: { context: ../.., dockerfile: services/platform-service/Dockerfile }
     env_file: ../../.env
     depends_on: [postgres, redis, redpanda]
-    ports: ["3011:3011"]
+    ports: ["127.0.0.1:3011:3011"]
 
   audit-service:
     build: { context: ../.., dockerfile: services/audit-service/Dockerfile }
     env_file: ../../.env
     depends_on: [postgres, redpanda]
-    ports: ["3010:3010"]
+    ports: ["127.0.0.1:3010:3010"]
 
   support-service:
     build: { context: ../.., dockerfile: services/support-service/Dockerfile }
     env_file: ../../.env
     depends_on: [postgres, redis, redpanda]
-    ports: ["3009:3009"]
+    ports: ["127.0.0.1:3009:3009"]
 
   realtime-gateway:
     build: { context: ../.., dockerfile: services/realtime-gateway/Dockerfile }
     env_file: ../../.env
     depends_on: [redis, redpanda]
-    ports: ["3000:3000"]
+    ports: ["127.0.0.1:3000:3000"]
 
 volumes:
   pg-data:

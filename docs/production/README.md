@@ -98,6 +98,9 @@ Production values that differ from dev:
 | Variable | Production value |
 |----------|------------------|
 | `NODE_ENV` | `production` |
+| `KAFKA_SSL`, `KAFKA_SASL_MECHANISM`, `KAFKA_SASL_USERNAME`, `KAFKA_SASL_PASSWORD` | `on`, `scram-sha-512`, the service's own principal and secret (required; see `infra/docs/data-stores.md`) |
+| `TRUSTED_PROXIES` (auth-service) | IPs/CIDRs of Kong / the ingress (required) |
+| `TRUST_PROXY` (other services) | hop count (default `1` = Kong) or the proxies' CIDRs; never `true` |
 | `BETTER_AUTH_SECRET` | auth-service only. From Secrets Manager, unique per environment. Never rotate it without a key-migration plan |
 | `AUTH_BASE_URL` | auth-service: public URL, must be `https://` (e.g. `https://api.anbessa.et`). Also the default JWT issuer |
 | `AUTH_ISSUER` / `AUTH_JWKS_URL` | verifiers: the issuer above / in-cluster JWKS URL (`http://auth-service:3001/api/auth/jwks`) |
@@ -211,6 +214,7 @@ These are known gaps in the current scaffold. Each one blocks or weakens a real 
 - [ ] **`.github/` is gitignored** (section 1).
 - [ ] **Android release signing** (section 8).
 - [ ] **Observability:** no metrics, tracing or alerting yet. Logs are JSON on stdout; ship them with the cluster's log agent.
+- [ ] **Kafka TLS + SASL and topic ACLs** per service (`infra/docs/data-stores.md`), `TRUSTED_PROXIES` on auth-service, NetworkPolicies (`infra/k8s/base/networkpolicy.yaml`).
 - [ ] **Seed script** (`scripts/seed-db.ts`) is a TODO. Never run it against production anyway.
 
 ---

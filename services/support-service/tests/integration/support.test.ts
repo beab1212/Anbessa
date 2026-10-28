@@ -193,9 +193,29 @@ describe("lost items", () => {
     expect(returned.json<Json>().lostItem.status).toBe("RETURNED");
     expect((await h.outbox("lost_item.returned")).some((e) => e.lostItemId === item.id)).toBe(true);
     expect(await h.c.db.ticket.findUniqueOrThrow({ where: { id: item.ticketId } })).toMatchObject({ status: "RESOLVED", resolution: "EXPLAINED" });
+    // a staff status-change note is internal: rider and driver don't see it, the driver's note stays
     const thread = (await h.req("GET", `/api/support/lost-items/${item.id}`, rider)).json<Json>().messages;
-    expect(thread.map((m: Json) => m.authorKind)).toEqual(["DRIVER", "RIDER", "STAFF"]);
+    expect(thread.map((m: Json) => m.authorKind)).toEqual(["DRIVER", "RIDER"]);
     expect(JSON.stringify(thread)).not.toContain(driver.id);
+    expect(JSON.stringify((await h.req("GET", `/api/support/lost-items/${item.id}`, driver)).json())).not.toContain("Handed over at Bole");
+    const staffView = (await h.req("GET", `/api/support/lost-items/${item.id}`, agent)).json<Json>();
+    expect(staffView.messages.map((m: Json) => [m.authorKind, m.internal])).toEqual([["DRIVER", false], ["RIDER", false], ["STAFF", true]]);
+    expect((await h.c.db.lostItem.findUniqueOrThrow({ where: { id: item.id } })).driverNote).toBe("It's here, can drop it at Bole");
+    expect((await h.c.db.ticket.findUniqueOrThrow({ where: { id: item.ticketId } })).resolutionNote).not.toContain("Bole");
+  });
+
+  it("a staff note is shared with rider and driver only with share: true", async () => {
+    const rider = await h.appUser();
+    const driver = await h.appUser([{ r: "DRIVER" }]);
+    const t = h.trip({ riderUserId: rider.id, driverUserId: driver.id, status: "completed", completedAt: new Date(h.clock.now - HOUR) });
+    const item = (await h.req("POST", "/api/support/lost-items", rider, { tripId: t.id, description: "Blue scarf" })).json<Json>().lostItem;
+    await h.req("POST", `/api/support/lost-items/${item.id}/respond`, driver, { found: false, note: "Checked the car" });
+    const agent = await support();
+    expect((await h.req("POST", `/api/support/lost-items/${item.id}/status`, agent, { status: "FOUND", note: "Driver keeps forgetting; flagged" })).statusCode).toBe(200);
+    expect((await h.req("POST", `/api/support/lost-items/${item.id}/status`, agent, { status: "RETURNED", note: "Ready at the Bole office", share: true })).statusCode).toBe(200);
+    const thread = (await h.req("GET", `/api/support/lost-items/${item.id}`, rider)).json<Json>().messages.map((m: Json) => m.body);
+    expect(thread).toEqual(["Checked the car", "Ready at the Bole office"]);
+    expect((await h.c.db.lostItem.findUniqueOrThrow({ where: { id: item.id } })).driverNote).toBe("Checked the car");
   });
 
   it("only within 7 days; repeat not-found is counted; not found for 48 h closes", async () => {

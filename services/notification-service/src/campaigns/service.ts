@@ -4,7 +4,14 @@
 // audience.ts). Opt-outs are honoured; nothing is sent during quiet hours (21:00–08:00 Addis Ababa).
 //
 //   DRAFT ──schedule──▶ SCHEDULED ──(time comes)──▶ SENDING ──(nothing left)──▶ SENT
+//     │        └─(large)─▶ AWAITING_APPROVAL ──approve (a different staff member)──▶ SCHEDULED
 //     └──────────────────┴────────cancel──────────────┴──▶ CANCELLED
+//
+// Maker-checker: a campaign whose audience is larger than CAMPAIGN_APPROVAL_THRESHOLD (default
+// 1000) waits in AWAITING_APPROVAL until another staff member with campaign:send in that city
+// approves it; neither its creator nor whoever scheduled it can. The sender checks again when
+// sending starts (the segment can grow after scheduling) and sends it back for approval if the
+// fixed recipient list is over the threshold and nobody approved it.
 //
 // When sending starts the recipients are fixed (campaign_delivery rows); the sender then works
 // through them at CAMPAIGN_SEND_PER_SECOND, claiming rows with FOR UPDATE SKIP LOCKED so several
@@ -29,7 +36,17 @@ const DAY = 24 * 3_600_000;
 
 export type Audience = "RIDER" | "DRIVER";
 export type Channel = "PUSH" | "SMS";
-export type CampaignStatus = "DRAFT" | "SCHEDULED" | "SENDING" | "SENT" | "CANCELLED";
+export type CampaignStatus = "DRAFT" | "AWAITING_APPROVAL" | "SCHEDULED" | "SENDING" | "SENT" | "CANCELLED";
+
+/** Does a campaign reaching `recipients` people need a second approver? */
+export function needsSecondApprover(recipients: number, threshold: number): boolean {
+  return recipients > threshold;
+}
+
+/** The maker (creator or scheduler) may not approve their own campaign. */
+export function canApprove(approverId: string, c: { createdBy: string; updatedBy: string }): boolean {
+  return approverId !== c.createdBy && approverId !== c.updatedBy;
+}
 
 export interface CampaignInput {
   cityId: string;
@@ -51,6 +68,8 @@ export interface CampaignDeps {
   sendPerSecond: number;
   /** local hours [from, to) when nothing is sent; Africa/Addis_Ababa (UTC+3, no DST) */
   quietHours: { from: number; to: number };
+  /** recipients above which a second staff member must approve (default 1000) */
+  approvalThreshold?: number;
 }
 
 /** Addis Ababa is UTC+3 all year. */
@@ -64,11 +83,13 @@ const SMS_MAX = 300;
 
 export function createCampaignService(deps: CampaignDeps) {
   const { db, now } = deps;
+  const approvalThreshold = deps.approvalThreshold ?? 1000;
 
   const view = (c: Campaign, counts?: Record<string, number>) => ({
     id: c.id, cityId: c.cityId, audience: c.audience as Audience, lastActiveDays: c.lastActiveDays, channel: c.channel as Channel,
     title: c.title, body: c.body, status: c.status as CampaignStatus, scheduledAt: c.scheduledAt?.toISOString() ?? null,
     startedAt: c.startedAt?.toISOString() ?? null, finishedAt: c.finishedAt?.toISOString() ?? null, targeted: c.targeted,
+    approvedBy: c.approvedBy, approvedAt: c.approvedAt?.toISOString() ?? null, approvalThreshold,
     counts: {
       pending: (counts?.PENDING ?? 0) + (counts?.IN_FLIGHT ?? 0), sent: counts?.SENT ?? 0, skipped: counts?.SKIPPED ?? 0, failed: counts?.FAILED ?? 0,
     },
@@ -183,7 +204,7 @@ export function createCampaignService(deps: CampaignDeps) {
     async get(p: Principal, id: string) {
       const c = await load(p, id);
       const counts = (await countsOf([id])).get(id);
-      const estimate = c.status === "DRAFT" || c.status === "SCHEDULED" ? await audienceSize(c) : null;
+      const estimate = c.status === "DRAFT" || c.status === "SCHEDULED" || c.status === "AWAITING_APPROVAL" ? await audienceSize(c) : null;
       return { ...view(c, counts), audienceEstimate: estimate, quietNow: inQuietHours(now(), deps.quietHours) };
     },
 
@@ -223,12 +244,26 @@ export function createCampaignService(deps: CampaignDeps) {
       if (when.getTime() < t - 60_000) throw badRequest("that time has passed", "in_past");
       if (when.getTime() > t + MAX_SCHEDULE_AHEAD_MS) throw badRequest("schedule at most 90 days ahead", "too_far");
       if (c.channel === "SMS" && !c.body) throw badRequest("empty message");
+      const size = await audienceSize(c);
+      if (needsSecondApprover(size, approvalThreshold)) {
+        return change(p, c, ["DRAFT"], { status: "AWAITING_APPROVAL", scheduledAt: when, approvedBy: null, approvedAt: null }, "campaign:send",
+          `scheduled for ${when.toISOString()}; ${size} recipients > ${approvalThreshold}, waiting for a second approver`);
+      }
       return change(p, c, ["DRAFT"], { status: "SCHEDULED", scheduledAt: when }, "campaign:send", `scheduled for ${when.toISOString()}`);
+    },
+
+    /** AWAITING_APPROVAL → SCHEDULED, by a staff member other than the campaign's maker. */
+    async approve(p: Principal, id: string) {
+      const c = await load(p, id);
+      if (c.status !== "AWAITING_APPROVAL") throw new AppError(409, "this campaign isn't waiting for approval", "invalid_transition");
+      if (!canApprove(p.userId, c)) throw forbidden("a second staff member must approve this campaign", "second_approver_required");
+      return change(p, c, ["AWAITING_APPROVAL"], { status: "SCHEDULED", approvedBy: p.userId, approvedAt: now() }, "campaign:send",
+        `approved by a second staff member (created by ${c.createdBy}, scheduled by ${c.updatedBy})`);
     },
 
     async cancel(p: Principal, id: string) {
       const c = await load(p, id);
-      return change(p, c, ["DRAFT", "SCHEDULED", "SENDING"], { status: "CANCELLED", finishedAt: now() }, "campaign:send", "cancelled");
+      return change(p, c, ["DRAFT", "AWAITING_APPROVAL", "SCHEDULED", "SENDING"], { status: "CANCELLED", finishedAt: now() }, "campaign:send", "cancelled");
     },
 
     /** The sender: start due campaigns, send one rate-limited batch, finish what's done. */
@@ -244,6 +279,13 @@ export function createCampaignService(deps: CampaignDeps) {
             INSERT INTO campaign_delivery (campaign_id, user_id, status, updated_at)
             SELECT DISTINCT ${c.id}::uuid, a.user_id, 'PENDING', ${t}::timestamptz ${segment(c)}
             ON CONFLICT DO NOTHING`;
+          if (!c.approvedBy && needsSecondApprover(targeted, approvalThreshold)) {
+            // the segment grew past the threshold since it was scheduled: back for approval
+            await tx.campaignDelivery.deleteMany({ where: { campaignId: c.id } });
+            await tx.campaign.update({ where: { id: c.id }, data: { status: "AWAITING_APPROVAL", startedAt: null, targeted: 0 } });
+            await writeAudit(tx, { actorId: null, action: "campaign:send", resource: { type: "campaign", id: c.id }, outcome: "EXECUTED", reason: `${targeted} recipients > ${approvalThreshold}: waiting for a second approver` });
+            return;
+          }
           await tx.campaign.update({ where: { id: c.id }, data: { targeted } });
           started++;
         });

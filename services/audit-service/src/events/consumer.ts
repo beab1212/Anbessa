@@ -2,12 +2,13 @@
 // message can't block a partition; database errors are retried by kafkajs.
 
 import { Kafka, logLevel } from "kafkajs";
+import { kafkaClientConfig } from "@ride-app/shared-utils";
 import { ZodError } from "zod";
 import type { Logger } from "@ride-app/shared-utils";
 import { auditEvent, type AuditStore } from "../store.js";
 
 export function createConsumer(opts: { brokers: string[]; store: AuditStore; logger: Logger; createTopics: boolean }) {
-  const kafka = new Kafka({ clientId: "audit-service", brokers: opts.brokers, logLevel: logLevel.WARN });
+  const kafka = new Kafka(kafkaClientConfig({ clientId: "audit-service", brokers: opts.brokers, logLevel: logLevel.WARN }));
   const consumer = kafka.consumer({ groupId: "audit-service" });
 
   /** One message (also used by the tests). */

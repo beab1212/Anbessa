@@ -73,7 +73,7 @@ Every route of support-service, from `src/http/routes.ts` and `src/app.ts`. Publ
 | `GET /api/support/lost-items` | staff `lost_item:manage` | `cityId, status, tripId, cursor, limit` | `{ lostItems, next }` | |
 | `GET /api/support/lost-items/:id` | rider, driver, fleet, staff | | `{ lostItem, messages }` | |
 | `POST /api/support/lost-items/:id/respond` | driver, fleet, staff | `{ found, note? }` | `{ lostItem }` | → FOUND / NOT_FOUND; the rider gets 403 |
-| `POST /api/support/lost-items/:id/status` | staff (any allowed move); rider (RETURNED only) | `{ status: FOUND\|NOT_FOUND\|RETURNED\|CLOSED, note? }` | `{ lostItem }` | RETURNED → `lost_item.returned`; RETURNED / CLOSED resolve the ticket |
+| `POST /api/support/lost-items/:id/status` | staff (any allowed move); rider (RETURNED only) | `{ status: FOUND\|NOT_FOUND\|RETURNED\|CLOSED, note?, share? }` | `{ lostItem }` | RETURNED → `lost_item.returned`; RETURNED / CLOSED resolve the ticket. A staff `note` is an internal message (staff only, `internal: true`) unless `share: true`; only a shared note becomes the ticket's resolution note. A staff note never replaces the driver's `driverNote` (also for staff answering through `/respond`). Messages carry `internal`; non-staff readers never get internal ones |
 | `POST /api/support/lost-items/:id/messages` | any viewer | `{ body }` | `201 { message }` | `409 lost_item_closed` |
 
 ## SOS

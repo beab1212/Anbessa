@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { nodeEnvSchema } from "@ride-app/shared-config";
 
 const csv = z
   .string()
@@ -10,7 +11,7 @@ const hexKey = (bytes: number) =>
 
 export const envSchema = z
   .object({
-    NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+    NODE_ENV: nodeEnvSchema, // required: no silent development default
     PORT: z.coerce.number().default(3006),
     LOG_LEVEL: z.string().optional(),
     DATABASE_URL: z.string().url(),
@@ -59,6 +60,9 @@ export const envSchema = z
     // Campaigns (workflow 15): recipients per second across all campaigns, and the quiet hours
     // ("21-8" = nothing sent from 21:00 to 08:00 Addis Ababa time; "0-0" = none)
     CAMPAIGN_SEND_PER_SECOND: z.coerce.number().int().min(1).max(1000).default(20),
+    // A campaign reaching more people than this needs a second staff member's approval
+    // (maker-checker) before it is sent; 0 = every campaign needs one.
+    CAMPAIGN_APPROVAL_THRESHOLD: z.coerce.number().int().min(0).default(1000),
     CAMPAIGN_QUIET_HOURS: z
       .string()
       .regex(/^\d{1,2}-\d{1,2}$/, "from-to in whole hours, e.g. 21-8")

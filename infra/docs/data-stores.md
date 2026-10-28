@@ -119,6 +119,55 @@ declared in Terraform. Client: `kafkajs@2.2.4`, patched (`patches/kafkajs@2.2.4.
 | location-service | `driver.connection_lost` |
 | realtime-gateway | `driver.location` |
 
+### Kafka security (TLS, SASL, ACLs)
+
+Every service builds its kafkajs client with `kafkaClientConfig()` from `@ride-app/shared-utils`
+(`libs/shared-utils/src/kafka.ts`), which reads:
+
+| Variable | Values | Notes |
+|----------|--------|-------|
+| `KAFKA_SSL` | `on` / `off` (default `off`) | TLS to the brokers |
+| `KAFKA_SSL_CA` | path to a PEM bundle | optional; implies `KAFKA_SSL=on` (private CA) |
+| `KAFKA_SASL_MECHANISM` | `plain`, `scram-sha-256`, `scram-sha-512` | unset = no SASL. Use SCRAM-SHA-512 on MSK |
+| `KAFKA_SASL_USERNAME` / `KAFKA_SASL_PASSWORD` | the service's own principal | password from the secrets manager, never in a ConfigMap |
+
+With `NODE_ENV=production` both TLS and SASL are **required**: the outbox relay / consumer throws at
+start ("Kafka in production needs TLS and SASL") instead of connecting in plaintext. Half-set SASL
+(a username without a mechanism, a mechanism without a password) fails in every environment.
+
+**One principal per service**, named after the service (`trip-service`, `payment-service`, …), so a
+leaked password lets an attacker forge only that service's events, and audit trails show who
+produced what. MSK: one SCRAM secret per service in Secrets Manager (`AmazonMSK_<service>`),
+associated with the cluster; MSK listens for SASL/SCRAM on TLS port 9096. Turn on
+`allow.everyone.if.no.acl.found=false` so a topic without ACLs is closed.
+
+Topic ACLs (prefixed resource patterns). Only the owner may **write** a family; consumers get
+**read** on what they consume plus their consumer group:
+
+| Principal | Write (produce) | Read (consume) + group |
+|-----------|-----------------|------------------------|
+| auth-service | `user.*`, `role.*`, `org.*`, `audit.recorded` | — |
+| trip-service | `trip.*` (except `trip.settled`), `corporate.*`, `audit.recorded` | `driver.location`, `incident.opened`; group `trip-service` |
+| fleet-service | `driver.*` (except `driver.location`, `driver.connection_lost`), `vehicle.*`, `document.*`, `audit.recorded` | `driver.connection_lost`; group `fleet-service` |
+| payment-service | `balance.*`, `payment.*`, `payout.*`, `payout_method.*`, `refund.*`, `invoice.*`, `incentive.*`, `trip.settled`, `audit.recorded` | `trip.cancelled`, `trip.completed`; group `payment-service` |
+| pricing-service | `pricing.*`, `promo.*`, `audit.recorded` | `trip.cancelled`, `trip.completed`; group `pricing-service` |
+| platform-service | `platform.*`, `audit.recorded` | Describe on groups (consumer-lag page) |
+| support-service | `ticket.*`, `lost_item.*`, `sos.*`, `incident.*`, `audit.recorded` | `refund.succeeded`, `refund.failed`; group `support-service` |
+| location-service | `driver.connection_lost` | `driver.online`, `driver.offline`, `driver.connection_lost`, `trip.matched`, `trip.reassigned`, `trip.completed`, `trip.cancelled`, `balance.state_changed`; group `location-service` |
+| realtime-gateway | `driver.location` | — |
+| notification-service | `audit.recorded` | the event-notification topics (`trip.*`, `payment.*`, `payout.*`, `refund.succeeded`, `balance.*`, `sos.*`, `role.granted`, `org.member_invited`, `driver.online`); group `notification-service` |
+| audit-service | — | `audit.recorded`; group `audit-service` |
+
+`audit.recorded` is written by many services; audit-service records the producing `service` field,
+and the ACLs above stop any other principal from writing it. No service gets `Create`, `Alter` or
+`Delete` on topics in production (topics are created up front, see above).
+
+**Development** stays plaintext: the dev Redpanda in `infra/docker/docker-compose.yml` has no
+SASL listener and is bound to `127.0.0.1:9092` only, so leave `KAFKA_SSL=off` and the SASL
+variables unset. To try SASL locally, enable it on Redpanda (`rpk cluster config set
+enable_sasl true`, `rpk security user create <svc> -p <pw> --mechanism SCRAM-SHA-256`) and set
+`KAFKA_SASL_MECHANISM=scram-sha-256` plus the user and password in that service's `.env`.
+
 Full topic list, keys and payloads: [libs/shared-types/docs/event-catalog.md](../../libs/shared-types/docs/event-catalog.md)
 and the events table in [docs/architecture/overview.md](../../docs/architecture/overview.md).
 
