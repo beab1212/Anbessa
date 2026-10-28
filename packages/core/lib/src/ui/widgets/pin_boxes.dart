@@ -37,7 +37,8 @@ class PinBoxes extends StatelessWidget {
       width: size,
       height: size * 1.15,
       textStyle: TextStyle(fontSize: size * 0.45, fontWeight: FontWeight.w700, color: c.text, fontFeatures: AnbessaType.tabular),
-      decoration: BoxDecoration(color: c.surface, borderRadius: BorderRadius.circular(AnbessaRadius.md), border: Border.all(color: c.border)),
+      // the kit's OTP boxes: filled grey, no border; the focused one tinted with an amber border
+      decoration: BoxDecoration(color: c.field, borderRadius: BorderRadius.circular(AnbessaRadius.md), border: Border.all(color: Colors.transparent, width: 1.5)),
     );
     return Pinput(
       length: length,
@@ -54,9 +55,9 @@ class PinBoxes extends StatelessWidget {
       hapticFeedbackType: HapticFeedbackType.lightImpact,
       separatorBuilder: (_) => const SizedBox(width: 8),
       defaultPinTheme: base,
-      focusedPinTheme: base.copyWith(decoration: base.decoration!.copyWith(border: Border.all(color: c.accent, width: 2))),
-      submittedPinTheme: base.copyWith(decoration: base.decoration!.copyWith(color: c.accentSoft, border: Border.all(color: c.accent))),
-      errorPinTheme: base.copyWith(decoration: base.decoration!.copyWith(color: c.dangerSoft, border: Border.all(color: c.danger, width: 2))),
+      focusedPinTheme: base.copyWith(decoration: base.decoration!.copyWith(color: Color.alphaBlend(c.selectedFill, c.page), border: Border.all(color: c.accent, width: 1.5))),
+      submittedPinTheme: base,
+      errorPinTheme: base.copyWith(decoration: base.decoration!.copyWith(color: c.dangerSoft, border: Border.all(color: c.danger, width: 1.5))),
       onCompleted: onCompleted,
     );
   }
@@ -82,7 +83,7 @@ class PinDisplay extends StatelessWidget {
               height: size * 1.15,
               alignment: Alignment.center,
               decoration: BoxDecoration(color: c.accentSoft, borderRadius: BorderRadius.circular(AnbessaRadius.md), border: Border.all(color: c.accent)),
-              child: Text(ch, style: TextStyle(fontSize: size * 0.5, fontWeight: FontWeight.w800, color: c.accentStrong, fontFeatures: AnbessaType.tabular)),
+              child: Text(ch, style: TextStyle(fontSize: size * 0.5, fontWeight: FontWeight.w800, color: c.text, fontFeatures: AnbessaType.tabular)),
             ),
           ],
         ],

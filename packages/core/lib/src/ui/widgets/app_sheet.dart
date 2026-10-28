@@ -116,8 +116,8 @@ class _AppSheetState extends State<AppSheet> {
                 onTap: () => widget.controller?.animateTo(_c.size < (snaps.last + snaps.first) / 2 ? snaps.length - 1 : 0),
                 child: Center(
                   child: Container(
-                    margin: const EdgeInsets.only(top: 10, bottom: 6),
-                    width: 40,
+                    margin: const EdgeInsets.only(top: 10, bottom: 8),
+                    width: 36,
                     height: 4,
                     decoration: BoxDecoration(color: c.borderStrong, borderRadius: BorderRadius.circular(2)),
                   ),

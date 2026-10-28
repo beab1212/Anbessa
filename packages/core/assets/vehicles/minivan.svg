@@ -1,18 +1,17 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 64" width="160" height="64">
-  <!-- Anbessa minivan: a tall people carrier, side view facing right. Authored for this project. -->
-  <ellipse cx="80" cy="59" rx="72" ry="3.5" fill="#000000" fill-opacity="0.12"/>
-  <path d="M8 48 L8 15 Q8 7 16 7 L106 7 Q112 7 116 12 L130 26 L146 29 Q152 31 152 38 L152 48 Z" fill="#D5D9DE"/>
-  <rect x="8" y="40" width="144" height="8" fill="#BAC0C7"/>
-  <rect x="14" y="12" width="26" height="14" rx="3" fill="#3A434D"/>
-  <rect x="44" y="12" width="30" height="14" rx="3" fill="#3A434D"/>
-  <path d="M78 12 L105 12 Q109 12 112 15 L122 26 L78 26 Z" fill="#3A434D"/>
-  <path d="M76 27 L76 44" stroke="#BAC0C7" stroke-width="1.5"/>
-  <path d="M42 27 L42 44" stroke="#BAC0C7" stroke-width="1.5"/>
-  <rect x="64" y="30" width="8" height="2" rx="1" fill="#BAC0C7"/>
-  <rect x="145" y="32" width="7" height="4" rx="2" fill="#FFC53D"/>
-  <rect x="8" y="26" width="4" height="9" rx="1.5" fill="#E5484D"/>
-  <circle cx="36" cy="48" r="11" fill="#23272C"/>
-  <circle cx="36" cy="48" r="5" fill="#A3AAB2"/>
-  <circle cx="126" cy="48" r="11" fill="#23272C"/>
-  <circle cx="126" cy="48" r="5" fill="#A3AAB2"/>
+  <!-- Anbessa minivan: a tall flat amber van, side view facing right. Authored for this project. -->
+  <ellipse cx="80" cy="60" rx="64" ry="3" fill="#000000" fill-opacity="0.10"/>
+  <path d="M18 52 L18 12 Q18 5 25 5 L104 5 Q110 5 114 10 L130 26 Q142 29 142 39 L142 52 Z" fill="#FFB300"/>
+  <path d="M18 44 L142 44 L142 49 Q142 52 139 52 L21 52 Q18 52 18 49 Z" fill="#E59E00"/>
+  <rect x="24" y="11" width="22" height="16" rx="3" fill="#FFFFFF"/>
+  <rect x="51" y="11" width="22" height="16" rx="3" fill="#FFFFFF"/>
+  <path d="M78 11 L102 11 Q105 11 107 13 L120 27 L78 27 Z" fill="#FFFFFF"/>
+  <path d="M75 8 L75 44" stroke="#E59E00" stroke-width="1.5"/>
+  <rect x="82" y="32" width="8" height="2.5" rx="1.25" fill="#E59E00"/>
+  <rect x="134" y="32" width="8" height="5" rx="2.5" fill="#FFF4D6"/>
+  <rect x="18" y="31" width="4" height="8" rx="2" fill="#E5343F"/>
+  <circle cx="44" cy="51" r="10" fill="#2B2F36"/>
+  <circle cx="44" cy="51" r="4.5" fill="#E6E3DC"/>
+  <circle cx="118" cy="51" r="10" fill="#2B2F36"/>
+  <circle cx="118" cy="51" r="4.5" fill="#E6E3DC"/>
 </svg>

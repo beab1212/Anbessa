@@ -54,13 +54,14 @@ class AnbessaColors extends ThemeExtension<AnbessaColors> {
   final Color info;
   final Color infoSoft;
 
-  // Warm paper, near-black ink, one amber (the reference design: client-discovery's admin).
+  // GoRide's light neutrals mapped onto ours: white pages and sheets (surface), barely-grey filled
+  // fields (surface2), a warm F5F5F5 for grouped pages (canvas), #EEE-like hairlines (border).
   static const light = AnbessaColors(
     canvas: Color(0xFFF6F5F1),
     surface: Color(0xFFFFFFFF),
-    surface2: Color(0xFFFBFAF7),
-    border: Color(0xFFD9D6CF),
-    borderStrong: Color(0xFFBDB8AE),
+    surface2: Color(0xFFFAF9F6),
+    border: Color(0xFFEEECE7),
+    borderStrong: Color(0xFFD9D6CF),
     text: Color(0xFF17191D),
     text2: Color(0xFF3B4048),
     muted: Color(0xFF5C636D),
@@ -91,6 +92,38 @@ class AnbessaColors extends ThemeExtension<AnbessaColors> {
 
   /// The text colour that reads on [accent] (amber): always ink.
   Color get onAmber => const Color(0xFF17191D);
+
+  // GoRide roles. Screens use these names; they resolve to the palette per brightness.
+
+  /// A screen's background, its sheets and the bottom bar: white / charcoal.
+  Color get page => surface;
+
+  /// A grouped page behind white cards (Account, Payment methods): warm F5F5F5 / the page.
+  Color get groupedPage => isDark ? surface : canvas;
+
+  /// A filled text field, a segmented tab track, an OTP box.
+  Color get field => surface2;
+
+  /// A card: white on light pages (with a hairline), a lifted grey on dark ones.
+  Color get cardFill => isDark ? surface2 : surface;
+
+  /// The hairline around a card (invisible in dark mode, where the fill separates it).
+  Color get cardBorder => isDark ? surface2 : border;
+
+  /// A neutral filled button (dark mode "Skip", "Call", "Cancel").
+  Color get neutralFill => isDark ? border : canvas;
+
+  /// Amber that reads as text: dark amber on light surfaces (5.7:1 on white), amber on dark.
+  Color get accentText => isDark ? accent : const Color(0xFF8F5B00);
+
+  /// The tinted fill of a selected card (with an [accent] border).
+  Color get selectedFill => isDark ? const Color(0x1FFFB300) : const Color(0xFFFFF8E5);
+
+  /// The pale amber of a tonal pill button ("Skip", "Sign in", "Use Later") in light mode.
+  Color get tonalFill => isDark ? neutralFill : accentSoft;
+
+  /// The label on [tonalFill].
+  Color get onTonal => isDark ? text : accentText;
 
   @override
   AnbessaColors copyWith({
@@ -177,11 +210,14 @@ const anbessaRadiusSm = AnbessaRadius.sm;
 const anbessaRadius = AnbessaRadius.md;
 const anbessaRadiusLg = AnbessaRadius.lg;
 
-/// Ids and money use a monospace fallback; the app bundles the body font (Inter) and Noto Sans
-/// Ethiopic for Amharic.
+/// The body font: Urbanist (OFL), bundled in this package (`assets/fonts`). The app bundles Noto
+/// Sans Ethiopic for Amharic, the fallback.
+const anbessaFontFamily = 'packages/ride_app_core/Urbanist';
+
+/// Ids and money use a monospace fallback.
 const monoFamilyFallback = ['JetBrains Mono', 'Roboto Mono', 'DejaVu Sans Mono', 'Menlo', 'monospace'];
 
-ThemeData anbessaTheme({Brightness brightness = Brightness.light, String? fontFamily = 'Inter', List<String> fontFamilyFallback = const ['NotoSansEthiopic']}) {
+ThemeData anbessaTheme({Brightness brightness = Brightness.light, String? fontFamily = anbessaFontFamily, List<String> fontFamilyFallback = const ['NotoSansEthiopic']}) {
   final dark = brightness == Brightness.dark;
   final c = dark ? AnbessaColors.dark : AnbessaColors.light;
   final scheme = ColorScheme.fromSeed(seedColor: c.accent, brightness: brightness).copyWith(
@@ -190,10 +226,13 @@ ThemeData anbessaTheme({Brightness brightness = Brightness.light, String? fontFa
     primaryContainer: c.accentSoft,
     onPrimaryContainer: c.text,
     secondary: c.text2,
-    surface: c.surface,
+    surface: c.page,
     onSurface: c.text,
     onSurfaceVariant: c.text2,
-    surfaceContainerHighest: c.surface2,
+    surfaceContainerHighest: c.field,
+    surfaceContainerHigh: c.field,
+    surfaceContainer: c.cardFill,
+    surfaceContainerLow: c.page,
     outline: c.borderStrong,
     outlineVariant: c.border,
     error: c.danger,
@@ -202,29 +241,34 @@ ThemeData anbessaTheme({Brightness brightness = Brightness.light, String? fontFa
     onErrorContainer: c.danger,
   );
   final base = ThemeData(useMaterial3: true, colorScheme: scheme, brightness: brightness, fontFamily: fontFamily);
-  TextStyle t(TextStyle s) => s.copyWith(color: c.text, fontFamily: fontFamily, fontFamilyFallback: fontFamilyFallback);
+  TextStyle f(TextStyle s) => s.copyWith(fontFamily: fontFamily, fontFamilyFallback: fontFamilyFallback);
+  TextStyle t(TextStyle s) => f(s).copyWith(color: c.text);
   final text = base.textTheme
       .copyWith(
-        displayLarge: t(AnbessaType.display),
-        displayMedium: t(AnbessaType.display.copyWith(fontSize: 28)),
-        headlineLarge: t(AnbessaType.h1),
-        headlineMedium: t(AnbessaType.h1.copyWith(fontSize: 22)),
+        displayLarge: t(AnbessaType.display.copyWith(fontSize: 32)),
+        displayMedium: t(AnbessaType.display),
+        displaySmall: t(AnbessaType.h1),
+        headlineLarge: t(AnbessaType.display),
+        headlineMedium: t(AnbessaType.h1),
         headlineSmall: t(AnbessaType.h2),
         titleLarge: t(AnbessaType.h2),
         titleMedium: t(AnbessaType.title),
-        titleSmall: t(AnbessaType.body2.copyWith(fontWeight: FontWeight.w600)),
+        titleSmall: t(AnbessaType.body2.copyWith(fontWeight: FontWeight.w700)),
         bodyLarge: t(AnbessaType.body),
         bodyMedium: t(AnbessaType.body2),
         bodySmall: t(AnbessaType.caption.copyWith(color: c.muted)),
-        labelLarge: t(AnbessaType.body2.copyWith(fontWeight: FontWeight.w600)),
+        labelLarge: t(AnbessaType.button),
         labelMedium: t(AnbessaType.label),
         labelSmall: t(AnbessaType.label.copyWith(fontSize: 11)),
       )
       .apply(fontFamily: fontFamily, fontFamilyFallback: fontFamilyFallback);
   final radius = BorderRadius.circular(AnbessaRadius.md);
+  const pill = StadiumBorder();
+  OutlineInputBorder field(Color? color) =>
+      OutlineInputBorder(borderRadius: radius, borderSide: color == null ? BorderSide.none : BorderSide(color: color, width: 1.5));
   return base.copyWith(
-    scaffoldBackgroundColor: c.canvas,
-    canvasColor: c.canvas,
+    scaffoldBackgroundColor: c.page,
+    canvasColor: c.page,
     textTheme: text,
     extensions: [c],
     splashFactory: InkRipple.splashFactory,
@@ -235,127 +279,182 @@ ThemeData anbessaTheme({Brightness brightness = Brightness.light, String? fontFa
       TargetPlatform.macOS: FadeForwardsPageTransitionsBuilder(),
       TargetPlatform.windows: FadeForwardsPageTransitionsBuilder(),
     }),
+    // back arrow + bold title, centred (the kit's default); see AppTopBar
     appBarTheme: AppBarTheme(
-      backgroundColor: c.canvas,
+      backgroundColor: c.page,
       foregroundColor: c.text,
       elevation: 0,
       scrolledUnderElevation: 0,
-      centerTitle: false,
+      surfaceTintColor: Colors.transparent,
+      centerTitle: true,
+      toolbarHeight: AnbessaSize.topBar,
       titleTextStyle: text.titleLarge,
-      iconTheme: IconThemeData(color: c.text),
+      iconTheme: IconThemeData(color: c.text, size: 24),
+      actionsIconTheme: IconThemeData(color: c.text, size: 24),
     ),
     cardTheme: CardThemeData(
-      color: c.surface,
+      color: c.cardFill,
       elevation: 0,
       margin: EdgeInsets.zero,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AnbessaRadius.lg), side: BorderSide(color: c.border)),
+      shape: RoundedRectangleBorder(borderRadius: radius, side: BorderSide(color: c.cardBorder)),
       clipBehavior: Clip.antiAlias,
     ),
-    // primary: amber-filled with ink text, 56 tall, rounded, bold label (an optional leading icon)
+    // primary: an amber pill, 56 tall, ink bold label (see PillButton)
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
         backgroundColor: c.primaryFill,
         foregroundColor: c.onAccent,
-        disabledBackgroundColor: c.isDark ? c.surface2 : c.border,
+        disabledBackgroundColor: dark ? c.surface2 : c.border,
         disabledForegroundColor: c.muted,
-        minimumSize: const Size(48, 56),
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        shape: RoundedRectangleBorder(borderRadius: radius),
+        minimumSize: const Size(48, AnbessaSize.button),
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+        shape: pill,
         elevation: 0,
-        textStyle: AnbessaType.body.copyWith(fontSize: 17, fontWeight: FontWeight.w600, fontFamily: fontFamily, fontFamilyFallback: fontFamilyFallback),
+        textStyle: f(AnbessaType.button),
       ),
     ),
-    // secondary: ink words with a 2 px outline on the surface
+    // secondary: an outlined pill with ink words ("Continue with Google")
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
         foregroundColor: c.text,
-        backgroundColor: c.surface,
-        minimumSize: const Size(48, 56),
-        side: BorderSide(color: c.border, width: 2),
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        shape: RoundedRectangleBorder(borderRadius: radius),
-        textStyle: AnbessaType.body.copyWith(fontSize: 17, fontWeight: FontWeight.w600, fontFamily: fontFamily, fontFamilyFallback: fontFamilyFallback),
+        backgroundColor: Colors.transparent,
+        minimumSize: const Size(48, AnbessaSize.button),
+        side: BorderSide(color: c.border, width: 1.5),
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+        shape: pill,
+        textStyle: f(AnbessaType.button),
       ),
     ),
+    // links: amber words ("Hide details", "Enter custom amount", "Sign in")
     textButtonTheme: TextButtonThemeData(
       style: TextButton.styleFrom(
-        foregroundColor: c.text,
+        foregroundColor: c.accentText,
         minimumSize: const Size(48, 44),
-        shape: RoundedRectangleBorder(borderRadius: radius),
-        textStyle: AnbessaType.body2.copyWith(fontWeight: FontWeight.w600, fontFamily: fontFamily, fontFamilyFallback: fontFamilyFallback),
+        shape: pill,
+        textStyle: f(AnbessaType.body.copyWith(fontWeight: FontWeight.w600)),
       ),
     ),
     iconButtonTheme: IconButtonThemeData(style: IconButton.styleFrom(foregroundColor: c.text, minimumSize: const Size(48, 48))),
+    // filled grey, no border, radius 12; amber border when focused
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      fillColor: c.surface,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
-      // 2 px borders; ink when focused
-      border: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: c.border, width: 2)),
-      enabledBorder: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: c.border, width: 2)),
-      focusedBorder: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: c.text, width: 2)),
-      errorBorder: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: c.danger, width: 2)),
-      focusedErrorBorder: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: c.danger, width: 2)),
-      labelStyle: TextStyle(color: c.text2, fontWeight: FontWeight.w500),
-      floatingLabelStyle: TextStyle(color: c.text, fontWeight: FontWeight.w600),
-      hintStyle: TextStyle(color: c.faint),
-      prefixIconColor: c.muted,
-      suffixIconColor: c.muted,
+      fillColor: c.field,
+      isDense: false,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+      border: field(null),
+      enabledBorder: field(null),
+      disabledBorder: field(null),
+      focusedBorder: field(c.accent),
+      errorBorder: field(c.danger),
+      focusedErrorBorder: field(c.danger),
+      labelStyle: f(AnbessaType.body).copyWith(color: c.muted),
+      floatingLabelStyle: f(AnbessaType.body2).copyWith(color: c.text, fontWeight: FontWeight.w600),
+      hintStyle: f(AnbessaType.body).copyWith(color: c.faint, fontWeight: FontWeight.w400),
+      errorStyle: f(AnbessaType.caption).copyWith(color: c.danger),
+      prefixIconColor: c.text2,
+      suffixIconColor: c.text2,
+      prefixIconConstraints: const BoxConstraints(minWidth: 48, minHeight: 24),
     ),
     bottomSheetTheme: BottomSheetThemeData(
-      backgroundColor: c.surface,
+      backgroundColor: c.page,
       surfaceTintColor: Colors.transparent,
-      modalBackgroundColor: c.surface,
+      modalBackgroundColor: c.page,
       showDragHandle: true,
       dragHandleColor: c.borderStrong,
+      dragHandleSize: const Size(36, 4),
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(AnbessaRadius.sheet))),
     ),
     dialogTheme: DialogThemeData(
-      backgroundColor: c.surface,
+      backgroundColor: c.page,
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AnbessaRadius.xl)),
       titleTextStyle: text.titleLarge,
       contentTextStyle: text.bodyMedium?.copyWith(color: c.text2),
     ),
+    // four items, label under the icon; the selected one amber (the shell gives it the filled icon)
     navigationBarTheme: NavigationBarThemeData(
-      backgroundColor: c.surface,
-      // no pill: the selected tab is ink, the others muted; a hairline above (see the shells)
+      backgroundColor: c.page,
       indicatorColor: Colors.transparent,
       surfaceTintColor: Colors.transparent,
-      height: 64,
+      height: AnbessaSize.navBar,
       elevation: 0,
-      labelTextStyle: WidgetStateProperty.resolveWith((s) => AnbessaType.label.copyWith(color: s.contains(WidgetState.selected) ? c.text : c.muted, fontWeight: s.contains(WidgetState.selected) ? FontWeight.w700 : FontWeight.w500, fontFamily: fontFamily, fontFamilyFallback: fontFamilyFallback)),
-      iconTheme: WidgetStateProperty.resolveWith((s) => IconThemeData(color: s.contains(WidgetState.selected) ? c.text : c.muted, size: 24)),
+      labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+      labelTextStyle: WidgetStateProperty.resolveWith((s) => f(AnbessaType.label).copyWith(
+            fontSize: 11,
+            color: s.contains(WidgetState.selected) ? c.accentText : c.muted,
+            fontWeight: s.contains(WidgetState.selected) ? FontWeight.w700 : FontWeight.w500,
+          )),
+      iconTheme: WidgetStateProperty.resolveWith((s) => IconThemeData(color: s.contains(WidgetState.selected) ? c.accent : c.muted, size: 24)),
+    ),
+    bottomNavigationBarTheme: BottomNavigationBarThemeData(
+      backgroundColor: c.page,
+      elevation: 0,
+      type: BottomNavigationBarType.fixed,
+      selectedItemColor: c.accentText,
+      unselectedItemColor: c.muted,
+      selectedIconTheme: IconThemeData(color: c.accent, size: 24),
+      unselectedIconTheme: IconThemeData(color: c.muted, size: 24),
+      selectedLabelStyle: f(AnbessaType.label).copyWith(fontSize: 11, fontWeight: FontWeight.w700),
+      unselectedLabelStyle: f(AnbessaType.label).copyWith(fontSize: 11, fontWeight: FontWeight.w500),
     ),
     dividerTheme: DividerThemeData(color: c.border, thickness: 1, space: 1),
+    // outlined pills; selected ones amber-filled (Activity filters, tip amounts)
     chipTheme: ChipThemeData(
-      backgroundColor: c.surface,
-      selectedColor: c.text,
-      secondarySelectedColor: c.text,
-      side: BorderSide(color: c.border, width: 1.5),
-      labelStyle: TextStyle(color: c.text, fontWeight: FontWeight.w600, fontFamily: fontFamily, fontFamilyFallback: fontFamilyFallback),
-      secondaryLabelStyle: TextStyle(color: c.canvas, fontWeight: FontWeight.w600, fontFamily: fontFamily, fontFamilyFallback: fontFamilyFallback),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AnbessaRadius.sm)),
+      backgroundColor: c.page,
+      selectedColor: c.accent,
+      secondarySelectedColor: c.accent,
+      disabledColor: c.field,
+      side: WidgetStateBorderSide.resolveWith((s) => BorderSide(color: s.contains(WidgetState.selected) ? c.accent : c.border, width: 1.5)),
+      labelStyle: f(AnbessaType.body2).copyWith(color: c.text, fontWeight: FontWeight.w600),
+      secondaryLabelStyle: f(AnbessaType.body2).copyWith(color: c.onAccent, fontWeight: FontWeight.w600),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      shape: pill,
       showCheckmark: false,
+      iconTheme: IconThemeData(color: c.text2, size: 18),
     ),
+    // white card with a shadow (dark: lifted grey), ink words, an amber action ("Undo")
     snackBarTheme: SnackBarThemeData(
-      backgroundColor: dark ? c.surface2 : c.text,
-      contentTextStyle: TextStyle(color: dark ? c.text : Colors.white, fontFamily: fontFamily, fontFamilyFallback: fontFamilyFallback),
+      backgroundColor: dark ? c.surface2 : c.surface,
+      contentTextStyle: f(AnbessaType.body).copyWith(color: c.text),
+      actionTextColor: c.accentText,
       behavior: SnackBarBehavior.floating,
+      elevation: 6,
       shape: RoundedRectangleBorder(borderRadius: radius),
+      insetPadding: const EdgeInsets.fromLTRB(AnbessaSpace.page, 0, AnbessaSpace.page, 12),
     ),
-    listTileTheme: ListTileThemeData(iconColor: c.text2, textColor: c.text, minVerticalPadding: 12),
-    progressIndicatorTheme: ProgressIndicatorThemeData(color: c.text, linearTrackColor: c.border, circularTrackColor: c.border),
+    listTileTheme: ListTileThemeData(
+      iconColor: c.text,
+      textColor: c.text,
+      minVerticalPadding: 12,
+      titleTextStyle: f(AnbessaType.body).copyWith(color: c.text, fontWeight: FontWeight.w600),
+      subtitleTextStyle: f(AnbessaType.caption).copyWith(color: c.muted),
+    ),
+    progressIndicatorTheme: ProgressIndicatorThemeData(color: c.accent, linearTrackColor: c.border, circularTrackColor: c.border),
+    // iOS-like: amber track with a white thumb when on, grey track when off, no outline
     switchTheme: SwitchThemeData(
-      thumbColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? Colors.white : c.surface),
-      trackColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? c.primaryFill : c.borderStrong),
+      thumbColor: const WidgetStatePropertyAll(Colors.white),
+      trackColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? c.primaryFill : (dark ? c.border : c.borderStrong)),
       trackOutlineColor: const WidgetStatePropertyAll(Colors.transparent),
+      thumbIcon: const WidgetStatePropertyAll(null),
     ),
-    radioTheme: RadioThemeData(fillColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? c.text : c.borderStrong)),
-    checkboxTheme: CheckboxThemeData(fillColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? c.primaryFill : Colors.transparent), checkColor: WidgetStatePropertyAll(c.onAccent)),
-    sliderTheme: SliderThemeData(activeTrackColor: c.text, thumbColor: c.text, inactiveTrackColor: c.border),
-    tabBarTheme: TabBarThemeData(labelColor: c.text, unselectedLabelColor: c.muted, indicatorColor: c.text, dividerColor: c.border),
+    radioTheme: RadioThemeData(fillColor: WidgetStatePropertyAll(c.accent)),
+    // amber outline when empty, amber with an ink tick when checked; rounded 6
+    checkboxTheme: CheckboxThemeData(
+      fillColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? c.primaryFill : Colors.transparent),
+      checkColor: WidgetStatePropertyAll(c.onAccent),
+      side: BorderSide(color: c.accent, width: 2),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+    ),
+    sliderTheme: SliderThemeData(activeTrackColor: c.accent, thumbColor: c.accent, inactiveTrackColor: c.border),
+    tabBarTheme: TabBarThemeData(labelColor: c.text, unselectedLabelColor: c.muted, indicatorColor: c.accent, dividerColor: c.border, labelStyle: f(AnbessaType.body).copyWith(fontWeight: FontWeight.w700), unselectedLabelStyle: f(AnbessaType.body)),
     badgeTheme: BadgeThemeData(backgroundColor: c.danger, textColor: Colors.white),
+    popupMenuTheme: PopupMenuThemeData(
+      color: dark ? c.surface2 : c.surface,
+      surfaceTintColor: Colors.transparent,
+      elevation: 8,
+      shape: RoundedRectangleBorder(borderRadius: radius),
+      textStyle: f(AnbessaType.body).copyWith(color: c.text),
+    ),
     tooltipTheme: TooltipThemeData(decoration: BoxDecoration(color: c.text, borderRadius: BorderRadius.circular(AnbessaRadius.sm)), textStyle: TextStyle(color: c.canvas)),
   );
 }

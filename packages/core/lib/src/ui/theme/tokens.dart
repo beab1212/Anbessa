@@ -11,20 +11,44 @@ abstract final class AnbessaSpace {
   static const xl = 20.0;
   static const xxl = 24.0;
   static const xxxl = 32.0;
+
+  /// the side gutter of a screen (the kit's 24 pt at 430 wide, scaled to phones)
+  static const page = 20.0;
+}
+
+/// Control sizes from the GoRide kit, scaled to 360–412 dp phones.
+abstract final class AnbessaSize {
+  /// a full pill button (Continue, Sign in, Cancel Ride)
+  static const button = 56.0;
+  /// a small pill (Redeem, Top Up, Undo)
+  static const buttonCompact = 40.0;
+  /// a filled text field
+  static const field = 56.0;
+  /// the circle-outlined leading icon of a list row
+  static const rowIcon = 48.0;
+  /// a segmented tab bar (Recent | Suggested)
+  static const segmented = 44.0;
+  /// an outlined chip (Home, Office)
+  static const chip = 40.0;
+  /// the top app bar
+  static const topBar = 64.0;
+  /// the bottom navigation bar (without the system inset)
+  static const navBar = 68.0;
 }
 
 abstract final class AnbessaRadius {
-  /// chips, badges, small boxes
-  static const sm = 10.0;
-  /// buttons, inputs, list cards
-  static const md = 16.0;
-  /// cards, tiles, the search bar
-  static const lg = 20.0;
+  /// segmented tabs, badges, small boxes
+  static const sm = 8.0;
+  /// inputs, list cards, ride-class tiles, the route card over the map
+  static const md = 12.0;
+  /// big cards (profile header, top-up amount)
+  static const lg = 16.0;
   /// dialogs
   static const xl = 24.0;
-  /// bottom sheets and the floating cards over the map
+  /// bottom sheets (top corners)
   static const sheet = 28.0;
-  static const pill = 999.0;
+  /// buttons and chips: fully rounded
+  static const pill = 100.0;
 }
 
 abstract final class AnbessaMotion {
@@ -108,15 +132,26 @@ abstract final class AnbessaElevation {
       : const [BoxShadow(color: Color(0x1F17191D), blurRadius: 28, offset: Offset(0, -6))];
 }
 
-/// The type scale. Money and ids add tabular figures on top.
+/// The type scale (Urbanist; the GoRide kit's sizes at 430 pt scaled ×0.89 to phones). Money and
+/// ids add tabular figures on top.
 abstract final class AnbessaType {
-  static const display = TextStyle(fontSize: 30, fontWeight: FontWeight.w800, height: 1.2, letterSpacing: -0.6);
-  static const h1 = TextStyle(fontSize: 24, fontWeight: FontWeight.w700, height: 1.25, letterSpacing: -0.4);
-  static const h2 = TextStyle(fontSize: 20, fontWeight: FontWeight.w700, height: 1.3, letterSpacing: -0.2);
-  static const title = TextStyle(fontSize: 17, fontWeight: FontWeight.w600, height: 1.35);
-  static const body = TextStyle(fontSize: 16, fontWeight: FontWeight.w400, height: 1.5);
-  static const body2 = TextStyle(fontSize: 14, fontWeight: FontWeight.w400, height: 1.45);
+  /// hero headlines: "Welcome Back!", onboarding titles
+  static const display = TextStyle(fontSize: 28, fontWeight: FontWeight.w700, height: 1.25);
+  /// sheet and result headlines: "Driver is heading to your location…", "You have arrived!"
+  static const h1 = TextStyle(fontSize: 24, fontWeight: FontWeight.w700, height: 1.3);
+  /// app bar titles, dialog titles, section heads ("Where to?")
+  static const h2 = TextStyle(fontSize: 20, fontWeight: FontWeight.w700, height: 1.3);
+  /// list and card titles ("GoRide Car", "Theo Holland")
+  static const title = TextStyle(fontSize: 16, fontWeight: FontWeight.w700, height: 1.35);
+  /// body text, field values, button labels (bold)
+  static const body = TextStyle(fontSize: 16, fontWeight: FontWeight.w500, height: 1.45);
+  /// key–value rows, secondary text
+  static const body2 = TextStyle(fontSize: 14, fontWeight: FontWeight.w500, height: 1.45);
+  /// small bold labels (nav labels, badges)
   static const label = TextStyle(fontSize: 12, fontWeight: FontWeight.w600, height: 1.25);
-  static const caption = TextStyle(fontSize: 12.5, fontWeight: FontWeight.w400, height: 1.4);
+  /// grey subtitles and captions
+  static const caption = TextStyle(fontSize: 13, fontWeight: FontWeight.w400, height: 1.4);
+  /// button labels
+  static const button = TextStyle(fontSize: 16, fontWeight: FontWeight.w700, height: 1.2);
   static const tabular = [FontFeature.tabularFigures()];
 }

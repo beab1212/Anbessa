@@ -42,8 +42,32 @@ void main() {
       expect(t.colorScheme.primary, c.accent);
     }
     expect(AnbessaRadius.sheet, 28);
+    expect(AnbessaRadius.md, 12);
+    expect(AnbessaSize.button, 56);
     expect(AnbessaElevation.card(Brightness.light), isEmpty);
     expect(AnbessaElevation.floating(Brightness.dark), isNotEmpty);
+  });
+
+  test('GoRide roles: white pages, filled fields, readable amber text, pill buttons', () {
+    final l = AnbessaColors.light, d = AnbessaColors.dark;
+    expect(l.page, const Color(0xFFFFFFFF));
+    expect(l.field, isNot(l.page));
+    expect(d.field, isNot(d.page));
+    for (final c in [l, d]) {
+      expect(contrast(c.accentText, c.page), greaterThanOrEqualTo(4.5), reason: 'amber text on the page');
+      expect(contrast(c.onTonal, c.tonalFill), greaterThanOrEqualTo(4.5), reason: 'tonal label');
+      expect(contrast(c.text, c.neutralFill), greaterThanOrEqualTo(4.5), reason: 'neutral label');
+      expect(contrast(c.text, c.field), greaterThanOrEqualTo(4.5), reason: 'field text');
+      expect(contrast(c.muted, c.field), greaterThanOrEqualTo(3.0), reason: 'hint/subtitle on a field');
+    }
+    for (final b in Brightness.values) {
+      final t = anbessaTheme(brightness: b);
+      final c = t.extension<AnbessaColors>()!;
+      expect(t.scaffoldBackgroundColor, c.page);
+      expect(t.inputDecorationTheme.fillColor, c.field);
+      expect(t.filledButtonTheme.style!.shape!.resolve({}), isA<StadiumBorder>());
+      expect(t.inputDecorationTheme.focusedBorder!.borderSide.color, c.accent);
+    }
   });
 
   test('both themes build with the extension and the font', () {
@@ -51,7 +75,8 @@ void main() {
       final t = anbessaTheme(brightness: b);
       expect(t.brightness, b);
       expect(t.extension<AnbessaColors>()!.brightness, b);
-      expect(t.textTheme.bodyLarge!.fontFamily, 'Inter');
+      expect(t.textTheme.bodyLarge!.fontFamily, anbessaFontFamily);
+      expect(anbessaFontFamily, 'packages/ride_app_core/Urbanist');
       expect(t.textTheme.bodyLarge!.fontFamilyFallback, contains('NotoSansEthiopic'));
     }
   });

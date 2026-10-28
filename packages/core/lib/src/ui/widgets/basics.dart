@@ -6,6 +6,7 @@ import '../../api/app_error.dart';
 import '../../domain/domain.dart';
 import '../theme/anbessa_theme.dart';
 import '../theme/tokens.dart';
+import 'pill_button.dart';
 
 enum Tone { amber, green, red, blue, grey }
 
@@ -257,7 +258,8 @@ class EmptyState extends StatelessWidget {
   }
 }
 
-/// The main action: amber-filled with ink words, an optional leading [icon], a busy spinner.
+/// The main action: an amber pill with ink words, an optional leading [icon], a busy spinner
+/// ([PillButton] with [PillVariant.primary], or [PillVariant.danger] when [danger]).
 class PrimaryButton extends StatelessWidget {
   const PrimaryButton({super.key, required this.label, this.onPressed, this.busy = false, this.icon, this.danger = false, this.trailing});
   final String label;
@@ -269,22 +271,14 @@ class PrimaryButton extends StatelessWidget {
   /// e.g. the price on the right of a request button
   final String? trailing;
   @override
-  Widget build(BuildContext context) {
-    final c = context.colors;
-    return FilledButton(
-      onPressed: busy ? null : onPressed,
-      style: danger ? FilledButton.styleFrom(backgroundColor: c.danger, foregroundColor: Colors.white) : null,
-      child: Row(
-        mainAxisSize: trailing == null ? MainAxisSize.min : MainAxisSize.max,
-        children: [
-          if (busy) ...[SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: danger ? Colors.white : c.onAccent)), const SizedBox(width: 10)]
-          else if (icon != null) ...[Icon(icon, size: 20), const SizedBox(width: 10)],
-          Flexible(child: Text(label, overflow: TextOverflow.ellipsis)),
-          if (trailing != null) ...[const Spacer(), Text(trailing!, style: const TextStyle(fontFeatures: AnbessaType.tabular))],
-        ],
-      ),
-    );
-  }
+  Widget build(BuildContext context) => PillButton(
+        label: label,
+        onPressed: onPressed,
+        busy: busy,
+        icon: icon,
+        trailing: trailing,
+        variant: danger ? PillVariant.danger : PillVariant.primary,
+      );
 }
 
 /// A label/value row for `kv` lists.

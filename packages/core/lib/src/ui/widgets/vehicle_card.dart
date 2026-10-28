@@ -19,8 +19,8 @@ String vehicleArtName(String code) => switch (code.toLowerCase()) {
     };
 
 /// A side-view car drawing for a vehicle class (`assets/vehicles/<class>.svg`, generic when the
-/// class has no art). Light grey body with dark windows; recoloured for dark mode, or the body
-/// painted with [tint].
+/// class has no art): flat amber body, white windows, dark tyres (the GoRide look, our drawing).
+/// [tint] repaints the body (the lower band follows, a little darker).
 class VehicleArt extends StatelessWidget {
   const VehicleArt(this.code, {super.key, this.width = 120, this.height, this.tint});
   final String code;
@@ -56,10 +56,9 @@ class _VehicleColors extends ColorMapper {
   Color substitute(String? id, String elementName, String attributeName, Color color) {
     final v = color.toARGB32() & 0xFFFFFF;
     return switch (v) {
-      0xD5D9DE => tint ?? (dark ? const Color(0xFFC4C9CF) : color), // body
-      0xBAC0C7 => tint != null ? Color.lerp(tint, Colors.black, 0.18)! : (dark ? const Color(0xFF959CA5) : color), // lower band, trim
-      0x3A434D => dark ? const Color(0xFF2A3037) : color, // windows
-      0x23272C => dark ? const Color(0xFF0B0C0E) : color, // tyres
+      0xFFB300 => tint ?? color, // body
+      0xE59E00 => tint != null ? Color.lerp(tint, Colors.black, 0.12)! : color, // lower band, trim
+      0xE6E3DC => dark ? const Color(0xFFCAC7C0) : color, // hubs
       _ => color,
     };
   }
