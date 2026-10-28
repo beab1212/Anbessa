@@ -30,8 +30,9 @@ describe("cancellation fee (workflow 07 §3)", () => {
     expect(r.feeMinor).toBe(3000n + 600n);
   });
 
-  it("waived when the driver asked the rider to cancel", () => {
-    expect(cancellationFee(DEFAULT_POLICY, { ...base, by: "RIDER", reason: "DRIVER_ASKED_TO_CANCEL", now: at(600) })).toMatchObject({ feeMinor: 0n, waived: "driver_asked" });
+  it("not waived on the rider's word that the driver asked (support reviews and refunds)", () => {
+    const fee = cancellationFee(DEFAULT_POLICY, { ...base, by: "RIDER", reason: "DRIVER_ASKED_TO_CANCEL", now: at(600) });
+    expect(fee).toEqual({ feeMinor: 3000n, compensationMinor: 2400n });
   });
 
   it("driver, staff and system cancellations are free; a no-show charges the rider", () => {
@@ -41,7 +42,7 @@ describe("cancellation fee (workflow 07 §3)", () => {
 });
 
 describe("config", () => {
-  const env = { DATABASE_URL: "postgresql://x@localhost/x", REDIS_URL: "redis://localhost:6379", INTERNAL_SERVICE_TOKEN: "t".repeat(64) };
+  const env = { NODE_ENV: "development", DATABASE_URL: "postgresql://x@localhost/x", REDIS_URL: "redis://localhost:6379", INTERNAL_SERVICE_TOKEN: "t".repeat(64) };
 
   it("refuses the quote stand-in and missing Kafka in production", () => {
     expect(() => loadConfig({ ...env, NODE_ENV: "production", PRICING: "builtin" })).toThrow(/PRICING[\s\S]*KAFKA_BROKERS|KAFKA_BROKERS[\s\S]*PRICING/);

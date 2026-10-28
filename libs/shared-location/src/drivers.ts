@@ -30,8 +30,13 @@ export interface DriverState {
   lat?: number;
   lng?: number;
   heading?: number;
-  /** last accepted ping, unix ms */
+  /** last accepted ping, by the phone's clock, unix ms */
   at?: number;
+  /**
+   * when the server received that ping, unix ms. Freshness checks that matter (arrival, start,
+   * no-show, completion) use this, not the phone's `at`.
+   */
+  receivedAt?: number;
   /** removed from the geo index by the sweeper until pings resume */
   stale: boolean;
 }
@@ -69,6 +74,7 @@ function parseState(driverId: string, h: Record<string, string>): DriverState | 
     lng: num(h.lng),
     heading: num(h.heading),
     at: num(h.at),
+    receivedAt: num(h.rt),
     stale: h.stale === "1",
   };
 }
@@ -89,13 +95,14 @@ export type PingResult =
 export async function recordPing(redis: Redis, driverId: string, ping: Ping, now = Date.now()): Promise<PingResult> {
   const state = await getDriverState(redis, driverId);
   if (!state || state.status === "offline") return { accepted: false, reason: "not_online" };
-  const previous = state.lat !== undefined && state.lng !== undefined && state.at !== undefined ? { lat: state.lat, lng: state.lng, at: state.at } : undefined;
+  const previous = state.lat !== undefined && state.lng !== undefined && state.at !== undefined ? { lat: state.lat, lng: state.lng, at: state.at, receivedAt: state.receivedAt } : undefined;
   const rejected = checkPing(ping, previous, now);
   if (rejected) return { accepted: false, reason: rejected };
 
   const set = setFor(state.status);
   const other: GeoSet = set === "available" ? "busy" : "available";
-  const fields: Record<string, string> = { lat: String(ping.lat), lng: String(ping.lng), at: String(ping.at), stale: "0" };
+  // rt = server receive time (the phone's clock can be wrong or set on purpose)
+  const fields: Record<string, string> = { lat: String(ping.lat), lng: String(ping.lng), at: String(ping.at), rt: String(now), stale: "0" };
   if (ping.heading !== undefined && Number.isFinite(ping.heading)) fields.heading = String(ping.heading);
 
   const p = redis.pipeline()
@@ -108,7 +115,7 @@ export async function recordPing(redis: Redis, driverId: string, ping: Ping, now
     p.hset(keys.tripLast(state.tripId), { driverId, ...fields }).expire(keys.tripLast(state.tripId), LOCATION_TIMING.tripLastTtlSeconds);
   }
   await p.exec();
-  return { accepted: true, state: { ...state, lat: ping.lat, lng: ping.lng, at: ping.at, heading: ping.heading ?? state.heading, stale: false } };
+  return { accepted: true, state: { ...state, lat: ping.lat, lng: ping.lng, at: ping.at, receivedAt: now, heading: ping.heading ?? state.heading, stale: false } };
 }
 
 // ── writes from location-service (events) ─────────────────────────────────────
@@ -281,7 +288,7 @@ export async function reassignTrip(redis: Redis, input: { tripId: string; riderI
         p.zrem(keys.geo(to.cityId, to.vehicleType, "available"), toDriverId)
           .geoadd(keys.geo(to.cityId, to.vehicleType, "busy"), to.lng, to.lat, toDriverId);
         if (lastDriver !== toDriverId) {
-          const fields: Record<string, string> = { driverId: toDriverId, lat: String(to.lat), lng: String(to.lng), at: String(to.at), stale: "0" };
+          const fields: Record<string, string> = { driverId: toDriverId, lat: String(to.lat), lng: String(to.lng), at: String(to.at), ...(to.receivedAt !== undefined ? { rt: String(to.receivedAt) } : {}), stale: "0" };
           if (to.heading !== undefined && Number.isFinite(to.heading)) fields.heading = String(to.heading);
           p.hset(keys.tripLast(tripId), fields).expire(keys.tripLast(tripId), LOCATION_TIMING.tripLastTtlSeconds);
         }

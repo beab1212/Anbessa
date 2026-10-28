@@ -159,6 +159,7 @@ describe("scheduled rides (workflow 12)", () => {
     const org = uuid();
     const coordinator = await h.rider(uuid(), [{ r: "CORPORATE_COORDINATOR", org }]);
     const guest = uuid();
+    h.addMember(org, guest);
     const { res } = await book(coordinator, 120, { paymentMethod: "CORPORATE", billingOrgId: org, riderUserId: guest });
     expect(res.statusCode).toBe(201);
     expect(res.json()).toMatchObject({ channel: "CORPORATE_PORTAL", riderUserId: guest, billing: { type: "CORPORATE", orgId: org } });
@@ -280,7 +281,7 @@ describe("reassignment (trip:reassign)", () => {
     expect((await h.req("POST", `/api/trips/${tripId}/reassign`, dispatcher, { driverId: d.id })).json()).toMatchObject({ error: "same_driver" });
     await h.req("POST", `/api/trips/${tripId}/en-route`, d);
     await h.req("POST", `/api/trips/${tripId}/arrive`, d);
-    await h.req("POST", `/api/trips/${tripId}/start`, d, {});
+    await h.start(tripId, d);
     expect((await h.req("POST", `/api/trips/${tripId}/reassign`, dispatcher, { driverId: d2.id })).statusCode).toBe(409);
   });
 });
@@ -303,7 +304,7 @@ describe("GPS trace (trip:read_gps_trace)", () => {
     await d.ping(near(BOLE, 20));
     await h.req("POST", `/api/trips/${tripId}/en-route`, d);
     await h.req("POST", `/api/trips/${tripId}/arrive`, d);
-    expect((await h.req("POST", `/api/trips/${tripId}/start`, d, {})).json()).toMatchObject({ status: "in_progress" });
+    expect((await h.start(tripId, d)).json()).toMatchObject({ status: "in_progress" });
     h.c.traceRecorder.forget(tripId);
     // the ride: 3 points, 1 km apart, 100 s each
     const start = h.clock.now + 10_000;

@@ -11,13 +11,13 @@ services:
       POSTGRES_USER: ride
       POSTGRES_PASSWORD: ride
       POSTGRES_DB: trip_service
-    ports: ["5432:5432"]
+    ports: ["127.0.0.1:5432:5432"]
     volumes: ["./.dev-data/postgres:/var/lib/postgresql"]
     profiles: [default]   # skip postgres if service doesn't use it
 
   redis:
     image: redis:8-alpine
-    ports: ["6379:6379"]
+    ports: ["127.0.0.1:6379:6379"]
 
   redpanda:
     image: redpandadata/redpanda:v26.2.6
@@ -33,4 +33,4 @@ services:
       - 0.0.0.0:9092
       - --advertise-kafka-addr
       - localhost:9092
-    ports: ["9092:9092"]
+    ports: ["127.0.0.1:9092:9092"]

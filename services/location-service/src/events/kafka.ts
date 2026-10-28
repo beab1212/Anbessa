@@ -2,6 +2,7 @@
 // Invalid events are logged and skipped so one bad message can't block a partition.
 
 import { Kafka, logLevel, type Producer } from "kafkajs";
+import { kafkaClientConfig } from "@ride-app/shared-utils";
 import { v7 as uuidv7 } from "uuid";
 import { ZodError } from "zod";
 import type { DriverConnectionLostEvent } from "@ride-app/shared-types";
@@ -14,7 +15,7 @@ export function createKafka(opts: {
   logger: Logger;
   createTopics?: boolean;
 }) {
-  const kafka = new Kafka({ clientId: "location-service", brokers: opts.brokers, logLevel: logLevel.WARN });
+  const kafka = new Kafka(kafkaClientConfig({ clientId: "location-service", brokers: opts.brokers, logLevel: logLevel.WARN }));
   const consumer = kafka.consumer({ groupId: "location-service" });
   const producer: Producer = kafka.producer({ idempotent: true, maxInFlightRequests: 1 });
 

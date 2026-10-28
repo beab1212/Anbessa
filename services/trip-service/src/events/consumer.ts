@@ -8,6 +8,7 @@
 // block a partition; database trouble is thrown so kafkajs retries the message.
 
 import { Kafka, logLevel } from "kafkajs";
+import { kafkaClientConfig } from "@ride-app/shared-utils";
 import { z, ZodError } from "zod";
 import type { Logger } from "@ride-app/shared-utils";
 import type { RegulatoryReport } from "../trips/regulatory.js";
@@ -41,7 +42,7 @@ export function createHandlers(deps: { trace: TraceRecorder; regulatory: Regulat
 }
 
 export function createConsumer(opts: { brokers: string[]; handlers: Record<Topic, (payload: unknown) => Promise<void>>; logger: Logger }) {
-  const kafka = new Kafka({ clientId: "trip-service", brokers: opts.brokers, logLevel: logLevel.WARN });
+  const kafka = new Kafka(kafkaClientConfig({ clientId: "trip-service", brokers: opts.brokers, logLevel: logLevel.WARN }));
   const consumer = kafka.consumer({ groupId: "trip-service" });
   return {
     async start() {

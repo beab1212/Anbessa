@@ -19,7 +19,7 @@ Source: `src/http/routes.ts`, `src/app.ts`, `src/locations.ts`. Port 3003. All r
 | `/api/locations/cities/:cityId/drivers` | staff access JWT, audience **`ride-admin`** | `createTokenVerifier` from `libs/shared-authz`: ES256, `iss = AUTH_ISSUER`, keys from `AUTH_JWKS_URL`, `sub`/`exp`/`iat` required, 30 s clock tolerance |
 | `/api/locations/trips/:tripId/driver`, `/api/locations/nearby` | app access JWT, audience **`ride-app`** | same verifier |
 
-location-service's verifier does **not** check the suspension deny list (`deny:{userId}`) or the permission version (`pv:{userId}`); those options are not passed in `server.ts`. A token for the wrong audience fails as `invalid_token`.
+The verifier (`src/lib/auth.ts`, `createVerifier`) also refuses tokens of suspended users (`deny:{userId}` → `401 token_revoked`) and tokens older than the user's last role change (`pv:{userId}` → `401 token_outdated`). A token for the wrong audience fails as `invalid_token`.
 
 ### Error format (`src/middlewares/error-handler.ts`)
 
@@ -31,7 +31,7 @@ location-service's verifier does **not** check the suspension deny list (`deny:{
 | 403 | `{ error: "forbidden", message: "missing permission … for this resource" }` | `authorize()` fails (ops map) |
 | 404 | `{ error: "not_found", message: "<what> not found" }` | unknown driver, trip not visible, no position, unknown route |
 | 4xx | `{ error: <fastify code or "bad_request">, message }` | other Fastify client errors, including 429 from the rate limiter |
-| 503 | `{ error: "auth_unavailable", message }` | `TokenCheckUnavailable` is mapped (503, `retry-after: 5`) but can't occur here: location-service's verifier has no deny-list / permission-version callbacks |
+| 503 | `{ error: "auth_unavailable", message }` | `TokenCheckUnavailable` (503, `retry-after: 5`): Redis couldn't be read for the deny-list / permission-version check |
 | 500 | `{ error: "internal_error", message: "Something went wrong" }` | anything else (logged with the request id) |
 
 A `cityId` or `vehicleType` that passes the length check but not the key guards in `libs/shared-location/src/keys.ts` (`^[a-z0-9-]{1,40}$`, `^[a-z0-9_]{1,30}$`) throws a plain `Error` inside the key builder and answers **500**, not 400.

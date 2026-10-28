@@ -1,7 +1,8 @@
 import { z } from "zod";
 
 export const config = z.object({
-  NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+  // no default: an unset NODE_ENV must not quietly turn on development behaviour
+  NODE_ENV: z.enum(["development", "test", "production"]),
   PORT: z.coerce.number().default(3000),
   REDIS_URL: z.string().url(),
   // driver.location stream; optional locally (pings still update Redis)

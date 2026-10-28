@@ -2,6 +2,7 @@
 // a failure is logged and counted, and never reaches the socket server or the driver.
 
 import { Kafka, logLevel, type Producer } from "kafkajs";
+import { kafkaClientConfig } from "@ride-app/shared-utils";
 import type { DriverLocationEvent } from "@ride-app/shared-types";
 
 export interface LocationPublisher {
@@ -11,7 +12,7 @@ export interface LocationPublisher {
 }
 
 export function kafkaLocationPublisher(brokers: string[], onError: (err: Error) => void): LocationPublisher {
-  const kafka = new Kafka({ clientId: "realtime-gateway", brokers, logLevel: logLevel.WARN });
+  const kafka = new Kafka(kafkaClientConfig({ clientId: "realtime-gateway", brokers, logLevel: logLevel.WARN }));
   const producer: Producer = kafka.producer({ allowAutoTopicCreation: true });
   let connected = false;
   let stopping = false;

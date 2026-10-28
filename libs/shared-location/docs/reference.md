@@ -59,6 +59,7 @@ interface DriverState {
   lng?: number;
   heading?: number;
   at?: number;              // last accepted ping, device time, unix ms
+  receivedAt?: number;      // when the server received it (hash field `rt`), unix ms: freshness for arrival/start/no-show/completion
   stale: boolean;           // removed from the geo index by the sweeper until pings resume
 }
 ```
@@ -146,12 +147,13 @@ const PING_LIMITS = {
   maxAccuracyMeters: 100,
   maxSpeedMps: 200 / 3.6,   // 200 km/h between two pings
   maxClockSkewMs: 5_000,
+  maxDeviceLeadMs: 60_000,  // the phone may claim at most this much more time passed than the server saw
 };
 ```
 
 ### `checkPing(ping, previous, now): PingRejection | undefined`
 
-`previous` is the last accepted ping (`{ lat, lng, at }`) or `undefined`. Checks in order, first failure wins:
+`previous` is the last accepted ping (`{ lat, lng, at, receivedAt? }`) or `undefined`. For `too_fast` the interval is the phone's (`ping.at − previous.at`) but never more than the server-seen interval (`now − previous.receivedAt`) + `maxDeviceLeadMs`, so a phone clock set back can't hide a teleport. Matching (`nearbyAvailable`) still judges freshness by `at`. Checks in order, first failure wins:
 
 | # | Rejection | Condition |
 |---|---|---|

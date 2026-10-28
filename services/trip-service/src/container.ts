@@ -5,7 +5,7 @@ import { createTokenVerifier, type VerifyAccessToken } from "@ride-app/shared-au
 import type { Logger } from "@ride-app/shared-utils";
 import type { Config } from "./config/index.js";
 import { createDb, type Db } from "./db.js";
-import { locationClient, mappingClient, partiesClient, type LocationClient, type MappingClient, type PartiesClient } from "./lib/clients.js";
+import { locationClient, mappingClient, orgMembersClient, partiesClient, type LocationClient, type MappingClient, type OrgMembersClient, type PartiesClient } from "./lib/clients.js";
 import { socketEmitter, type Realtime } from "./lib/realtime.js";
 import { createMatcher } from "./matching/matcher.js";
 import { builtinQuotes, pricingQuotes, type QuoteProvider } from "./quotes.js";
@@ -25,6 +25,8 @@ export interface ContainerOptions {
   location?: LocationClient;
   mapping?: MappingClient;
   parties?: PartiesClient;
+  /** company memberships (auth-service) */
+  orgs?: OrgMembersClient;
   quotes?: QuoteProvider;
   realtime?: Realtime;
   verifyAccessToken?: VerifyAccessToken;
@@ -82,6 +84,7 @@ export function createContainer(config: Config, logger: Logger, opts: ContainerO
   const trips = createTripService({
     db, redis, quotes, location, realtime, logger, matching: matcher.control, now,
     settings, policies, trace,
+    orgs: opts.orgs ?? orgMembersClient(config.AUTH_INTERNAL_URL, config.INTERNAL_SERVICE_TOKEN),
   });
   const scheduler = createScheduler({
     db, quotes, trips, policies, settings, realtime, logger, now,

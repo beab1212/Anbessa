@@ -77,6 +77,7 @@ Indexes:
 | `ix_trip_rider_recent` | `(rider_user_id, created_at DESC)` | my trips as rider |
 | `ix_trip_booked_by_recent` | `(booked_by_user_id, created_at DESC)` | trips I booked |
 | `ux_trip_rider_active` | unique `(rider_user_id)` WHERE status is active | **one active trip per rider** |
+| `ux_trip_quote_live` | unique `(quote_id)` WHERE `quote_id IS NOT NULL AND status <> 'cancelled'` | **one live or finished trip per quote** (parallel requests with the same quote: the loser gets `400 quote_used`) |
 | `ix_trip_driver_recent` | `(driver_user_id, created_at DESC)` WHERE driver set | my trips as driver |
 | `ix_trip_city_active` | `(city_id, status, created_at)` WHERE status is active | dispatcher board |
 | `ix_trip_billing_org` | `(billing_org_id, created_at)` WHERE org set | company trips (`GET /api/trips/org/:orgId?role=billing`) |
@@ -211,6 +212,8 @@ Applied in order by `prisma migrate deploy` (`make db-migrate`). The `migration_
 | 4 | `20261030090000_trip_share` | `trip_share` with its index and the cascading FK to `trip` |
 | 5 | `20261031090000_trip_search_indexes` | `ix_trip_city_recent` (also an `@@index` in `schema.prisma`), the partial `ix_trip_fleet_recent` and `ix_trip_vehicle_recent` (SQL only) |
 | 6 | `20261101090000_scheduled_policies_trace` | `trip.purpose`; `scheduled_trip` (status and `match_at ≤ scheduled_for` checks, unique `trip_id` with `ON DELETE SET NULL`, the partial due-queue index and per rider / booker / org / city indexes); `corporate_policy` (minute, day and money checks); `ix_trip_billing_org_recent`; `trip_trace` (FK cascade); `regulatory_incident` with its `(city_id, opened_at)` index |
+| 7 | `20261102090000_trip_promo_discount` | `trip.promo_discount_minor` and `promo_code`, CHECK `ck_trip_promo_discount` |
+| 8 | `20261103090000_trip_quote_live` | the partial unique index `ux_trip_quote_live` (one non-cancelled trip per quote) |
 
 Writing a new migration: the Makefile notes that `prisma migrate dev` sees the generated PostGIS columns as drift; use `pnpm exec prisma migrate dev --create-only` and edit the SQL.
 

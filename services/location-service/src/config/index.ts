@@ -8,7 +8,8 @@ const csv = z
 
 export const envSchema = z
   .object({
-    NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+    // no default: an unset NODE_ENV must not quietly turn on development behaviour
+    NODE_ENV: z.enum(["development", "test", "production"]),
     PORT: z.coerce.number().default(3003),
     LOG_LEVEL: z.string().optional(),
     // Live positions and driver state (written by realtime-gateway, Database.md §10)

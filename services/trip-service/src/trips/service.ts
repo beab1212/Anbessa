@@ -8,6 +8,7 @@
 // the trip first: the caller gets 409 with the current status (Database.md §9, race 2).
 
 import { randomInt } from "node:crypto";
+import { v7 as uuidv7 } from "uuid";
 import type { Redis } from "ioredis";
 import { authorize, can, type Principal } from "@ride-app/shared-authz";
 import { getDriverState, haversineMeters, keys as locationKeys } from "@ride-app/shared-location";
@@ -15,7 +16,7 @@ import { RATING_TAGS, type Beneficiary, type PaymentMethod } from "@ride-app/sha
 import type { Logger } from "@ride-app/shared-utils";
 import { Prisma, type ScheduledTrip, type Trip } from "../generated/prisma/client.js";
 import type { Db } from "../db.js";
-import type { DriverLive, LocationClient } from "../lib/clients.js";
+import type { DriverLive, LocationClient, OrgMembersClient } from "../lib/clients.js";
 import { AppError, badRequest, conflict, notFound } from "../lib/errors.js";
 import type { Realtime } from "../lib/realtime.js";
 import { audit, writeOutbox, type TripEvent } from "../outbox/outbox.js";
@@ -49,6 +50,8 @@ export interface TripServiceDeps {
   policies: CorporatePolicies;
   /** the GPS trace: the ride's driven distance on completion */
   trace?: TraceReader;
+  /** auth-service memberships: a company booking for someone else needs the rider in the company */
+  orgs: OrgMembersClient;
   now?: () => Date;
 }
 
@@ -65,9 +68,34 @@ export interface BookingInput {
 /** Scheduled trips still searching this long after the pickup time are cancelled (NO_DRIVER_FOUND). */
 export const SCHEDULED_SEARCH_GRACE_MS = 10 * 60_000;
 
+/**
+ * Anti-fraud (workflow 06 step 8): wrong trip PINs allowed per trip before the PIN check locks;
+ * the rider (a new PIN from their app) or support unlocks it.
+ */
+export const PIN_MAX_ATTEMPTS = 5;
+const pinFailsKey = (tripId: string) => `trip:${tripId}:pin_fails`;
+const PIN_FAILS_TTL_SECONDS = 12 * 3600;
+const newPin = () => String(randomInt(0, 10_000)).padStart(4, "0");
+
+/**
+ * Fake rides (workflow 06 step 13): a ride "completed" this soon after the start, with the car still
+ * this close to the pickup and far from the drop-off, didn't happen and is refused. Other rides
+ * this short are completed but flagged SHORT_TRIP for review.
+ */
+export const MIN_RIDE_SECONDS = 60;
+export const STILL_AT_PICKUP_METERS = 300;
+
 const unavailable = (what: string) => new AppError(503, `${what} is temporarily unavailable`, "dependency_unavailable");
 const invalidState = (status: string) => new AppError(409, `the trip is ${status}`, "invalid_state");
 const isP2002 = (err: unknown) => err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002";
+const quoteUsed = () => badRequest("this quote was already used, get a new one", "quote_used");
+/** A unique violation on booking: the live-trip-per-quote index (quote_used), else one active trip per rider. */
+export function uniqueViolation(err: unknown): AppError {
+  const e = err as { message?: string; meta?: unknown };
+  const text = `${e.message ?? ""} ${JSON.stringify(e.meta ?? {})}`;
+  if (text.includes("ux_trip_quote_live") || text.includes("quote_id")) return quoteUsed();
+  return conflict("the rider already has an active trip", "active_trip_exists");
+}
 
 function beneficiaryOf(t: Pick<Trip, "vehicleOwnerType" | "beneficiaryId">): Beneficiary | undefined {
   if (!t.beneficiaryId || !t.vehicleOwnerType) return undefined;
@@ -82,9 +110,11 @@ export function payableDiscount(t: Pick<Trip, "promoDiscountMinor" | "fareEstima
 }
 
 /** What a caller sees. The PIN only goes to the rider's side; review flags only to staff. */
-export function tripView(t: Trip, viewer?: Principal) {
+export function tripView(t: Trip, viewer?: Pick<Principal, "userId" | "audience">) {
   const riderSide = viewer && (viewer.userId === t.riderUserId || viewer.userId === t.bookedByUserId);
   const staff = viewer?.audience === "ride-admin";
+  // the driver works with the rider's name (GET /:id/parties), never their account id
+  const driverOnly = !!viewer && !riderSide && !staff && viewer.userId === t.driverUserId;
   const n = (v: bigint | null) => (v === null ? null : Number(v));
   return {
     id: t.id,
@@ -94,7 +124,7 @@ export function tripView(t: Trip, viewer?: Principal) {
     vehicleType: t.vehicleType,
     paymentMethod: t.paymentMethod,
     billing: { type: t.billingType, orgId: t.billingOrgId },
-    riderUserId: t.riderUserId,
+    riderUserId: driverOnly ? null : t.riderUserId,
     pickup: { lat: t.pickupLat, lng: t.pickupLng, address: t.pickupAddress },
     dropoff: { lat: t.dropoffLat, lng: t.dropoffLng, address: t.dropoffAddress },
     driver: t.driverUserId ? { userId: t.driverUserId, vehicleId: t.vehicleId } : null,
@@ -126,6 +156,15 @@ export function createTripService(deps: TripServiceDeps) {
     const t = await db.trip.findUnique({ where: { id: tripId } });
     if (!t) throw notFound("trip");
     return t;
+  }
+
+  /** A quote already carries a live or finished trip, or an upcoming scheduled ride. */
+  async function quoteInUse(quoteId: string) {
+    const [trip, scheduled] = await Promise.all([
+      db.trip.findFirst({ where: { quoteId, status: { not: "cancelled" } }, select: { id: true } }),
+      db.scheduledTrip.findFirst({ where: { quoteId, status: { not: "CANCELLED" } }, select: { id: true } }),
+    ]);
+    return !!(trip || scheduled);
   }
 
   /** Trip readers: its rider, booker and driver; staff in its city; the billing org; the vehicle's fleet. */
@@ -191,9 +230,10 @@ export function createTripService(deps: TripServiceDeps) {
   }
 
   function notify(t: Trip, event = "trip:status") {
-    const payload = { tripId: t.id, status: t.status, trip: tripView(t) };
+    // each person gets their own view (the driver without the rider's account id; never the PIN)
     for (const userId of new Set([t.riderUserId, t.bookedByUserId, ...(t.driverUserId ? [t.driverUserId] : [])])) {
-      realtime.toUser(userId, event, payload);
+      const { pin: _pin, ...trip } = tripView(t, { userId, audience: "ride-app" });
+      realtime.toUser(userId, event, { tripId: t.id, status: t.status, trip });
     }
   }
 
@@ -208,7 +248,9 @@ export function createTripService(deps: TripServiceDeps) {
     } catch {
       throw unavailable("driver location");
     }
-    if (!live || live.lat === undefined || live.lng === undefined || live.at === undefined || now().getTime() - live.at > 60_000) return null;
+    // fresh by when the server received the ping, not the phone's own clock (`at`)
+    const seenAt = live?.receivedAt ?? live?.at;
+    if (!live || live.lat === undefined || live.lng === undefined || seenAt === undefined || now().getTime() - seenAt > 60_000) return null;
     return { lat: live.lat, lng: live.lng };
   }
 
@@ -258,13 +300,15 @@ export function createTripService(deps: TripServiceDeps) {
     payload: { tripId: u.id, riderId: u.riderUserId, driverId, cityId: u.cityId, vehicleType: u.vehicleType, ...(u.bookedByUserId !== u.riderUserId ? { bookedById: u.bookedByUserId } : {}), ...(u.billingOrgId ? { billingOrgId: u.billingOrgId } : {}) },
   });
 
-  async function finishCancel(t: Trip, by: CancelledBy, actorId: string | null, reason: string, fee: { feeMinor: bigint; compensationMinor: bigint }) {
+  async function finishCancel(t: Trip, by: CancelledBy, actorId: string | null, reason: string, fee: { feeMinor: bigint; compensationMinor: bigint }, reviewFlags: string[] = []) {
     const offered = await db.tripOffer.findMany({ where: { tripId: t.id, status: "OFFERED" }, select: { driverUserId: true } });
+    const flags = reviewFlags.filter((f) => !t.flags.includes(f));
     const updated = await transition(
       t, ["requested", "matched", "en_route"], "cancelled",
       {
         cancelledAt: now(), cancelledBy: by, cancelledByUserId: actorId, cancelReason: reason,
         cancelFeeMinor: fee.feeMinor, driverCompensationMinor: fee.compensationMinor,
+        ...(flags.length ? { flags: [...t.flags, ...flags] } : {}),
       },
       actorId,
       (u) => ({
@@ -286,6 +330,8 @@ export function createTripService(deps: TripServiceDeps) {
       await redis.del(locationKeys.offer(o.driverUserId));
       realtime.toUser(o.driverUserId, "trip:offer_cancelled", { tripId: t.id });
     }
+    // the driver of a cancelled trip stops watching its live position
+    if (t.driverUserId) realtime.leaveTrip?.(t.driverUserId, t.id);
     notify(updated);
     return updated;
   }
@@ -305,7 +351,7 @@ export function createTripService(deps: TripServiceDeps) {
    * (maintenance, booking channels, payment methods of the city). Shared by on-demand and scheduled
    * bookings.
    */
-  function authorizeBooking(p: Principal, input: BookingInput, cityId: string): { riderId: string; channel: Channel; corporate: boolean } {
+  async function authorizeBooking(p: Principal, input: BookingInput, cityId: string): Promise<{ riderId: string; channel: Channel; corporate: boolean }> {
     const riderId = input.riderUserId ?? p.userId;
     const onBehalf = riderId !== p.userId;
     const corporate = input.paymentMethod === "CORPORATE";
@@ -334,6 +380,16 @@ export function createTripService(deps: TripServiceDeps) {
     // payment methods offered in the city (admin settings → Payments); company accounts are always billed
     if (!corporate && !deps.settings.get<string[]>("payments.methods", cityId).includes(input.paymentMethod)) {
       throw new AppError(403, `${input.paymentMethod.toLowerCase().replace("_", " ")} payments aren't available in this city right now`, "payment_method_unavailable");
+    }
+    // a coordinator books only for people in the company (auth-service membership), never any account
+    if (channel === "CORPORATE_PORTAL") {
+      let member: boolean;
+      try {
+        member = await deps.orgs.isMember(input.billingOrgId!, riderId);
+      } catch {
+        throw unavailable("company membership");
+      }
+      if (!member) throw new AppError(403, "the rider isn't a member of this company account", "rider_not_in_org");
     }
     return { riderId, channel, corporate };
   }
@@ -372,6 +428,31 @@ export function createTripService(deps: TripServiceDeps) {
     return live;
   }
 
+  /**
+   * The trip PIN, with at most PIN_MAX_ATTEMPTS wrong tries per trip. Every try takes a slot first
+   * (INCR), so parallel guesses can't get past the limit; the right PIN clears the count.
+   */
+  async function checkPin(t: Trip, pin: string | undefined) {
+    const key = pinFailsKey(t.id);
+    const locked = () => new AppError(423, "too many wrong PINs: ask the rider to share a new PIN from their app, or call support", "pin_locked");
+    const wrong = (left: number) => badRequest(`wrong trip PIN: ask the rider for the 4-digit code (${left} ${left === 1 ? "try" : "tries"} left)`, "wrong_pin");
+    if (pin === undefined) {
+      // no guess: nothing to count, but say so if it's locked
+      const used = Number((await redis.get(key)) ?? 0);
+      throw used >= PIN_MAX_ATTEMPTS ? locked() : wrong(PIN_MAX_ATTEMPTS - used);
+    }
+    const tries = await redis.incr(key);
+    if (tries === 1) await redis.expire(key, PIN_FAILS_TTL_SECONDS);
+    if (tries > PIN_MAX_ATTEMPTS) throw locked();
+    if (pin !== t.pin) {
+      if (tries < PIN_MAX_ATTEMPTS) throw wrong(PIN_MAX_ATTEMPTS - tries);
+      logger.warn({ tripId: t.id, driverId: t.driverUserId }, "trip PIN locked after too many wrong tries");
+      for (const userId of new Set([t.riderUserId, t.bookedByUserId])) realtime.toUser(userId, "trip:pin_locked", { tripId: t.id });
+      throw locked();
+    }
+    await redis.del(key);
+  }
+
   async function systemCancel(tripId: string, reason: string) {
     const t = await load(tripId);
     if (!["requested", "matched", "en_route"].includes(t.status)) return t;
@@ -385,30 +466,33 @@ export function createTripService(deps: TripServiceDeps) {
     authorizeBooking,
 
     async request(p: Principal, input: BookingInput & { quoteId: string }) {
+      // one trip per quote: re-booking after a cancellation is fine (without its promo discount:
+      // pricing released that for good with the cancelled trip), a second live or finished trip
+      // isn't. The partial unique index ux_trip_quote_live is the guarantee; this answers early.
+      if (await quoteInUse(input.quoteId)) throw quoteUsed();
+      // the trip id is chosen first so pricing books the promo discount for exactly this trip
+      const tripId = uuidv7();
       let quote;
       try {
-        quote = await quotes.get(input.quoteId);
+        quote = await quotes.get(input.quoteId, { tripId, userId: p.userId });
       } catch {
         throw unavailable("pricing");
       }
       if (!quote || quote.requestedBy !== p.userId) throw badRequest("unknown quote", "invalid_quote");
-      if (new Date(quote.expiresAt).getTime() <= now().getTime()) throw badRequest("the quote has expired, get a new one", "quote_expired");
-      // one trip per quote: re-booking after a cancellation is fine, a second live or finished trip isn't
-      const used = await db.trip.findFirst({ where: { quoteId: input.quoteId, status: { not: "cancelled" } }, select: { id: true } });
-      if (used) throw badRequest("this quote was already used, get a new one", "quote_used");
-
-      const { riderId, channel, corporate } = authorizeBooking(p, input, quote.cityId);
-      if (input.billingOrgId) {
-        await deps.policies.check(input.billingOrgId, { vehicleType: quote.vehicleType, fareMinor: quote.fareMinor, at: now(), purpose: input.purpose });
-      }
-      // pricing-service booked the quote's promo discount when we read it (absent = none)
+      // pricing-service booked the quote's promo discount for this trip when we read it (absent = none)
       const discount = quoteDiscount(quote);
 
+      let trip: Trip;
       try {
-        const trip = await db.$transaction(async (tx) => {
+        if (new Date(quote.expiresAt).getTime() <= now().getTime()) throw badRequest("the quote has expired, get a new one", "quote_expired");
+        const { riderId, channel, corporate } = await authorizeBooking(p, input, quote.cityId);
+        if (input.billingOrgId) {
+          await deps.policies.check(input.billingOrgId, { vehicleType: quote.vehicleType, fareMinor: quote.fareMinor, at: now(), purpose: input.purpose });
+        }
+        trip = await db.$transaction(async (tx) => {
           const t = await tx.trip.create({
             data: {
-              cityId: quote.cityId, riderUserId: riderId, bookedByUserId: p.userId, channel,
+              id: tripId, cityId: quote.cityId, riderUserId: riderId, bookedByUserId: p.userId, channel,
               billingType: corporate ? "CORPORATE" : "PERSONAL", billingOrgId: input.billingOrgId ?? null,
               paymentMethod: input.paymentMethod, vehicleType: quote.vehicleType, quoteId: quote.id,
               pickupLat: quote.pickup.lat, pickupLng: quote.pickup.lng, dropoffLat: quote.dropoff.lat, dropoffLng: quote.dropoff.lng,
@@ -424,13 +508,18 @@ export function createTripService(deps: TripServiceDeps) {
           await writeOutbox(tx, requestedEvent(t));
           return t;
         });
-        await matching.start(trip.id);
-        notify(trip);
-        return trip;
       } catch (err) {
-        if (isP2002(err)) throw conflict("the rider already has an active trip", "active_trip_exists");
+        // no trip was created: give the booked discount back so the rider's retry can have it
+        if (discount > 0 && quotes.unbook) {
+          const q = quote;
+          await quotes.unbook(q.id, tripId).catch((e: Error) => logger.warn({ err: e.message, quoteId: q.id, tripId }, "promo discount not unbooked; it expires with the booking"));
+        }
+        if (isP2002(err)) throw uniqueViolation(err);
         throw err;
       }
+      await matching.start(trip.id);
+      notify(trip);
+      return trip;
     },
 
     /**
@@ -567,6 +656,8 @@ export function createTripService(deps: TripServiceDeps) {
         throw err;
       }
       await releaseDriver(from, t.id);
+      // and stops receiving the car's live positions now, not at their next subscribe
+      realtime.leaveTrip?.(from, t.id);
       realtime.toUser(from, "trip:reassigned", { tripId: t.id, reason: reason ?? null });
       notify(updated);
       return updated;
@@ -633,8 +724,29 @@ export function createTripService(deps: TripServiceDeps) {
       const t = await load(tripId);
       assertDriver(p, t);
       if (!t.arrivedAt) throw conflict("tap \"Arrived\" at the pickup first", "not_arrived");
-      if (deps.settings.get<boolean>("trip.pinRequired") && pin !== t.pin) throw badRequest("wrong trip PIN: ask the rider for the 4-digit code", "wrong_pin");
+      if (t.status !== "en_route") throw invalidState(t.status);
+      if (deps.settings.get<boolean>("trip.pinRequired")) await checkPin(t, pin);
       const u = await transition(t, ["en_route"], "in_progress", { startedAt: now() }, p.userId, progressEvent("trip.started"));
+      notify(u);
+      return u;
+    },
+
+    /**
+     * A new trip PIN, and the PIN check unlocked (after PIN_MAX_ATTEMPTS wrong tries): the rider or
+     * whoever booked the ride (they read the new PIN in their app), or support (trip:cancel @ CITY).
+     * Only before the ride starts.
+     */
+    async resetPin(p: Principal, tripId: string) {
+      const t = await readable(p, tripId);
+      const riderSide = p.userId === t.riderUserId || p.userId === t.bookedByUserId;
+      if (!riderSide) {
+        if (p.audience !== "ride-admin") throw new AppError(403, "only the rider or support can reset the trip PIN", "forbidden");
+        authorize(p, "trip:cancel", { cityId: t.cityId });
+      }
+      if (t.status !== "matched" && t.status !== "en_route") throw invalidState(t.status);
+      const status = t.status as Status;
+      const u = await transition(t, [status], status, { pin: newPin() }, p.userId, undefined, undefined, { pinReset: true, by: riderSide ? "rider" : "staff" });
+      await redis.del(pinFailsKey(t.id));
       notify(u);
       return u;
     },
@@ -661,9 +773,20 @@ export function createTripService(deps: TripServiceDeps) {
       const distanceM = traced && traced > 0 ? traced : t.estDistanceM;
 
       const flags = [...t.flags];
+      const flag = (f: string) => void (flags.includes(f) || flags.push(f));
       const pos = await livePosition(p.userId).catch(() => null);
       const fromDropoff = pos ? haversineMeters(pos, { lat: t.dropoffLat, lng: t.dropoffLng }) : undefined;
-      if (fromDropoff !== undefined && fromDropoff > policy.completeFarFromDropoffMeters) flags.push("FAR_FROM_DROPOFF");
+      const fromPickup = pos ? haversineMeters(pos, { lat: t.pickupLat, lng: t.pickupLng }) : undefined;
+      const farFromDropoff = fromDropoff !== undefined && fromDropoff > policy.completeFarFromDropoffMeters;
+      const rideSeconds = t.startedAt ? (at.getTime() - t.startedAt.getTime()) / 1000 : 0;
+      const early = rideSeconds < MIN_RIDE_SECONDS;
+      // a ride that obviously didn't happen: ended right after the start, the car still at the pickup
+      if (early && farFromDropoff && fromPickup !== undefined && fromPickup < STILL_AT_PICKUP_METERS) {
+        logger.warn({ tripId: t.id, driverId: t.driverUserId, rideSeconds: Math.round(rideSeconds), metersFromPickup: Math.round(fromPickup) }, "completion refused: the car hasn't left the pickup");
+        throw conflict("the car is still at the pickup: complete the trip at the drop-off", "trip_not_driven");
+      }
+      if (farFromDropoff) flag("FAR_FROM_DROPOFF");
+      if (early) flag("SHORT_TRIP");
 
       const u = await transition(
         t, ["in_progress"], "completed",
@@ -717,7 +840,10 @@ export function createTripService(deps: TripServiceDeps) {
       const fee = cancellationFee(policy, {
         by, reason, status: t.status, matchedAt: t.matchedAt, arrivedAt: t.arrivedAt, waitingPerMinMinor: t.waitingPerMinMinor, now: now(),
       });
-      return finishCancel(t, by, p.userId, reason, fee);
+      // the rider's word alone doesn't waive the fee: the usual rules apply and support reviews it
+      // (a refund when the driver did ask; drivers who keep asking show up in the flags)
+      const review = by === "RIDER" && reason === "DRIVER_ASKED_TO_CANCEL" ? ["RIDER_SAYS_DRIVER_ASKED"] : [];
+      return finishCancel(t, by, p.userId, reason, fee, review);
     },
 
     /** Matching timed out, or another system rule. Always free. */

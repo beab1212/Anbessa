@@ -38,19 +38,33 @@ export const PING_LIMITS = {
   maxAccuracyMeters: 100,
   maxSpeedMps: 200 / 3.6, // 200 km/h between two pings
   maxClockSkewMs: 5_000,
+  /**
+   * The phone may claim at most this much more time between two pings than the server saw pass
+   * (pings queued during a short signal loss). Beyond it the speed check uses the server's interval,
+   * so a phone clock set back can't make a jump across town look like a slow drive.
+   */
+  maxDeviceLeadMs: 60_000,
 };
+
+/** The last accepted ping: the phone's time, and when the server received it (if known). */
+export interface PreviousPing extends LatLng {
+  at: number;
+  receivedAt?: number;
+}
 
 /**
  * Workflow 04, step 9: drop implausible pings before they reach the geo index.
  * `previous` is the last accepted ping for this driver.
  */
-export function checkPing(ping: Ping, previous: { lat: number; lng: number; at: number } | undefined, now: number): PingRejection | undefined {
+export function checkPing(ping: Ping, previous: PreviousPing | undefined, now: number): PingRejection | undefined {
   if (!isValidLatLng(ping) || !Number.isFinite(ping.at)) return "invalid";
   if (ping.accuracy !== undefined && ping.accuracy > PING_LIMITS.maxAccuracyMeters) return "inaccurate";
   if (ping.at > now + PING_LIMITS.maxClockSkewMs) return "future";
   if (previous) {
     if (ping.at <= previous.at) return "out_of_order";
-    const seconds = (ping.at - previous.at) / 1000;
+    let elapsedMs = ping.at - previous.at;
+    if (previous.receivedAt !== undefined) elapsedMs = Math.min(elapsedMs, Math.max(0, now - previous.receivedAt) + PING_LIMITS.maxDeviceLeadMs);
+    const seconds = elapsedMs / 1000;
     if (haversineMeters(previous, ping) / seconds > PING_LIMITS.maxSpeedMps) return "too_fast";
   }
   return undefined;

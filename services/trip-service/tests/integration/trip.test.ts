@@ -95,7 +95,14 @@ describe("request (workflow 05, part C)", () => {
     const org = uuid();
     const coordinator = await h.rider(uuid(), [{ r: "CORPORATE_COORDINATOR", org }]);
     const q3 = await h.quote(coordinator);
-    const corp = await h.req("POST", "/api/trips", coordinator, { quoteId: q3.id, paymentMethod: "CORPORATE", billingOrgId: org, riderUserId: uuid() });
+    // only for people in the company (auth-service membership), never any account
+    const outsider = uuid();
+    const refused = await h.req("POST", "/api/trips", coordinator, { quoteId: q3.id, paymentMethod: "CORPORATE", billingOrgId: org, riderUserId: outsider });
+    expect(refused.statusCode).toBe(403);
+    expect(refused.json()).toMatchObject({ error: "rider_not_in_org" });
+    const employee = uuid();
+    h.addMember(org, employee);
+    const corp = await h.req("POST", "/api/trips", coordinator, { quoteId: q3.id, paymentMethod: "CORPORATE", billingOrgId: org, riderUserId: employee });
     expect(corp.statusCode).toBe(201);
     expect(corp.json()).toMatchObject({ channel: "CORPORATE_PORTAL", billing: { type: "CORPORATE", orgId: org } });
 
@@ -239,7 +246,7 @@ describe("execution (workflow 06)", () => {
     expect((await post("arrive")).json()).toMatchObject({ status: "en_route", times: { arrivedAt: expect.any(String) } });
 
     h.clock.now += 5 * 60_000 + 10_000; // 2 min 10 s of paid waiting → 3 started minutes
-    expect((await post("start")).json()).toMatchObject({ status: "in_progress" });
+    expect((await h.start(tripId, d)).json()).toMatchObject({ status: "in_progress" });
     h.clock.now += 15 * 60_000;
     await d.ping(near(PIASSA, 50));
     const done = (await post("complete")).json<{ status: string; fare: { estimateMinor: number; finalMinor: number; waitingFeeMinor: number } }>();
@@ -266,7 +273,7 @@ describe("execution (workflow 06)", () => {
     for (const s of ["en-route"]) await h.req("POST", `/api/trips/${tripId}/${s}`, d);
     await d.ping(near(BOLE, 20));
     await h.req("POST", `/api/trips/${tripId}/arrive`, d);
-    await h.req("POST", `/api/trips/${tripId}/start`, d);
+    await h.start(tripId, d);
     h.clock.now += 60_000;
     await d.ping(near(BOLE, 900)); // nowhere near Piassa
     await h.req("POST", `/api/trips/${tripId}/complete`, d);
@@ -280,7 +287,8 @@ describe("execution (workflow 06)", () => {
     await h.req("POST", `/api/trips/${tripId}/en-route`, d);
     await d.ping(near(BOLE, 10));
     await h.req("POST", `/api/trips/${tripId}/arrive`, d);
-    await h.req("POST", `/api/trips/${tripId}/start`, d);
+    await h.start(tripId, d);
+    await d.ping(near(PIASSA, 20)); // the ride (completing at the pickup right after the start is refused)
     await h.req("POST", `/api/trips/${tripId}/complete`, d);
     expect((await h.req("POST", `/api/trips/${tripId}/rating`, r, { stars: 5, comment: "great" })).statusCode).toBe(201);
     expect((await h.req("POST", `/api/trips/${tripId}/rating`, r, { stars: 1 })).statusCode).toBe(409);
@@ -294,7 +302,8 @@ describe("execution (workflow 06)", () => {
       await h.req("POST", `/api/trips/${tripId}/en-route`, d);
       await d.ping(near(BOLE, 10));
       await h.req("POST", `/api/trips/${tripId}/arrive`, d);
-      await h.req("POST", `/api/trips/${tripId}/start`, d);
+      await h.start(tripId, d);
+      await d.ping(near(PIASSA, 20)); // the ride (completing at the pickup right after the start is refused)
       await h.req("POST", `/api/trips/${tripId}/complete`, d);
       return { r, d, tripId };
     };
@@ -348,7 +357,8 @@ describe("promo codes (workflow 15)", () => {
     await h.req("POST", `/api/trips/${tripId}/en-route`, d);
     await d.ping(near(BOLE, 10));
     await h.req("POST", `/api/trips/${tripId}/arrive`, d);
-    await h.req("POST", `/api/trips/${tripId}/start`, d);
+    await h.start(tripId, d);
+    await d.ping(near(PIASSA, 20)); // the ride (completing at the pickup right after the start is refused)
     const done = (await h.req("POST", `/api/trips/${tripId}/complete`, d)).json<{ fare: { finalMinor: number; promoDiscountMinor: number; payableMinor: number } }>();
     expect(done.fare.promoDiscountMinor).toBe(2_000);
     expect(done.fare.payableMinor).toBe(done.fare.finalMinor - 2_000);
@@ -368,7 +378,8 @@ describe("promo codes (workflow 15)", () => {
     await h.req("POST", `/api/trips/${tripId}/en-route`, d);
     await d.ping(near(BOLE, 10));
     await h.req("POST", `/api/trips/${tripId}/arrive`, d);
-    await h.req("POST", `/api/trips/${tripId}/start`, d);
+    await h.start(tripId, d);
+    await d.ping(near(PIASSA, 20)); // the ride (completing at the pickup right after the start is refused)
     await h.req("POST", `/api/trips/${tripId}/complete`, d);
     const [event] = await outbox(tripId, "trip.completed");
     expect(event).toMatchObject({ promoDiscountMinor: 0, quoteId: expect.stringMatching(/^q_/) });
@@ -424,7 +435,7 @@ describe("cancellations (workflow 07)", () => {
     await h.req("POST", `/api/trips/${c.tripId}/en-route`, c.d);
     await c.d.ping(near(BOLE, 10));
     await h.req("POST", `/api/trips/${c.tripId}/arrive`, c.d);
-    await h.req("POST", `/api/trips/${c.tripId}/start`, c.d);
+    await h.start(c.tripId, c.d);
     expect((await cancel(c.tripId, c.r)).json()).toMatchObject({ error: "invalid_state" });
   });
 });
@@ -487,7 +498,7 @@ describe("share my trip", () => {
     await h.req("POST", `/api/trips/${tripId}/en-route`, d);
     await d.ping(near(BOLE, 20));
     await h.req("POST", `/api/trips/${tripId}/arrive`, d);
-    await h.req("POST", `/api/trips/${tripId}/start`, d);
+    await h.start(tripId, d);
     await d.ping(near(PIASSA, 20));
     expect((await h.req("POST", `/api/trips/${tripId}/complete`, d)).json()).toMatchObject({ status: "completed" });
 

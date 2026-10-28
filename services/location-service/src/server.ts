@@ -1,10 +1,10 @@
 import { createAuthzSync, fetchAuthzSnapshotFrom } from "@ride-app/shared-authz";
 import { Redis } from "ioredis";
-import { createTokenVerifier } from "@ride-app/shared-authz";
 import { buildApp } from "./app.js";
 import { loadConfig } from "./config/index.js";
 import { createHandlers } from "./events/handlers.js";
 import { createKafka } from "./events/kafka.js";
+import { createVerifier } from "./lib/auth.js";
 import { mappingClient } from "./lib/mapping.js";
 import { createLocations } from "./locations.js";
 import { createSweeper } from "./sweeper.js";
@@ -31,7 +31,8 @@ async function main() {
   const app = await buildApp({
     locations, redis, logger,
     internalToken: config.INTERNAL_SERVICE_TOKEN,
-    verifyAccessToken: createTokenVerifier({ issuer: config.AUTH_ISSUER, jwksUrl: config.AUTH_JWKS_URL }),
+    // suspended users and outdated role claims are refused like everywhere else
+    verifyAccessToken: createVerifier({ issuer: config.AUTH_ISSUER, jwksUrl: config.AUTH_JWKS_URL }, redis),
     devRoutes: config.NODE_ENV === "development",
   });
   // the permission matrix follows auth-service live (Role.md §8)

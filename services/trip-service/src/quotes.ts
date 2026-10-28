@@ -33,7 +33,8 @@ export interface Quote {
   routePolyline6?: string;
   /**
    * Promo discount on this quote (pricing-service, workflow 15); absent or 0 = none. Booked by
-   * pricing-service when trip-service reads the quote, so a discount present here is the rider's.
+   * pricing-service for the trip id trip-service names when it reads the quote, so a discount
+   * present here belongs to that one trip. Read without a trip id, a quote never carries one.
    */
   discountMinor?: number;
   /** what the rider pays: fareMinor − discountMinor */
@@ -59,8 +60,20 @@ export interface RepriceInput {
   dropoffAddress?: string;
 }
 
+/** Reading a quote to book a trip: the trip id it will get and who books it. */
+export interface QuoteBooking {
+  tripId: string;
+  userId: string;
+}
+
 export interface QuoteProvider {
-  get(quoteId: string): Promise<Quote | null>;
+  /**
+   * The quote. With `booking`, its promo discount is booked for that trip (or dropped when it
+   * can't be given); without, it comes without a discount (scheduled bookings, checks).
+   */
+  get(quoteId: string, booking?: QuoteBooking): Promise<Quote | null>;
+  /** The trip couldn't be created after all: give the discount booked for it back (best effort). */
+  unbook?(quoteId: string, tripId: string): Promise<void>;
   /**
    * A fresh quote for a scheduled ride shortly before dispatch (workflow 12). null when the
    * provider can't make one; the scheduler then keeps the booked quote.
@@ -70,9 +83,14 @@ export interface QuoteProvider {
 
 export function pricingQuotes(base: string, token: string): QuoteProvider {
   return {
-    async get(quoteId) {
+    async get(quoteId, booking) {
       try {
-        const res = await fetch(new URL(`/internal/quotes/${encodeURIComponent(quoteId)}`, base), {
+        const url = new URL(`/internal/quotes/${encodeURIComponent(quoteId)}`, base);
+        if (booking) {
+          url.searchParams.set("tripId", booking.tripId);
+          url.searchParams.set("userId", booking.userId);
+        }
+        const res = await fetch(url, {
           headers: { authorization: `Bearer ${token}` },
           signal: AbortSignal.timeout(2500),
         });
@@ -83,6 +101,17 @@ export function pricingQuotes(base: string, token: string): QuoteProvider {
         if (err instanceof NotFoundUpstream) return null;
         throw err;
       }
+    },
+    // POST /internal/quotes/:id/unbook (pricing-service): the booked discount is held again for the
+    // rider's retry. A failure leaves it booked until it expires (24 h); the caller only logs it.
+    async unbook(quoteId, tripId) {
+      const res = await fetch(new URL(`/internal/quotes/${encodeURIComponent(quoteId)}/unbook`, base), {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ tripId }),
+        signal: AbortSignal.timeout(2500),
+      });
+      if (!res.ok && res.status !== 404) throw new Error(`pricing-service http ${res.status}`);
     },
     // POST /internal/quotes (pricing-service): a quote made for a user by a service, same pricing
     // as an estimate (rule in force, zones) but never a promo. 404/405 = an older pricing-service

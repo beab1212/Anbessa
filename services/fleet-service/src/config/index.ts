@@ -10,7 +10,8 @@ const hexKey = (name: string) => z.string().regex(/^[0-9a-f]{64}$/i, `${name} mu
 
 export const envSchema = z
   .object({
-    NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+    // no default: an unset NODE_ENV must not quietly turn on development behaviour
+    NODE_ENV: z.enum(["development", "test", "production"]),
     PORT: z.coerce.number().default(3008),
     LOG_LEVEL: z.string().optional(),
     DATABASE_URL: z.string().url(),

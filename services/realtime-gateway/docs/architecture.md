@@ -65,7 +65,7 @@ Staff tokens (`ride-admin`) can't connect.
 | Room | Joined when | Left when | Who emits into it |
 |---|---|---|---|
 | `user:{userId}` | on every connection (`server.ts`), so all of a user's devices are in it | disconnect | trip-service and payment-service through the Redis emitter |
-| `trip:{tripId}` | `trip:subscribe` succeeds | `trip:unsubscribe` or disconnect | the gateway itself (`driver:location`) |
+| `trip:{tripId}` | `trip:subscribe` succeeds | `trip:unsubscribe`, disconnect, trip-service's `socketsLeave` (reassigned driver, cancelled trip's driver), or the 15 s room sweep (no longer in `trip:{id}:members`) | the gateway itself (`driver:location`) |
 
 Room membership is held by the Redis adapter, so an emit to a room from any pod (or from the emitter in another service) reaches sockets on every pod.
 
@@ -74,6 +74,8 @@ Room membership is held by the Redis adapter, so an emit to a room from any pod 
 1. `tripId` must be a string matching a UUID regex. Otherwise ack `{ ok: false, reason: "invalid" }`.
 2. `SISMEMBER trip:{tripId}:members userId` (`isTripMember`). The set holds the rider and the driver, written by location-service on `trip.matched`, kept 12 h, cut to 5 min after the trip ends. Not a member → `{ ok: false, reason: "not_found" }`. Redis error → `{ ok: false, reason: "unavailable" }`.
 3. `socket.join("trip:{tripId}")`, ack `{ ok: true }`.
+
+Membership is re-checked after the join, too: trip-service removes a reassigned driver (and the driver of a cancelled trip) from the room at once through the Redis emitter (`emitter.in("user:{id}").socketsLeave("trip:{id}")`), and every pod runs `sweepTripRooms` every 15 s (`TRIP_ROOM_SWEEP_MS`): one pipelined `SISMEMBER` per socket in its local trip rooms, leaving whoever isn't a member any more (also everyone once the members set expires after the trip). A Redis error leaves the rooms as they are.
 
 No permission (`location:read_live`) is checked: membership alone decides. A fleet owner is not a member and can't join (they can read the position over HTTP from location-service). There is no limit on how many trip rooms one socket joins.
 

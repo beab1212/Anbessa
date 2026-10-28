@@ -64,7 +64,7 @@ Needs Docker and a running Postgres (`make infra-up`).
 
 | Area | Cases |
 |---|---|
-| Request | the quote's road line on the trip; PIN only for the rider; idempotency (same key → same trip, different body → refused); one active trip per rider; expired and foreign quotes; a quote books one trip (`quote_used`), and again after a cancellation; call center and coordinator bookings on behalf; only company employees may bill it |
+| Request | the quote's road line on the trip; PIN only for the rider; idempotency (same key → same trip, different body → refused); one active trip per rider; expired and foreign quotes; a quote books one trip (`quote_used`), and again after a cancellation; `tests/unit/quote-booking.test.ts`: the trip id named to pricing, unbooking when no trip is created, the unique-index race → `quote_used`; call center and coordinator bookings on behalf; only company employees may bill it |
 | Matching | nearest by driving time, then accept; decline and expiry move on; cash filter; blocked balances; payment methods turned off; ranking by distance when mapping is down; `NO_DRIVER_FOUND` after 120 s, free; rider cancel beats a late accept; one active trip per driver even through a dispatcher; dispatchers assign in their city only |
 | Execution | en route → arrive (geofence) → start → complete with paid waiting and the `trip.completed` payload; `FAR_FROM_DROPOFF` (staff only); ratings once, after completion; tags, read-back and averages (shown from 3) |
 | Cancellations | rider free window then fee; no-show only after 5 min at the pickup; driver and staff free; no cancelling a started trip; strangers get 404 |

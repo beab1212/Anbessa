@@ -7,7 +7,7 @@ import { createLogger } from "@ride-app/shared-utils";
 import { config } from "./config/index.js";
 import { kafkaLocationPublisher, noopPublisher } from "./kafka.js";
 import { createSocketAuth } from "./middlewares/auth.middleware.js";
-import { registerLocationHandlers } from "./sockets/location.handler.js";
+import { registerLocationHandlers, sweepTripRooms, TRIP_ROOM_SWEEP_MS } from "./sockets/location.handler.js";
 
 const logger = createLogger("realtime-gateway", config.NODE_ENV);
 
@@ -57,6 +57,15 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => clearInterval(recheck));
 });
 
+// people no longer on a trip (reassigned, released, trip over) leave its live-position room
+const roomSweep = setInterval(() => {
+  sweepTripRooms(io, pubClient).then(
+    (removed) => void (removed && logger.info({ removed }, "removed sockets from trip rooms they no longer belong to")),
+    (err: Error) => logger.warn({ err: err.message }, "trip room sweep failed"),
+  );
+}, TRIP_ROOM_SWEEP_MS);
+roomSweep.unref();
+
 // the permission matrix follows auth-service live (Role.md §8); without the service token, the built-in one
 if (config.INTERNAL_SERVICE_TOKEN) {
   void createAuthzSync({ fetchSnapshot: fetchAuthzSnapshotFrom(config.AUTH_INTERNAL_URL, config.INTERNAL_SERVICE_TOKEN), redis: pubClient, logger }).start();
@@ -72,6 +81,7 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
     if (closing) return;
     closing = true;
     logger.info(`${signal} received, shutting down`);
+    clearInterval(roomSweep);
     await new Promise<void>((resolve) => io.close(() => resolve()));
     await publisher.stop();
     pubClient.disconnect();

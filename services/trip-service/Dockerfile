@@ -18,7 +18,8 @@ RUN pnpm --filter @ride-app/trip-service deploy --prod --legacy /out
 FROM node:24-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
-RUN addgroup -S app && adduser -S app -G app
+# a fixed id, so Kubernetes' runAsUser / runAsNonRoot can name it (infra/k8s/base)
+RUN addgroup -S -g 10001 app && adduser -S -u 10001 app -G app
 COPY --from=build /out/node_modules ./node_modules
 COPY --from=build /out/dist ./dist
 COPY --from=build /out/package.json ./

@@ -1,13 +1,16 @@
 import type { Server, Socket } from "socket.io";
 import type { Redis } from "ioredis";
 import { can, type Principal } from "@ride-app/shared-authz";
-import { isTripMember, recordPing, type Ping } from "@ride-app/shared-location";
+import { isTripMember, keys, recordPing, type Ping } from "@ride-app/shared-location";
 import type { DriverLocationEvent } from "@ride-app/shared-types";
 import type { LocationPublisher } from "../kafka.js";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** pings closer together than this are dropped (the app sends one every ~4 s) */
 const MIN_PING_INTERVAL_MS = 1000;
+
+/** how often each gateway pod re-checks who sits in its trip rooms */
+export const TRIP_ROOM_SWEEP_MS = 15_000;
 
 type Ack = (result: Record<string, unknown>) => void;
 const reply = (ack: unknown, result: Record<string, unknown>) => (typeof ack === "function" ? (ack as Ack)(result) : undefined);
@@ -74,4 +77,44 @@ export function registerLocationHandlers(io: Server, socket: Socket, deps: { red
   socket.on("trip:unsubscribe", async (tripId: unknown) => {
     if (typeof tripId === "string") await socket.leave(`trip:${tripId}`);
   });
+}
+
+/**
+ * Backstop for trip-room membership: `trip:subscribe` checks `trip:{id}:members` once, and
+ * trip-service makes a reassigned or cancelled driver leave the room at once (Redis emitter,
+ * socketsLeave). This re-checks every socket in this pod's trip rooms against the members set
+ * (one pipelined SISMEMBER each) and removes whoever is no longer on the trip, e.g. after a missed
+ * leave or once the members set expired after the trip ended. A Redis error leaves everyone in place.
+ * Returns how many sockets left.
+ */
+export async function sweepTripRooms(io: Server, redis: Redis): Promise<number> {
+  const nsp = io.of("/");
+  const checks: { socket: Socket; tripId: string; userId: string }[] = [];
+  for (const [room, socketIds] of nsp.adapter.rooms) {
+    if (!room.startsWith("trip:")) continue;
+    const tripId = room.slice("trip:".length);
+    if (!UUID.test(tripId)) continue;
+    for (const id of socketIds) {
+      const socket = nsp.sockets.get(id);
+      const userId = socket?.data.userId as string | undefined;
+      if (socket && userId) checks.push({ socket, tripId, userId });
+    }
+  }
+  if (checks.length === 0) return 0;
+  const p = redis.pipeline();
+  for (const c of checks) p.sismember(keys.tripMembers(c.tripId), c.userId);
+  let res: [Error | null, unknown][] | null;
+  try {
+    res = await p.exec();
+  } catch {
+    return 0;
+  }
+  let removed = 0;
+  for (const [i, c] of checks.entries()) {
+    const [err, member] = res?.[i] ?? [null, 1];
+    if (err || member !== 0) continue;
+    await c.socket.leave(`trip:${c.tripId}`);
+    removed++;
+  }
+  return removed;
 }

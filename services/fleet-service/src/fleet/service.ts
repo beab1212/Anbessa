@@ -69,8 +69,9 @@ const parseDay = (s: string) => {
 const isUnique = (err: unknown) => err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002";
 
 /** Fleet organisations whose vehicles this person may drive (token claims, Role.md §4 attributes). */
-const fleetOrgIdsOf = (p: Principal) =>
-  p.roles.filter((a) => (a.role === "FLEET_DRIVER" || a.role === "FLEET_OWNER") && a.scope === "ORG" && a.orgId).map((a) => a.orgId!);
+/** The fleets the caller drives or owns for; roles in a fleet that isn't verified yet (`pending`) don't count. */
+export const fleetOrgIdsOf = (p: Principal) =>
+  p.roles.filter((a) => (a.role === "FLEET_DRIVER" || a.role === "FLEET_OWNER") && a.scope === "ORG" && a.orgId && !a.pending).map((a) => a.orgId!);
 
 // ── views ─────────────────────────────────────────────────────────────────────
 
@@ -596,18 +597,25 @@ export function createFleetService(deps: FleetDeps) {
         if (full) await db.$transaction((tx) => writeOutbox(tx, audit({ actorId: p.userId, action: "user:read_pii", resource: { type: "driver", id: userId }, outcome: "ALLOWED", reason: "licence number" })));
       }
     }
+    // a fleet owner (?orgId=) sees the driver's place in THEIR fleet only: not the driver's own cars
+    // or other fleets' cars. The driver, and staff with the city (or global) grant, see everything.
+    const fleetOnly = !!orgId && d.userId !== p.userId && !can(p, "driver:read", { cityId: d.cityId });
     const [docs, owned, auths, session] = await Promise.all([
       docsOf(db, "DRIVER", userId),
-      db.vehicle.findMany({ where: { ownerType: "INDIVIDUAL", ownerUserId: userId }, orderBy: { createdAt: "asc" } }),
-      db.vehicleAuthorization.findMany({ where: { driverUserId: userId }, include: { vehicle: true } }),
+      fleetOnly ? Promise.resolve([]) : db.vehicle.findMany({ where: { ownerType: "INDIVIDUAL", ownerUserId: userId }, orderBy: { createdAt: "asc" } }),
+      db.vehicleAuthorization.findMany({
+        where: { driverUserId: userId, ...(fleetOnly ? { vehicle: { ownerType: "ORGANIZATION", ownerOrgId: orgId } } : {}) },
+        include: { vehicle: true },
+      }),
       openSessionOfDriver(db, userId),
     ]);
+    const visibleSession = session && (!fleetOnly || auths.some((a) => a.vehicleId === session.vehicleId)) ? session : null;
     return {
       ...driverView(d, { fullLicence: full }),
       ...checklist("DRIVER", docs, now(), warningDays()),
       vehicles: owned.map(vehicleView),
       fleetVehicles: auths.map((a) => ({ ...vehicleView(a.vehicle), authorization: { status: a.status, validUntil: a.validUntil?.toISOString() ?? null } })),
-      session: session ? sessionView(session) : null,
+      session: visibleSession ? sessionView(visibleSession) : null,
     };
   }
 

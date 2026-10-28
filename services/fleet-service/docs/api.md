@@ -147,7 +147,7 @@ Request bodies are parsed before the token is checked on most routes, so an inva
 |---|---|
 | Who | The driver themself; or `driver:read @ CITY` of the driver; or, with `?orgId=`, `driver:read @ ORG` (fleet owner) and auth-service confirms the driver is a member of that org |
 | Params / query | `userId` uuid · `orgId` uuid (optional) |
-| 200 | Driver + Checklist + `{ vehicles: Vehicle[] (all owned, retired included), fleetVehicles: (Vehicle + { authorization: { status, validUntil } })[] (all authorisations), session }` |
+| 200 | Driver + Checklist + `{ vehicles: Vehicle[] (all owned, retired included), fleetVehicles: (Vehicle + { authorization: { status, validUntil } })[] (all authorisations), session }`. A fleet owner (`?orgId=`, without `driver:read @ CITY`) sees only that fleet: `vehicles` is `[]`, `fleetVehicles` only the org's cars, `session` only when it's in one of them |
 | Errors | 404 `not_found` (no profile, or not a member of `orgId`) · 403 · 503 (auth-service, with `orgId`) |
 | Notes | Full licence for the driver themself and for staff with `user:read_pii @ CITY`; each such staff read writes `audit.recorded` (`user:read_pii`). Fleet owners always see the masked licence |
 

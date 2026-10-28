@@ -243,8 +243,10 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
     const { orgId } = z.object({ orgId: z.string().uuid() }).parse(req.params);
     const { role, ...f } = z.object({ ...listQuery, role: z.enum(["billing", "fleet"]) }).parse(req.query);
     const r = await reports.forOrg(p, orgId, role, f);
-    // partners get the plain view (no PIN, even for trips they booked; no review flags)
-    return { trips: r.trips.map((t) => (p.audience === "ride-admin" ? tripView(t, p) : tripView(t))), next: r.next };
+    // partners get the plain view (no PIN, even for trips they booked; no review flags); a fleet
+    // sees its cars' trips, not the riders' account ids
+    const view = (t: Parameters<typeof tripView>[0]) => (p.audience === "ride-admin" ? tripView(t, p) : role === "fleet" ? { ...tripView(t), riderUserId: null } : tripView(t));
+    return { trips: r.trips.map(view), next: r.next };
   });
 
   const reportQuery = z.object({ cityId: cityQ, from: day, to: day });
@@ -358,6 +360,12 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
     const p = await principal(req);
     const { pin } = z.object({ pin: z.string().regex(/^\d{4}$/).optional() }).parse(req.body ?? {});
     return tripView(await trips.start(p, id.parse(req.params).id, pin), p);
+  });
+
+  // a new PIN and the PIN check unlocked after too many wrong tries (the rider side, or support)
+  app.post("/api/trips/:id/pin/reset", async (req) => {
+    const p = await principal(req);
+    return tripView(await trips.resetPin(p, id.parse(req.params).id), p);
   });
 
   app.post("/api/trips/:id/complete", async (req, reply) => {

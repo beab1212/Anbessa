@@ -15,7 +15,7 @@ The key builders are in `libs/shared-location/src/keys.ts`. City ids must match 
 | `location:cities` | set | city ids that have had a driver online | none, never cleaned | location (`goOnline`) | location (sweeper) |
 | `driver:{driverId}` | hash | see below | **15 min**, refreshed by every accepted ping, `goOnline`, `goOffline` | gateway, location | gateway, location, trip-service (through `GET /internal/drivers/:id`) |
 | `offer:driver:{driverId}` | string | tripId of the open offer (soft lock) | `EX offerSeconds` (trip-service setting) | trip-service (`SET NX EX`), deleted by trip-service and by location's `startTrip` | location (`EXISTS` in `nearbyAvailable`) |
-| `trip:{tripId}:last` | hash | `driverId`, `lat`, `lng`, `at` (device ms), `stale` (`"0"`), `heading?` | 3600 s, refreshed on each on-trip ping; set to 300 s by `endTrip` | gateway (`recordPing`, only while `on_trip`) | location (`tripDriver`) |
+| `trip:{tripId}:last` | hash | `driverId`, `lat`, `lng`, `at` (device ms), `rt` (server receive ms), `stale` (`"0"`), `heading?` | 3600 s, refreshed on each on-trip ping; set to 300 s by `endTrip` | gateway (`recordPing`, only while `on_trip`) | location (`tripDriver`) |
 | `trip:{tripId}:members` | set | riderId and driverId, plus the booker (`bookedById`) for phone and company bookings | 12 h from `trip.matched`; 300 s after `trip.completed`/`cancelled` | location (`startTrip`, `endTrip`) | gateway (`trip:subscribe`), location (`tripDriver`) |
 | `trip:{tripId}:billing_org` | string | the company the trip is billed to (`billingOrgId`); only for company trips | 12 h from `trip.matched`; 300 s after `trip.completed`/`cancelled` | location (`startTrip`, `endTrip`) | location (`tripDriver`: `trip:read` holders for that org may watch the car) |
 | `balance:{beneficiaryId}` | hash | `state`, `cashAllowed` (`"1"`/`"0"`), `at` (ms) | 30 days | location (`applyBalanceState`) | location (`goOnline`) |
@@ -28,7 +28,7 @@ Keys used by the shared authz library (not the location layout):
 |---|---|
 | `authz:changed` (pub/sub channel) | permission matrix changed: re-fetch the snapshot (`libs/shared-authz/src/sync.ts`) |
 
-location-service does not read `deny:{userId}` or `pv:{userId}` (realtime-gateway does).
+location-service reads `deny:{userId}` and `pv:{userId}` in its token verifier (`src/lib/auth.ts`), like every other service.
 
 ## `driver:{driverId}` fields
 
@@ -48,6 +48,7 @@ All values are strings. `parseState()` in `drivers.ts` returns `null` (driver un
 | `lat`, `lng` | decimal degrees | `recordPing` |
 | `heading` | degrees, only when the ping had a finite heading | `recordPing` |
 | `at` | device time of the last accepted ping, unix ms | `recordPing` |
+| `rt` | server receive time of that ping, unix ms (returned as `receivedAt`; trip-service judges arrival/start/completion freshness by it) | `recordPing` |
 | `stale` | `"1"` (set by the sweeper) / `"0"` (reset by every ping and `goOnline`) | sweeper, `recordPing`, `goOnline` |
 
 ## Timing constants (`LOCATION_TIMING`, `PING_LIMITS`)

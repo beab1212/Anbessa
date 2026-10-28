@@ -76,7 +76,7 @@ Everything payment-service needs to settle the trip.
 | `billingOrgId` | uuid, optional | only for company-billed trips |
 | `fareMinor` | int | final fare, waiting fee included. The full fare: the driver's earning is computed on it |
 | `waitingFeeMinor` | int | |
-| `quoteId` | string, optional | the pricing-service quote the trip was booked with (absent only on trips without one); pricing-service finds the promo reservation by it |
+| `quoteId` | string, optional | the pricing-service quote the trip was booked with (absent only on trips without one). pricing-service finds the promo reservation by `tripId` (it is booked for the trip), by quote id only for older bookings |
 | `promoDiscountMinor` | int | promo discount from the quote (`trip.promo_discount_minor`), at most `fareMinor`; 0 = none. The rider pays `fareMinor − promoDiscountMinor` |
 | `currency` | string | `ETB` |
 | `distanceMeters` | int | currently the planned route distance |
@@ -108,7 +108,7 @@ Everything payment-service needs to settle the trip.
 | `trip.completed`, `trip.cancelled` | `location-service` | location-service | `endTrip()`: driver back to `available` (if still on this trip), trip member/last-position keys expire after 300 s |
 | `trip.completed` | `payment-service` | payment-service (`src/events/consumer.ts`) | settles the trip per payment method (inbox dedupe on `eventId`) |
 | `trip.cancelled` | `payment-service` | payment-service | settles the cancellation fee when `feeMinor > 0` (inbox dedupe) |
-| `trip.completed`, `trip.cancelled` | `pricing-service` | pricing-service (`src/events/consumer.ts`) | promo: redeems the booked reservation (`promo.redeemed`) by `quoteId` with `promoDiscountMinor` / releases it on cancellation |
+| `trip.completed`, `trip.cancelled` | `pricing-service` | pricing-service (`src/events/consumer.ts`) | promo: redeems the reservation booked for that `tripId` (`promo.redeemed`) with `promoDiscountMinor` / releases it for good on cancellation |
 | `trip.requested`, `trip.driver_en_route`, `trip.driver_arrived`, `trip.started` | — | none found in the repo | produced only |
 
 Consequence: **without the relay running, location-service never marks a matched driver as busy**, so the driver stays in the `available` set and can be offered other trips. Accepting a second one fails with `409 driver_busy` (the `driver_active_trip` key), but offers are wasted. Keep `KAFKA_BROKERS` set whenever you run location-service.

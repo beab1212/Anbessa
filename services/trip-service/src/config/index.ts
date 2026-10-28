@@ -8,7 +8,8 @@ const csv = z
 
 export const envSchema = z
   .object({
-    NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+    // no default: an unset NODE_ENV must not quietly turn on development behaviour
+    NODE_ENV: z.enum(["development", "test", "production"]),
     PORT: z.coerce.number().default(3002),
     LOG_LEVEL: z.string().optional(),
     DATABASE_URL: z.string().url(),
@@ -43,7 +44,7 @@ export const envSchema = z
     // Anti-fraud: the driver must enter the rider's 4-digit PIN to start (workflow 06 step 8)
     /** where share-my-trip links point: the web app's public /t/:token page */
     SHARE_BASE_URL: z.string().url().default("http://localhost:5173"),
-    TRIP_PIN_REQUIRED: z.enum(["true", "false"]).default("false").transform((v) => v === "true"),
+    TRIP_PIN_REQUIRED: z.enum(["true", "false"]).default("true").transform((v) => v === "true"),
 
     // Scheduled rides (workflow 12): matching starts this many minutes before the pickup
     // (longer at night, 22:00–06:00 Addis time); the scheduler looks for due bookings every N s

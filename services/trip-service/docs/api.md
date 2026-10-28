@@ -52,8 +52,11 @@ Codes found in the code, by status. A route section lists the ones specific to i
 | 401 | `invalid_token`, `token_revoked`, `token_outdated` | token verification (`libs/shared-authz/src/verify.ts`) |
 | 403 | `forbidden` | missing permission/scope (`AuthorizationError`) |
 | 403 | `feature_disabled`, `payment_method_unavailable` | live settings, on `POST /api/trips` |
+| 403 | `rider_not_in_org` | a company booking for someone who isn't a member of the company (auth-service) |
+| 423 | `pin_locked` | five wrong trip PINs on this trip (`POST /:id/start`) |
 | 404 | `not_found` | missing or hidden resource; unknown route |
 | 409 | `invalid_state` | the trip isn't in a status that allows this, or another change won the race |
+| 409 | `trip_not_driven` | `POST /:id/complete` within 60 s of the start with the car still at the pickup |
 | 409 | `active_trip_exists`, `driver_busy`, `driver_unavailable`, `offer_closed`, `position_unknown`, `too_far_from_pickup`, `not_arrived`, `too_early_for_no_show`, `rating_closed`, `already_rated`, `trip_ended`, `too_many_places`, `request_in_progress` | see routes |
 | 422 | `idempotency_mismatch` | same key, different request |
 | 429 | (from `@fastify/rate-limit`, passed through the error handler's 4xx branch) | rate limit |
@@ -75,7 +78,7 @@ Returned by most routes. Built by `tripView()` in `src/trips/service.ts`; the Ty
 | `vehicleType` | string | from the quote |
 | `paymentMethod` | `CASH` \| `MOBILE_MONEY` \| `CARD` \| `CORPORATE` | |
 | `billing` | `{ type: PERSONAL\|CORPORATE, orgId: uuid\|null }` | |
-| `riderUserId` | uuid | |
+| `riderUserId` | uuid \| null | `null` when the caller is the trip's driver (they get the rider's name from `/parties`), and in a fleet's `GET /api/trips/org/:orgId?role=fleet` list. Each person's `trip:status` socket push is their own view (never the PIN) |
 | `pickup`, `dropoff` | `{ lat, lng, address: string\|null }` | |
 | `driver` | `{ userId, vehicleId }` \| null | set at match |
 | `fare` | `{ estimateMinor, finalMinor\|null, waitingFeeMinor\|null, currency, promoDiscountMinor, promoCode\|null, payableMinor }` | final values set at completion. `promoDiscountMinor` = promo discount from the quote (0 = none, never above the fare); `payableMinor` = what the rider pays: (`finalMinor` once completed, else `estimateMinor`) − `promoDiscountMinor` |
@@ -83,7 +86,7 @@ Returned by most routes. Built by `tripView()` in `src/trips/service.ts`; the Ty
 | `times` | `{ requestedAt, matchedAt, arrivedAt, startedAt, completedAt, cancelledAt }` | null until reached |
 | `cancellation` | `{ by: RIDER\|DRIVER\|SYSTEM\|STAFF, reason, feeMinor, driverCompensationMinor }` \| null | |
 | `pin` | 4-digit string | **only** when the caller is the rider or the booker |
-| `flags` | string[] (e.g. `FAR_FROM_DROPOFF`) | **only** for `ride-admin` callers |
+| `flags` | string[]: `FAR_FROM_DROPOFF`, `SHORT_TRIP` (completed < 60 s after the start), `RIDER_SAYS_DRIVER_ASKED` (rider cancelled with `DRIVER_ASKED_TO_CANCEL`: fee charged, support may refund), `REASSIGNED`, `DISPATCH_ESCALATED` | **only** for `ride-admin` callers |
 
 ## Health
 
@@ -114,7 +117,7 @@ Request a trip. **Idempotent.** `request()` in `src/trips/service.ts`.
 |---|---|---|
 | `quoteId` | string 1–100 | must exist, be made by the caller (`requestedBy`), not be expired, and not already be on a trip that wasn't cancelled (one trip per quote; re-booking after a cancellation is allowed) |
 | `paymentMethod` | `CASH` \| `MOBILE_MONEY` \| `CARD` \| `CORPORATE` | `CORPORATE` exactly when `billingOrgId` is given |
-| `riderUserId` | uuid, optional | someone else rides (booking on behalf). Not checked against auth-service |
+| `riderUserId` | uuid, optional | someone else rides (booking on behalf). On a company booking (`CORPORATE_PORTAL`) the rider must be a current member of `billingOrgId` (auth-service `GET /internal/organizations/:id/members/:userId`): else `403 rider_not_in_org`, `503 dependency_unavailable` when auth-service can't answer. Call-center (`PHONE`) bookings aren't checked |
 | `billingOrgId` | uuid, optional | the company account to bill |
 
 Who may call, and the resulting `channel`:
@@ -130,7 +133,7 @@ Then, in this order, the live settings: `maintenance.newTrips` (→ `503 mainten
 
 Response: `201` [trip](#the-trip-object) with `status: requested` (and `pin` for the caller). Matching starts right after.
 
-Errors: `400 invalid_quote`, `400 quote_expired`, `400 quote_used` ("this quote was already used, get a new one"), `400 bad_request` (corporate/billing mismatch, staff without `riderUserId`, on-behalf without `billingOrgId`), `403 forbidden`, `403 feature_disabled`, `403 payment_method_unavailable`, `409 active_trip_exists` (the rider already has an active trip), `503 dependency_unavailable` (pricing-service), `503 maintenance`.
+Errors: `400 invalid_quote`, `400 quote_expired`, `400 quote_used` ("this quote was already used, get a new one"; also when a parallel request with the same quote won the race, or the quote belongs to an upcoming scheduled ride), `400 bad_request` (corporate/billing mismatch, staff without `riderUserId`, on-behalf without `billingOrgId`), `403 forbidden`, `403 feature_disabled`, `403 payment_method_unavailable`, `409 active_trip_exists` (the rider already has an active trip), `503 dependency_unavailable` (pricing-service), `503 maintenance`.
 
 ## Offers and assignment
 
@@ -176,8 +179,14 @@ All four routes: only the assigned driver (`404` for anyone else, including the 
 |---|---|---|---|---|
 | `POST /api/trips/:id/en-route` | none | `matched` | → `en_route` | `409 invalid_state` |
 | `POST /api/trips/:id/arrive` | none | `en_route` | sets `arrived_at` (status stays `en_route`). Calling again after arrival returns the trip unchanged | `409 invalid_state` (still `matched`), `409 position_unknown` (no fix in the last 60 s), `409 too_far_from_pickup` (farther than `trip.arrivalRadiusMeters`, default 150 m; message gives the distance), `503 dependency_unavailable` |
-| `POST /api/trips/:id/start` | `{ pin?: "dddd" }` | `en_route` with `arrived_at` | → `in_progress` | `409 not_arrived`, `400 wrong_pin` (only when `trip.pinRequired` is on), `409 invalid_state` |
-| `POST /api/trips/:id/complete` | none | `in_progress` | → `completed`, final fare = quote + paid waiting, `FAR_FROM_DROPOFF` flag if > `trip.completeFarFromDropoffMeters` from the drop-off. **Idempotent** | `409 invalid_state` |
+| `POST /api/trips/:id/start` | `{ pin?: "dddd" }` | `en_route` with `arrived_at` | → `in_progress` | `409 not_arrived`, `400 wrong_pin` (only when `trip.pinRequired` is on; the message says how many tries are left), `423 pin_locked` (after 5 wrong PINs on this trip, Redis `trip:{id}:pin_fails`, 12 h; even the right PIN is refused until a reset; the rider and booker get socket `trip:pin_locked { tripId }`), `409 invalid_state` |
+| `POST /api/trips/:id/complete` | none | `in_progress` | → `completed`, final fare = quote + paid waiting. Flags: `FAR_FROM_DROPOFF` if > `trip.completeFarFromDropoffMeters` from the drop-off, `SHORT_TRIP` if < 60 s after the start. **Idempotent** | `409 invalid_state`, `409 trip_not_driven` (< 60 s after the start, the car's last fix still < 300 m from the pickup and farther than `trip.completeFarFromDropoffMeters` from the drop-off) |
+
+Positions count as known when location-service **received** them in the last 60 s (`receivedAt`), whatever the phone's own clock (`at`) says.
+
+### `POST /api/trips/:id/pin/reset`
+
+A new 4-digit PIN, and the PIN check unlocked. The rider or booker (they read the new PIN in their app), or staff with `trip:cancel` @ CITY (support, dispatch); anyone else who can read the trip gets `403 forbidden`. Allowed in `matched` and `en_route`, else `409 invalid_state`. Recorded as a `trip_event` `{ pinReset: true, by: "rider"|"staff" }`; everyone on the trip gets `trip:status`. Response: `200` trip.
 
 ## Cancellation
 
@@ -192,7 +201,7 @@ All four routes: only the assigned driver (`404` for anyone else, including the 
 | Allowed from | `requested`, `matched`, `en_route` |
 | Response | `200` trip with `cancellation { by, reason, feeMinor, driverCompensationMinor }` |
 | Errors | `404`, `403 forbidden`, `409 invalid_state` (e.g. `in_progress`), `400 bad_request` (`NO_SHOW` from anyone but the driver), `409 too_early_for_no_show`, `409 too_far_from_pickup` (no-show reported away from the pickup or with no recent fix), `503 dependency_unavailable` |
-| Notes | `by` = `STAFF` for `ride-admin` callers, `DRIVER` for the assigned driver, else `RIDER`. Fees: [architecture.md](architecture.md#money-final-fare-waiting-cancellation-fees) |
+| Notes | `by` = `STAFF` for `ride-admin` callers, `DRIVER` for the assigned driver, else `RIDER`. A rider's `DRIVER_ASKED_TO_CANCEL` is charged like any rider cancel and adds the `RIDER_SAYS_DRIVER_ASKED` flag; support refunds it when the driver did ask. Fees: [architecture.md](architecture.md#money-final-fare-waiting-cancellation-fees) |
 
 ## Ratings
 

@@ -118,14 +118,14 @@ stateDiagram-v2
   en_route --> in_progress: POST /:id/start<br/>guards: arrived_at set; PIN when trip.pinRequired
   en_route --> cancelled: POST /:id/cancel<br/>rider fee (+ waiting after arrival)<br/>driver NO_SHOW: 5 min after arrival, at pickup
 
-  in_progress --> completed: POST /:id/complete<br/>final fare = quote + paid waiting<br/>FAR_FROM_DROPOFF flag if > 300 m
+  in_progress --> completed: POST /:id/complete<br/>final fare = quote + paid waiting<br/>FAR_FROM_DROPOFF flag if > 300 m, SHORT_TRIP if < 60 s<br/>409 trip_not_driven if < 60 s and still at the pickup
   completed --> [*]
   cancelled --> [*]
 ```
 
 | Transition | Function | Who | Guards | `trip_event` row | Outbox topic | Push |
 |---|---|---|---|---|---|---|
-| → `requested` | `request()` | see [API](api.md#post-apitrips) | quote exists, `requestedBy` = caller, not expired, not used by another trip that isn't `cancelled` (`400 quote_used`); corporate ⇔ `billingOrgId`; permission per channel; `maintenance.newTrips` off; channel flags; payment method allowed in city; no other active trip for the rider (unique index → `409 active_trip_exists`) | `to_status=requested`, `data={quoteId, approximate}` | `trip.requested` | `trip:status` |
+| → `requested` | `request()` | see [API](api.md#post-apitrips) | not used by another trip that isn't `cancelled` nor by an upcoming scheduled ride (`400 quote_used`, checked first; the unique index `ux_trip_quote_live` catches a race → `400 quote_used`); the trip id is chosen, then the quote read with it (pricing books its promo discount for that trip); quote exists, `requestedBy` = caller, not expired; corporate ⇔ `billingOrgId`; permission per channel; `maintenance.newTrips` off; channel flags; payment method allowed in city; no other active trip for the rider (unique index → `409 active_trip_exists`) | `to_status=requested`, `data={quoteId, approximate}` | `trip.requested` | `trip:status` |
 | `requested → matched` | `accept()` / `assign()` → `matchDriver()` | offered driver / dispatcher | see diagram; `driver_active_trip` insert (PK violation → `409 driver_busy`) | `data={assignedBy}` for assign | `trip.matched` | `trip:status` |
 | `matched → en_route` | `enRoute()` | assigned driver | status `matched` | yes | `trip.driver_en_route` | `trip:status` |
 | `en_route → en_route` | `arrive()` | assigned driver | not `matched` (→ `409 invalid_state`); already arrived → returns the trip unchanged; position known (`409 position_unknown`); within radius (`409 too_far_from_pickup`) | `data={arrived:true, metersFromPickup}` | `trip.driver_arrived` | `trip:status` |
@@ -221,9 +221,15 @@ All amounts are in santim (minor units, `BIGINT` columns). The rules are in `src
 
 **Paid waiting** (`waitingFee()`): zero if the driver never arrived; otherwise `ceil((until − arrived_at − freeWaitingSeconds) / 60)` started minutes × `waiting_per_min_minor` (from the quote). `until` is `started_at` at completion, or "now" in a rider cancellation.
 
-**Final fare** (`complete()`): `fare_final_minor = fare_estimate_minor + waiting_fee_minor`. `distance_m = est_distance_m`; `duration_s = completed_at − started_at`. If the driver's live position is known and farther than `completeFarFromDropoffMeters` from the drop-off, `FAR_FROM_DROPOFF` is added to `flags` (staff-only in the API). An unknown position does not block completion.
+**Final fare** (`complete()`): `fare_final_minor = fare_estimate_minor + waiting_fee_minor`. `distance_m = est_distance_m`; `duration_s = completed_at − started_at`. If the driver's live position is known and farther than `completeFarFromDropoffMeters` from the drop-off, `FAR_FROM_DROPOFF` is added to `flags` (staff-only in the API); a completion under 60 s (`MIN_RIDE_SECONDS`) after the start adds `SHORT_TRIP`. A ride that obviously didn't happen is refused with `409 trip_not_driven`: under 60 s, the car still within 300 m (`STILL_AT_PICKUP_METERS`) of the pickup and farther than `completeFarFromDropoffMeters` from the drop-off. An unknown position does not block completion (only flags it `SHORT_TRIP` when early). "Known" means location-service received a ping in the last 60 s (server receive time `receivedAt`, not the phone's `at`).
 
-**Promo discount** (workflow 15): `request()` copies the booked quote's `discountMinor` (clamped to 0 … fare, `quoteDiscount()` in `src/quotes.ts`) to `promo_discount_minor` and its code to `promo_code`; the `requested` history row records them. The fare stays the full fare (driver earnings, commission and corporate policy checks use it). At completion `trip.completed` carries `promoDiscountMinor = min(promo_discount_minor, fare_final_minor)` (`payableDiscount()`) and `quoteId`; the rider pays `fare − discount` (payment-service). `trip.cancelled` carries `quoteId` so pricing-service releases the reservation. Scheduled rides carry no promo.
+**Trip PIN** (`trip.pinRequired`): at most 5 wrong PINs per trip (`PIN_MAX_ATTEMPTS`, Redis counter `trip:{id}:pin_fails`, 12 h TTL; every try takes a slot with `INCR` before the comparison, so parallel guesses can't exceed it). Then `423 pin_locked`, even for the right PIN, until the rider/booker or support calls `POST /:id/pin/reset` (new PIN, counter cleared).
+
+**Live-position room**: when a dispatcher reassigns a trip and when a trip is cancelled, trip-service tells the gateway (Redis emitter, `socketsLeave`) to take the driver's sockets out of `trip:{id}`; the gateway also re-checks its trip rooms against `trip:{id}:members` every 15 s.
+
+**Company bookings for someone else** (`authorizeBooking`, async): after the permission checks and settings, the rider must be a current member of the billing company (auth-service internal API); else `403 rider_not_in_org`.
+
+**Promo discount** (workflow 15): `request()` picks the trip id (uuid v7) before reading the quote and reads it with `?tripId=&userId=`, so pricing-service books the discount for exactly that trip; if the trip is then not created (expired quote, a refused booking, a policy, a unique violation) it calls `unbook` so the rider's retry can have it (best effort: a failure is logged and the booking expires after 24 h). A quote rebooked after its trip was cancelled comes without the discount (pricing released it for good). It copies the booked quote's `discountMinor` (clamped to 0 … fare, `quoteDiscount()` in `src/quotes.ts`) to `promo_discount_minor` and its code to `promo_code`; the `requested` history row records them. The fare stays the full fare (driver earnings, commission and corporate policy checks use it). At completion `trip.completed` carries `promoDiscountMinor = min(promo_discount_minor, fare_final_minor)` (`payableDiscount()`) and `quoteId`; the rider pays `fare − discount` (payment-service). `trip.cancelled` carries `quoteId` so pricing-service releases the reservation. Scheduled rides carry no promo.
 
 **Cancellation fee** (`cancellationFee()`):
 
@@ -233,10 +239,11 @@ All amounts are in santim (minor units, `BIGINT` columns). The rules are in `src
 | `DRIVER` | reason `NO_SHOW` | `cancel.feeMinor` | fee × `cancel.driverShare` |
 | `DRIVER` | other reasons | 0 | 0 |
 | `RIDER` | status `requested` or no `matched_at` | 0 | 0 |
-| `RIDER` | reason `DRIVER_ASKED_TO_CANCEL` | 0 (`waived: driver_asked`) | 0 |
 | `RIDER` | driver has arrived | `cancel.feeMinor` + paid waiting so far | (fee incl. waiting) × share |
 | `RIDER` | within `cancel.freeSeconds` of `matched_at` | 0 (`waived: free_window`) | 0 |
 | `RIDER` | otherwise | `cancel.feeMinor` | fee × share |
+
+The rider's reason never waives the fee by itself: `DRIVER_ASKED_TO_CANCEL` follows the rows above (free window, arrived, otherwise) and adds the review flag `RIDER_SAYS_DRIVER_ASKED`, so support can check the trip and refund it (a waiver backed by the record is a staff cancel, which is free).
 
 Compensation is computed as `fee × round(share × 100) / 100` in integer arithmetic. The `waived` field is returned by the function but not stored or published. The fee is published in `trip.cancelled`; payment-service charges it.
 
@@ -328,6 +335,7 @@ No trip data is cached; every read goes to Postgres.
 |---|---|
 | Two writers change the same trip (e.g. rider cancels while driver accepts) | `transition()`: `WHERE status IN (…) AND version = v`; the loser gets `409 invalid_state` |
 | A rider requests twice | `ux_trip_rider_active` → `409 active_trip_exists`; plus `Idempotency-Key` |
+| Two requests with the same quote | `ux_trip_quote_live` → the second gets `400 quote_used` (and gives its promo booking back) |
 | A driver gets two trips (two accepts, or accept + dispatcher assign) | `driver_active_trip` primary key → `409 driver_busy` |
 | Two matcher workers on one trip | `match:lease:{trip}` (`SET NX PX 5000`) and `ux_trip_offer_open` (one `OFFERED` row per trip) |
 | A driver offered two trips at once | `offer:driver:{id}` `SET NX EX` (shared with location-service) |

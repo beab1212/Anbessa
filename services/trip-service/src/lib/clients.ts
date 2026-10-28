@@ -40,7 +40,10 @@ export interface DriverLive {
   lat?: number;
   lng?: number;
   heading?: number;
+  /** the ping's own time (the phone's clock), unix ms */
   at?: number;
+  /** when the server received that ping, unix ms (freshness is judged by this) */
+  receivedAt?: number;
   stale: boolean;
 }
 
@@ -111,5 +114,25 @@ export function partiesClient(authBase: string, fleetBase: string, token: string
   return {
     user: (userId) => orNull(call<PublicUser>(authBase, token, `/internal/users/${userId}`)),
     vehicle: (vehicleId) => orNull(call<PublicVehicle>(fleetBase, token, `/internal/vehicles/${vehicleId}`)),
+  };
+}
+
+/** auth-service organization memberships: who may ride on a company's account (workflow 11). */
+export interface OrgMembersClient {
+  /** true when `userId` is a current member of `orgId` (404 upstream = not a member) */
+  isMember(orgId: string, userId: string): Promise<boolean>;
+}
+
+export function orgMembersClient(authBase: string, token: string): OrgMembersClient {
+  return {
+    async isMember(orgId, userId) {
+      try {
+        await call(authBase, token, `/internal/organizations/${encodeURIComponent(orgId)}/members/${encodeURIComponent(userId)}`, { headers: { "x-service-name": "trip-service" } });
+        return true;
+      } catch (err) {
+        if (err instanceof NotFoundUpstream) return false;
+        throw err;
+      }
+    },
   };
 }

@@ -58,7 +58,12 @@ export interface CancelInput {
   now: Date;
 }
 
-/** Workflow 07 §3: who pays what. Staff and system cancellations are free by default. */
+/**
+ * Workflow 07 §3: who pays what. Staff and system cancellations are free by default. A rider's
+ * reason never waives the fee on its own: "the driver asked me to cancel" is charged like any
+ * other rider cancel and flagged for support (RIDER_SAYS_DRIVER_ASKED), who refund it when the
+ * driver did ask.
+ */
 export function cancellationFee(p: CityPolicy, c: CancelInput): { feeMinor: bigint; compensationMinor: bigint; waived?: string } {
   const none = (waived?: string) => ({ feeMinor: 0n, compensationMinor: 0n, ...(waived ? { waived } : {}) });
   const charge = (extra = 0n) => {
@@ -71,7 +76,6 @@ export function cancellationFee(p: CityPolicy, c: CancelInput): { feeMinor: bigi
 
   // rider
   if (c.status === "requested" || !c.matchedAt) return none();
-  if (c.reason === "DRIVER_ASKED_TO_CANCEL") return none("driver_asked");
   if (c.arrivedAt) return charge(waitingFee(p, c.arrivedAt, c.now, c.waitingPerMinMinor));
   if (c.now.getTime() - c.matchedAt.getTime() <= p.freeCancelSeconds * 1000) return none("free_window");
   return charge();

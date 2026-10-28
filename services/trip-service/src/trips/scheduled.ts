@@ -263,7 +263,7 @@ export function createScheduler(deps: SchedulerDeps) {
       if (!deps.settings.get<boolean>("features.scheduledRides")) throw new AppError(403, "scheduled rides are turned off", "feature_disabled");
       checkWindow(input.scheduledFor);
       const quote = await freshQuote(p, input.quoteId);
-      const { riderId, channel, corporate } = trips.authorizeBooking(p, input, quote.cityId);
+      const { riderId, channel, corporate } = await trips.authorizeBooking(p, input, quote.cityId);
       if (input.billingOrgId) {
         await deps.policies.check(input.billingOrgId, { vehicleType: quote.vehicleType, fareMinor: quote.fareMinor, at: input.scheduledFor, purpose: input.purpose });
       }

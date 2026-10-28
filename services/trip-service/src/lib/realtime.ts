@@ -7,6 +7,11 @@ import type { Redis } from "ioredis";
 
 export interface Realtime {
   toUser(userId: string, event: string, payload: unknown): void;
+  /**
+   * Every socket of `userId` leaves the trip's live-position room (`trip:{tripId}`), on every
+   * gateway pod: a reassigned or released driver stops receiving the car's positions at once.
+   */
+  leaveTrip?(userId: string, tripId: string): void;
 }
 
 export function socketEmitter(redis: Redis): Realtime {
@@ -14,6 +19,9 @@ export function socketEmitter(redis: Redis): Realtime {
   return {
     toUser(userId, event, payload) {
       emitter.to(`user:${userId}`).emit(event, payload);
+    },
+    leaveTrip(userId, tripId) {
+      emitter.in(`user:${userId}`).socketsLeave(`trip:${tripId}`);
     },
   };
 }

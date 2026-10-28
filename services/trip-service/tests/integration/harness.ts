@@ -11,7 +11,7 @@ import { getDriverState, goOnline, haversineMeters, nearbyAvailable, recordPing,
 import { buildApp } from "../../src/app.js";
 import { loadConfig } from "../../src/config/index.js";
 import { createContainer } from "../../src/container.js";
-import type { LocationClient, MappingClient, PartiesClient } from "../../src/lib/clients.js";
+import type { LocationClient, MappingClient, OrgMembersClient, PartiesClient } from "../../src/lib/clients.js";
 import { TEST_DATABASE_URL, TEST_REDIS_URL } from "./global-setup.js";
 
 const ISSUER = "http://localhost:3001";
@@ -50,6 +50,15 @@ export async function createHarness() {
       return { id, plateNumber: "3-A40402", vehicleType: "economy", make: "Toyota", model: "Vitz", color: "White" };
     },
   };
+  // auth-service company memberships ("orgId:userId"); tests add members and can take auth down
+  const orgsState = { members: new Set<string>(), down: false };
+  const orgs: OrgMembersClient = {
+    async isMember(orgId, userId) {
+      if (orgsState.down) throw new Error("auth 503");
+      return orgsState.members.has(`${orgId}:${userId}`);
+    },
+  };
+  const addMember = (orgId: string, userId: string) => void orgsState.members.add(`${orgId}:${userId}`);
   const location: LocationClient = {
     nearby: (q) => nearbyAvailable(redis, q, clock.now),
     driver: (id) => getDriverState(redis, id) as never,
@@ -69,7 +78,7 @@ export async function createHarness() {
   // the admin dashboard's live settings, changeable by tests
   const settings = staticSettings({ "match.timeoutSeconds": 120, "match.offerSeconds": 15 });
   const c = createContainer(config, pino({ level: "silent" }), {
-    redis, location, mapping, parties, settings, now: () => new Date(clock.now),
+    redis, location, mapping, parties, orgs, settings, now: () => new Date(clock.now),
     realtime: { toUser: (userId, event, payload) => void pushes.push({ userId, event, payload: payload as Record<string, unknown> }) },
     verifyAccessToken: createTokenVerifier({ issuer: ISSUER, keySet: createLocalJWKSet({ keys: [jwk as never] }) }),
   });
@@ -139,8 +148,14 @@ export async function createHarness() {
     return { r, d, tripId };
   }
 
+  /** The driver starts the ride with the PIN the rider reads out (required by default). */
+  async function start(tripId: string, who: { token: string }) {
+    const { pin } = await c.db.trip.findUniqueOrThrow({ where: { id: tripId }, select: { pin: true } });
+    return req("POST", `/api/trips/${tripId}/start`, who, { pin });
+  }
+
   return {
-    app, c, redis, clock, pushes, mappingState, partiesState, settings, token, rider, staff, driver, req, quote, requestTrip, offerFor, matchedTrip,
+    app, c, redis, clock, pushes, mappingState, partiesState, orgsState, addMember, settings, token, rider, staff, driver, req, quote, requestTrip, offerFor, matchedTrip, start,
     close: async () => {
       await app.close();
       await c.close();

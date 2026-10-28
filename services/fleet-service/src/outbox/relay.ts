@@ -1,4 +1,5 @@
 import { Kafka, type Producer } from "kafkajs";
+import { kafkaClientConfig } from "@ride-app/shared-utils";
 import type { Logger } from "@ride-app/shared-utils";
 import type { Db } from "../db.js";
 
@@ -15,7 +16,7 @@ export interface OutboxRelay {
 }
 
 export function createOutboxRelay(db: Db, brokers: string[], logger: Logger, intervalMs = 500): OutboxRelay {
-  const kafka = new Kafka({ clientId: "fleet-service-outbox", brokers });
+  const kafka = new Kafka(kafkaClientConfig({ clientId: "fleet-service-outbox", brokers }));
   const producer: Producer = kafka.producer({ idempotent: true, maxInFlightRequests: 1 });
   let connected = false;
   let timer: NodeJS.Timeout | undefined;
