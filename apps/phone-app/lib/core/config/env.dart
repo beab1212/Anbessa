@@ -35,7 +35,7 @@ abstract final class Env {
   /// `on`: the sign-in page lists the seed accounts (auth-service DEV_LOGIN=on; debug builds only).
   static const devLogin = String.fromEnvironment('DEV_LOGIN', defaultValue: 'off');
 
-  /// `on`: positions come from a fake source you steer from a debug panel (Linux has no GPS).
+  /// `on`: positions come from a fake source you steer from a debug panel (Linux has no GPS). Debug builds only.
   static const fakeLocation = String.fromEnvironment('FAKE_LOCATION', defaultValue: 'off');
 
   /// Public host for https app links.
@@ -49,7 +49,9 @@ abstract final class Env {
 
   static bool get isHostMode => apiMode == 'host';
   static bool get devLoginOn => kDebugMode && devLogin == 'on';
-  static bool get fakeLocationOn => fakeLocation == 'on' || (!kIsWeb && defaultTargetPlatform == TargetPlatform.linux);
+  /// Debug builds only, like devLoginOn: a release build never takes positions from the fake source,
+  /// whatever FAKE_LOCATION says.
+  static bool get fakeLocationOn => kDebugMode && (fakeLocation == 'on' || (!kIsWeb && defaultTargetPlatform == TargetPlatform.linux));
   static bool get firebaseConfigured => firebaseApiKey.isNotEmpty && firebaseAppId.isNotEmpty && firebaseProjectId.isNotEmpty && firebaseSenderId.isNotEmpty;
 
   static ApiEndpoints get endpoints => isHostMode ? ApiEndpoints.host(hostBase: hostBase) : ApiEndpoints.gateway(apiBaseUrl);
