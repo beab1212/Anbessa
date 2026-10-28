@@ -11,7 +11,8 @@ const secret = (name: string) => z.string().min(32, `${name} must be at least 32
 
 export const envSchema = z
   .object({
-    NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+    // no default: an unset NODE_ENV must not quietly turn on development behaviour
+    NODE_ENV: z.enum(["development", "test", "production"]),
     PORT: z.coerce.number().default(3005),
     LOG_LEVEL: z.string().optional(),
     DATABASE_URL: z.string().url(),
@@ -25,6 +26,12 @@ export const envSchema = z
     AUTH_JWKS_URL: z.string().url().default("http://localhost:3001/api/auth/jwks"),
     AUTH_INTERNAL_URL: z.string().url().default("http://localhost:3001"),
     PLATFORM_INTERNAL_URL: z.string().url().default("http://localhost:3011"),
+    // trip-service's own record of a trip (GET /internal/trips/:id): trip.completed / trip.cancelled
+    // are checked against it before any money is posted
+    TRIP_INTERNAL_URL: z.string().url().default("http://localhost:3002"),
+    // "on" (default; required in production) | "off" (default under NODE_ENV=test, for suites
+    // without a trip-service): cross-check every trip event's money fields with trip-service
+    TRIP_EVENT_CHECK: z.enum(["on", "off"]).optional(),
 
     // Where providers reach us (webhooks) and payers' browsers reach the hosted checkout. Behind
     // Kong this is the public API URL; /api/payments/webhooks/{provider} must be reachable.
@@ -58,6 +65,9 @@ export const envSchema = z
     SETTLEMENT_SCHEDULE: z.enum(["weekly", "off"]).default("weekly"),
     // A negative balance can be written off once its payment due has been overdue this many days (Payment.md Q8)
     WRITE_OFF_AFTER_DAYS: z.coerce.number().int().min(0).max(3650).default(90),
+    // A balance whose payout method changed less than this many hours ago is held by the payout
+    // run (paid by a later run); the owner is told about every change (payout_method.changed)
+    PAYOUT_METHOD_COOLOFF_HOURS: z.coerce.number().min(0).max(720).default(72),
   })
   .superRefine((env, ctx) => {
     const fail = (path: string, message: string) => ctx.addIssue({ code: "custom", path: [path], message });
@@ -65,6 +75,7 @@ export const envSchema = z
       if (env.GATEWAY_MODE === "simulated") fail("GATEWAY_MODE", "simulated payment providers are not allowed in production");
       if (!env.KAFKA_BROKERS) fail("KAFKA_BROKERS", "required in production (trip settlement and balance states travel through Kafka)");
       if (!env.REDIS_URL) fail("REDIS_URL", "required in production (suspended users and role changes must take effect at once)");
+      if (env.TRIP_EVENT_CHECK === "off") fail("TRIP_EVENT_CHECK", "required in production (trip events are checked against trip-service before money is posted)");
     }
     if (env.PAYMENT_RETRY_SECONDS.some((n) => !Number.isFinite(n) || n < 1)) fail("PAYMENT_RETRY_SECONDS", "seconds, comma separated, each ≥ 1");
     const secrets = [env.TELEBIRR_WEBHOOK_SECRET, env.CBEBIRR_WEBHOOK_SECRET, env.CHAPA_WEBHOOK_SECRET];
@@ -72,6 +83,9 @@ export const envSchema = z
   });
 
 export type Config = z.infer<typeof envSchema>;
+
+/** Is every trip event checked against trip-service? On unless turned off (never in production); off by default in tests. */
+export const tripEventCheck = (c: Pick<Config, "NODE_ENV" | "TRIP_EVENT_CHECK">) => (c.TRIP_EVENT_CHECK ?? (c.NODE_ENV === "test" ? "off" : "on")) === "on";
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   // `KEY=` (blank, as in .env.example) means "not set"

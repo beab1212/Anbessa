@@ -11,10 +11,10 @@ import { badRequest, forbidden, notFound } from "../lib/errors.js";
 import { integrity } from "../ledger/ledger.js";
 import { audit, writeOutbox } from "../outbox/outbox.js";
 import { assertBalanceOwner, assertBalanceReadable } from "./access.js";
-import { balanceView, ensureBeneficiary, policyAt } from "./balances.js";
+import { balanceView, beneficiaryOf, ensureBeneficiary, maskDestination, policyAt } from "./balances.js";
 import { cashAllowed, suggestedTopUp } from "./rules.js";
 
-export function createBalanceService(deps: { db: Db; gateways: Gateways; now?: () => Date }) {
+export function createBalanceService(deps: { db: Db; gateways: Gateways; now?: () => Date; /** payouts wait this long after a payout method change */ payoutCoolOffMs?: number }) {
   const { db, gateways } = deps;
   const now = deps.now ?? (() => new Date());
 
@@ -75,7 +75,11 @@ export function createBalanceService(deps: { db: Db; gateways: Gateways; now?: (
       };
     },
 
-    /** Where payouts go (the owner sets it; finance sees it masked). */
+    /**
+     * Where payouts go (the owner sets it; finance sees it masked). A change takes effect after a
+     * cooling-off period (payout runs hold the balance until then) and the owner is told through
+     * `payout_method.changed`, so a hijacked account can't quietly redirect the next payout.
+     */
     async setPayoutMethod(p: Principal, accountId: string, input: { provider: string; destination: string }) {
       const b = await readable(p, accountId);
       assertBalanceOwner(p, b);
@@ -83,8 +87,25 @@ export function createBalanceService(deps: { db: Db; gateways: Gateways; now?: (
       const destination = input.destination.replace(/[\s-]/g, "");
       if (!/^\+?\d{6,20}$/.test(destination)) throw badRequest("a phone number or account number, digits only", "invalid_destination");
       await db.$transaction(async (tx) => {
-        await tx.beneficiary.update({ where: { accountId }, data: { payoutProvider: input.provider, payoutDestination: destination } });
-        await writeOutbox(tx, audit({ actorId: p.userId, action: "payout_method:set", resource: { type: "beneficiary", id: accountId }, outcome: "EXECUTED", reason: input.provider }));
+        // the row lock orders concurrent changes, so each one is told with the right "previous"
+        await tx.$queryRaw`SELECT account_id FROM beneficiary WHERE account_id = ${accountId}::uuid FOR UPDATE`;
+        const before = await tx.beneficiary.findUniqueOrThrow({ where: { accountId } });
+        if (before.payoutProvider === input.provider && before.payoutDestination === destination) return; // nothing changed
+        const at = now();
+        // the first payout method replaces nothing a thief could redirect: no cooling-off for it
+        const first = !before.payoutProvider && !before.payoutDestination;
+        const u = await tx.beneficiary.update({ where: { accountId }, data: { payoutProvider: input.provider, payoutDestination: destination, payoutMethodChangedAt: first ? null : at } });
+        await writeOutbox(tx,
+          {
+            topic: "payout_method.changed", key: u.ownerId,
+            payload: {
+              accountId, beneficiary: beneficiaryOf(u), provider: input.provider, destinationMasked: maskDestination(destination)!,
+              previousProvider: before.payoutProvider, previousDestinationMasked: maskDestination(before.payoutDestination),
+              changedBy: p.userId, changedAt: at.toISOString(), payoutsResumeAt: new Date(at.getTime() + (first ? 0 : deps.payoutCoolOffMs ?? 0)).toISOString(),
+            },
+          },
+          audit({ actorId: p.userId, action: "payout_method:set", resource: { type: "beneficiary", id: accountId }, outcome: "EXECUTED", reason: input.provider }),
+        );
       });
       return db.$transaction((tx) => balanceView(tx, accountId, now()));
     },

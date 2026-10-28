@@ -3,6 +3,7 @@ import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import { registerRoutes, type RouteDeps } from "./http/routes.js";
 import { registerErrorHandler } from "./middlewares/error-handler.js";
+import { trustProxyFromEnv } from "@ride-app/shared-utils";
 
 export interface AppDeps extends RouteDeps {
   logger?: FastifyServerOptions["loggerInstance"];
@@ -13,7 +14,7 @@ export interface AppDeps extends RouteDeps {
 export async function buildApp(deps: AppDeps) {
   const app = Fastify({
     ...(deps.logger ? { loggerInstance: deps.logger } : { logger: false }),
-    trustProxy: true,
+    trustProxy: trustProxyFromEnv(), // TRUST_PROXY: hop count (default 1 = Kong) or proxy CIDRs; never `true`
     bodyLimit: 16 * 1024,
   });
 

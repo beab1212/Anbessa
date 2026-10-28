@@ -159,7 +159,7 @@ export async function balanceView(tx: Tx, accountIdValue: string, now: Date) {
     stateChangedAt: b.stateChangedAt,
     overdueSince: b.overdueSince,
     referenceCode: b.referenceCode,
-    payoutMethod: b.payoutProvider ? { provider: b.payoutProvider, destination: maskDestination(b.payoutDestination) } : null,
+    payoutMethod: b.payoutProvider ? { provider: b.payoutProvider, destination: maskDestination(b.payoutDestination), changedAt: b.payoutMethodChangedAt } : null,
     suggestedTopUpMinor: suggestedTopUp(balance, policy),
     policy: {
       mode: policy.mode, warningMinor: policy.warningMinor, cashLimitMinor: policy.cashLimitMinor, hardLimitMinor: policy.hardLimitMinor,

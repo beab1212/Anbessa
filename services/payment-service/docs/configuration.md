@@ -24,6 +24,8 @@ Environment variables are parsed by a zod schema in `src/config/index.ts` (`load
 | `AUTH_JWKS_URL` | `http://localhost:3001/api/auth/jwks` | set it | URL | token signing keys |
 | `AUTH_INTERNAL_URL` | `http://localhost:3001` | set it | URL | `/internal/authz/snapshot` |
 | `PLATFORM_INTERNAL_URL` | `http://localhost:3011` | set it | URL | `/internal/settings/snapshot` |
+| `TRIP_INTERNAL_URL` | `http://localhost:3002` | set it | URL | `/internal/trips/:id`: trip-service's record of a trip, checked against every trip event before money is posted |
+| `TRIP_EVENT_CHECK` | `on` (`off` under `NODE_ENV=test`) | **on** (`off` refused) | `on` \| `off` | cross-check `trip.completed` / `trip.cancelled` (fee > 0) money fields with trip-service; a disagreeing event is not posted (`trip_event_anomaly`). `off` only for local runs or suites without trip-service; logged as a warning at start |
 | `PUBLIC_URL` | `http://localhost:3005` | set it | URL | base of the webhook URLs given to providers (`{PUBLIC_URL}/api/payments/webhooks/{provider}`) and of the simulator's checkout URLs. Behind Kong: the public API URL. A trailing `/` is removed |
 
 ### Providers
@@ -56,6 +58,7 @@ Because `GATEWAY_MODE` has no value other than `simulated`, and `simulated` is r
 | `RECONCILE_AFTER_SECONDS` | `300` | `120` | integer ≥ 10 | open charges, top-ups, refunds and payouts older than this are queried at the provider by the 1-minute reconcile job |
 | `SETTLEMENT_SCHEDULE` | `weekly` | `weekly` | `weekly` \| `off` | `weekly`: the settlement batch is prepared on Mondays (Addis Ababa date); `off`: only `POST /api/payments/settlements/run` |
 | `WRITE_OFF_AFTER_DAYS` | `90` | `90` | integer 0–3650 | A balance below zero can be written off once its payment due has been overdue this many days (`beneficiary.overdue_since`; Payment.md Q8). Read by `src/money/write-offs.ts` |
+| `PAYOUT_METHOD_COOLOFF_HOURS` | `72` | `72` | number 0–720 | a balance whose payout method was set or changed less than this long ago is held by payout runs (line `HELD`, paid by a later run); 0 = no cooling-off. The owner is told of every change (`payout_method.changed`) |
 
 ### Production checks
 
@@ -63,7 +66,8 @@ Because `GATEWAY_MODE` has no value other than `simulated`, and `simulated` is r
 
 - `GATEWAY_MODE` is `simulated`;
 - `KAFKA_BROKERS` is not set;
-- `REDIS_URL` is not set.
+- `REDIS_URL` is not set;
+- `TRIP_EVENT_CHECK` is `off`.
 
 Always: `PAYMENT_RETRY_SECONDS` must be valid and the webhook secrets distinct.
 

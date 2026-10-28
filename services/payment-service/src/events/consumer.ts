@@ -4,6 +4,7 @@
 // can't block a partition.
 
 import { Kafka, logLevel } from "kafkajs";
+import { kafkaClientConfig } from "@ride-app/shared-utils";
 import { z, ZodError } from "zod";
 import type { TripCancelledEvent, TripCompletedEvent } from "@ride-app/shared-types";
 import type { Logger } from "@ride-app/shared-utils";
@@ -46,7 +47,7 @@ export function createHandlers(payments: Payments) {
 }
 
 export function createConsumer(opts: { brokers: string[]; payments: Payments; logger: Logger; createTopics: boolean }) {
-  const kafka = new Kafka({ clientId: "payment-service", brokers: opts.brokers, logLevel: logLevel.WARN });
+  const kafka = new Kafka(kafkaClientConfig({ clientId: "payment-service", brokers: opts.brokers, logLevel: logLevel.WARN }));
   const consumer = kafka.consumer({ groupId: "payment-service" });
   const handlers = createHandlers(opts.payments);
   return {

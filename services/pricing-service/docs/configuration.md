@@ -45,7 +45,7 @@ Source: `src/config/index.ts` (zod). Blank values (`KEY=`) count as not set. The
 |---|---|---|---|
 | `DATABASE_URL` | Postgres (zones, fare rules and changes, promos, outbox) | none | **yes, always** |
 | `KAFKA_BROKERS` | comma-separated brokers; outbox relay and the trip event consumer | none (events stay in `outbox`) | **in production** (refused otherwise) |
-| `PROMO_APPROVAL_THRESHOLD_MINOR` | promos with a larger budget are activated by `incentive:approve`, not the creator | `1000000` (10 000 birr) | no |
+| `PROMO_APPROVAL_THRESHOLD_MINOR` | a promo whose budget, added to the live (ACTIVE/PAUSED) budgets of its creator or of any of its cities, passes this is activated by `incentive:approve`, not the creator | `1000000` (10 000 birr) | no |
 
 `LOCATION_INTERNAL_URL` is now in `.env.example`. `make secrets` adds the new keys to an existing `.env`.
 

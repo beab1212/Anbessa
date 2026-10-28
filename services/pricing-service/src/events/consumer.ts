@@ -4,10 +4,12 @@
 // kafkajs retries.
 //
 // trip-service sends `quoteId` on both events and `promoDiscountMinor` (the discount it actually
-// applied) on trip.completed; the reservation is found by quote id. Events without a quote id
-// (older ones) fall back to the rider's most recent BOOKED reservation in that city and vehicle type.
+// applied) on trip.completed. The reservation is the one BOOKED for that trip id (trip-service
+// names the trip when it books the quote); reservations booked before that are found by quote id.
+// A discount on a trip pricing never booked it for is recorded as a promo anomaly.
 
 import { Kafka, logLevel } from "kafkajs";
+import { kafkaClientConfig } from "@ride-app/shared-utils";
 import { z, ZodError } from "zod";
 import type { Logger } from "@ride-app/shared-utils";
 import type { PromoService } from "../promos/service.js";
@@ -24,7 +26,7 @@ const cancelled = z.object({
 });
 
 export function createConsumer(opts: { brokers: string[]; promos: PromoService; logger: Logger; createTopics: boolean }) {
-  const kafka = new Kafka({ clientId: "pricing-service", brokers: opts.brokers, logLevel: logLevel.WARN });
+  const kafka = new Kafka(kafkaClientConfig({ clientId: "pricing-service", brokers: opts.brokers, logLevel: logLevel.WARN }));
   const consumer = kafka.consumer({ groupId: "pricing-service" });
 
   /** One message (also used by the tests). */

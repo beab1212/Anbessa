@@ -129,6 +129,11 @@ export async function registerAdminRoutes(
   app.post("/api/pricing/promos/:id/pause", async (req) => ({ promo: await promos.pause(await staff(req), id.parse(req.params).id) }));
   app.post("/api/pricing/promos/:id/resume", async (req) => ({ promo: await promos.resume(await staff(req), id.parse(req.params).id) }));
   app.post("/api/pricing/promos/:id/archive", async (req) => ({ promo: await promos.archive(await staff(req), id.parse(req.params).id) }));
+  // promo anomalies (finance, every city): discounts the promo books can't explain
+  app.get("/api/pricing/promos/anomalies", async (req, reply) => {
+    const q = z.object({ limit }).parse(req.query);
+    return noStore(reply).send(await promos.anomalies(await staff(req), q));
+  });
   app.get("/api/pricing/promos/:id/redemptions", async (req, reply) => {
     const q = z.object({ limit, before: iso.optional() }).parse(req.query);
     return noStore(reply).send(await promos.redemptions(await staff(req), id.parse(req.params).id, q));

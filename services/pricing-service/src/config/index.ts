@@ -8,7 +8,8 @@ const csv = z
 
 export const envSchema = z
   .object({
-    NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+    // no default: an unset NODE_ENV must not quietly turn on development behaviour
+    NODE_ENV: z.enum(["development", "test", "production"]),
     PORT: z.coerce.number().default(3004),
     LOG_LEVEL: z.string().optional(),
     // zones, fare rules and their change requests, promotions (workflow 15)

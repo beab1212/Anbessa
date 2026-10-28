@@ -7,6 +7,7 @@ How payment-service talks to the rest of the system and to payment providers.
 | System | Direction | How | Purpose |
 |---|---|---|---|
 | trip-service | in | Kafka `trip.completed`, `trip.cancelled` | settle trips and cancellation fees |
+| trip-service | out | `GET {TRIP_INTERNAL_URL}/internal/trips/:id` (service token, 3 s) | every trip event's money checked against trip-service's record before posting; 404 → anomaly (not posted); other errors / timeout → the handler throws and Kafka retries (`src/lib/trips.ts`) |
 | fleet-service | in | HTTP `GET /internal/balances/state` | balance state when a driver starts a session |
 | platform-service | in | HTTP `GET /internal/ops/outbox`, `/internal/ops/integrations` | system page |
 | platform-service | out | HTTP `GET /internal/settings/snapshot` + Redis `settings:changed` | live settings (`payments.*`) |

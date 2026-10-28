@@ -6,7 +6,7 @@ Quotes (workflow [05](../../docs/design/workflows/05-ride-booking-matching.md) p
 2. prices it with the city's live fare card (admin dashboard → Settings → Fares: base, per km, per minute, minimum; changes need a second super admin);
 3. keeps one quote per vehicle type in Redis for `quote.ttlSeconds` (10 minutes).
 
-trip-service reads the quote by id when the trip is requested (`GET /internal/quotes/:id`). The rider pays the quoted fare even if fares change in between.
+trip-service reads the quote by id when the trip is requested (`GET /internal/quotes/:id?tripId=&userId=`). The rider pays the quoted fare even if fares change in between. A promo discount on the quote is booked for that one trip id: it is redeemed or released only by that trip's events, and a quote rebooked after its trip was cancelled comes without it.
 
 Port **3004**. There's no database: quotes live in Redis.
 
@@ -19,7 +19,8 @@ pnpm dev       # or `make dev-services` from the root
 |---|---|---|
 | `POST /api/pricing/estimates` | Anyone signed in (`ride-app` or `ride-admin`) | `{ pickup, dropoff, vehicleTypes?, pickupAddress?, dropoffAddress? }` → `{ quotes: [{ id, fareMinor, breakdown, distanceMeters, durationSeconds, approximate, expiresAt, … }] }`. Without `vehicleTypes`, every type offered in the city (admin → Cities and vehicles) |
 | `GET /api/pricing/fares?cityId=` | Public | The city's fare card per vehicle type (cached 60 s) |
-| `GET /internal/quotes/:id` | trip-service (service token) | The quote, or 404 when expired or unknown |
+| `GET /internal/quotes/:id` | trip-service (service token) | The quote, or 404 when expired or unknown; with `?tripId=&userId=` its promo discount is booked for that trip, without them the quote has no discount |
+| `POST /internal/quotes/:id/unbook` | trip-service (service token) | A discount booked for a trip that was never created is held again for the retry |
 | `POST /internal/quotes` | trip-service (service token) | A fresh quote for a user (re-pricing a scheduled ride at dispatch); never a promo |
 
 How the fare is worked out: base + km × per km + minutes × per minute, rounded to whole birr, at least the minimum fare. When OSRM is down, mapping-service answers with a straight-line estimate and the quote is marked `approximate`; the rider still pays the quoted fare.

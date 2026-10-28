@@ -37,7 +37,7 @@ No consumer reads `pricing.*` or `promo.*` yet. payment-service books the promo 
 
 | Topic | Producer | Effect |
 |---|---|---|
-| `trip.completed` | trip-service | redeem the rider's booked promo reservation (idempotent per trip). trip-service sends `quoteId` and `promoDiscountMinor` (the discount it applied; payment-service charges the rider `fareMinor −` it and books it to `PROMO_EXPENSE`); an event without `quoteId` falls back to the rider's latest BOOKED reservation in the city and vehicle type |
-| `trip.cancelled` | trip-service | release the booked reservation (by `quoteId`, which trip-service sends; else the rider's latest BOOKED in the city) |
+| `trip.completed` | trip-service | redeem the reservation BOOKED for that `tripId` (idempotent per trip; reservations booked before trips were bound are found by `quoteId`). trip-service sends `promoDiscountMinor` (the discount it applied; payment-service charges the rider `fareMinor −` it, after checking it against trip-service's record, and books it to `PROMO_EXPENSE`). A discount on a trip with no booking for it is recorded in `promo_anomaly` and logged, never skipped silently |
+| `trip.cancelled` | trip-service | release, for good, the reservation BOOKED for that `tripId` (another trip's cancellation never touches it) |
 
 Invalid JSON or payloads are logged and skipped; database errors are rethrown (kafkajs retries). In non-production the consumer creates missing topics.

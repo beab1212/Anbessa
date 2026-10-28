@@ -467,6 +467,7 @@ export const PAYMENT_CONTROL_TOPICS = {
   incentiveAwarded: "incentive.awarded",
   invoiceIssued: "invoice.issued",
   invoicePaid: "invoice.paid",
+  payoutMethodChanged: "payout_method.changed",
 } as const;
 export type PaymentControlTopic = (typeof PAYMENT_CONTROL_TOPICS)[keyof typeof PAYMENT_CONTROL_TOPICS];
 
@@ -509,6 +510,26 @@ export interface IncentiveAwardedEvent extends EventEnvelope {
   amountMinor: number;
   balanceMinor: number;
   currency: string;
+}
+
+/**
+ * payment-service → `payout_method.changed` (key beneficiary owner id): where a balance's payouts
+ * go was set or changed. Payouts wait until `payoutsResumeAt` (cooling-off), so the owner can
+ * react if it wasn't them. Destinations are masked (last four digits only).
+ */
+export interface PayoutMethodChangedEvent extends EventEnvelope {
+  accountId: string;
+  beneficiary: Beneficiary;
+  provider: string;
+  /** e.g. "•••1234" */
+  destinationMasked: string;
+  previousProvider: string | null;
+  previousDestinationMasked: string | null;
+  /** who made the change (the owner, or a member of the owning organisation) */
+  changedBy: string;
+  changedAt: string;
+  /** payouts to the new method start after this (ISO 8601) */
+  payoutsResumeAt: string;
 }
 
 /** payment-service → `invoice.issued` / `invoice.paid` (key orgId): a company's monthly invoice. */

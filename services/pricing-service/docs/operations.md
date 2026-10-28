@@ -71,7 +71,7 @@ Run locally now needs Postgres too: `docker compose -f docker-compose.dev.yml up
 | Command | What |
 |---|---|
 | `pnpm test` | unit: `tests/unit/pricing.test.ts` (unchanged behaviour with the empty catalog) and `tests/unit/workflow15.test.ts` (geometry, zone effects, surge + airport fee, promo discounts, impact preview) |
-| `pnpm test:integration` | `tests/integration/pricing.test.ts` on a recreated `pricing_service_test` database and its own Redis container `anbessa-test-redis-pricing` on port **6398** (started and stopped by the suite; `TEST_REDIS_URL` / `TEST_DATABASE_URL` override). Zones (validation, scoping, idempotency, versioning, effect on quotes), fare changes (maker–checker, 24 h notice, scheduled activation, quotes keep their price, emergency, reject/withdraw/expire), promos (activation threshold, discounted quotes, booking, redemption and exhaustion via the trip event handler, cancellation release, pause, expiry) |
+| `pnpm test:integration` | `tests/integration/pricing.test.ts` on a recreated `pricing_service_test` database and its own Redis container `anbessa-test-redis-pricing` on port **6398** (started and stopped by the suite; `TEST_REDIS_URL` / `TEST_DATABASE_URL` override). Zones (validation, scoping, idempotency, versioning, effect on quotes), fare changes (maker–checker, 24 h notice, scheduled activation, quotes keep their price, emergency, reject/withdraw/expire), promos (activation threshold, discounted quotes, booking, redemption and exhaustion via the trip event handler, cancellation release, pause, expiry). `tests/integration/promo-binding.test.ts` needs only Postgres (`TEST_REDIS_URL=redis://127.0.0.1:1 pnpm test:integration tests/integration/promo-binding.test.ts`): a reservation bound to one trip (rebooking after a cancellation, other trips' events), unbook, booking within budget and `maxRedemptions` (also in parallel), the spending cap, anomalies, the approval threshold across live promos |
 
 Failure modes:
 
@@ -80,6 +80,7 @@ Failure modes:
 | Postgres down at start | estimates `503 dependency_unavailable` until the catalog loads; readiness 503 |
 | Postgres down later | estimates keep using the last catalog (warning `pricing catalog reload failed`); promo codes fail (500) |
 | Kafka down | events wait in `outbox`; trip events wait in Kafka; promo reservations stay BOOKED (expire after 24 h if never redeemed) |
+| `PROMO ANOMALY` in the logs / rows in `promo_anomaly` | a trip was given a discount the promo books can't explain (no booking for that trip, more than booked, or past the budget). payment-service only posts a discount trip-service's own record confirms, so the money moved; check the trip's history (`trip_event`), the reservation (`promo_reservation` by `quote_id`) and the promo's budget. `GET /api/pricing/promos/anomalies` lists them |
 | Redis `pricing:catalog_changed` lost | other replicas pick the change up within 60 s |
 
 Useful queries: pending fare changes `SELECT * FROM fare_change_request WHERE status='PENDING'`; promo burn `SELECT code, spent_minor, budget_minor, redemption_count FROM promo WHERE status='ACTIVE'`; unpublished events `SELECT count(*) FROM outbox WHERE published_at IS NULL`.

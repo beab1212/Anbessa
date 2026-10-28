@@ -5,6 +5,8 @@
 //   per day, so a rerun changes nothing. A finance manager approves the batch (maker ≠ checker);
 //   each line debits the balance and goes to the provider; a failed payout is reversed.
 //   Dues past their deadline without the minimum paid block the beneficiary (OVERDUE → BLOCKED).
+//   A balance whose payout method changed less than the cooling-off period ago (default 72 h) is
+//   held: its line is HELD with the reason, nothing is debited, and a later run pays it.
 
 import { authorize, can, type Principal } from "@ride-app/shared-authz";
 import type { Logger } from "@ride-app/shared-utils";
@@ -36,9 +38,19 @@ export function batchView(b: PayoutBatch & { lines?: (PayoutLine & { referenceCo
   };
 }
 
-export function createPayouts(deps: { db: Db; gateways: Gateways; logger: Logger; notifyUrl: (provider: string) => string; now?: () => Date }) {
+/** Is a payout to this method still in its cooling-off period? Returns until when, or null. */
+export function coolingOffUntil(changedAt: Date | null, coolOffMs: number, at: Date): Date | null {
+  if (!changedAt || coolOffMs <= 0) return null;
+  const until = new Date(changedAt.getTime() + coolOffMs);
+  return until.getTime() > at.getTime() ? until : null;
+}
+
+const heldReason = (until: Date) => `payout method changed recently: held until ${until.toISOString()}, paid by the next run after that`;
+
+export function createPayouts(deps: { db: Db; gateways: Gateways; logger: Logger; notifyUrl: (provider: string) => string; now?: () => Date; /** payouts wait this long after a payout method change */ payoutCoolOffMs?: number }) {
   const { db, gateways, logger } = deps;
   const now = deps.now ?? (() => new Date());
+  const coolOffMs = deps.payoutCoolOffMs ?? 0;
 
   async function finishBatchIfDone(tx: Tx, batchId: string) {
     const open = await tx.payoutLine.count({ where: { batchId, status: { in: ["PENDING", "SENT"] } } });
@@ -55,6 +67,12 @@ export function createPayouts(deps: { db: Db; gateways: Gateways; logger: Logger
       const amount = Math.min(Number(line.amountMinor), Number(b.account.balanceMinor));
       if (amount <= 0 || !line.provider || !line.destination) {
         await tx.payoutLine.update({ where: { id: line.id }, data: { status: "SKIPPED", failure: amount <= 0 ? "nothing left to pay out" : "no payout method" } });
+        return null;
+      }
+      // the method changed after the run (or the line's destination isn't the current one): wait
+      const until = coolingOffUntil(b.payoutMethodChangedAt, coolOffMs, now());
+      if (until || line.provider !== b.payoutProvider || line.destination !== b.payoutDestination) {
+        await tx.payoutLine.update({ where: { id: line.id }, data: { status: "HELD", failure: until ? heldReason(until) : "payout method changed since the run: paid by the next run" } });
         return null;
       }
       const posted = await post(tx, {
@@ -131,11 +149,14 @@ export function createPayouts(deps: { db: Db; gateways: Gateways; logger: Logger
             });
             const amount = balance - Number(held._sum.amountMinor ?? 0n);
             if (amount <= 0) continue;
-            const ready = !!(ben.payoutProvider && ben.payoutDestination && gateways.has(ben.payoutProvider));
+            const hasMethod = !!(ben.payoutProvider && ben.payoutDestination && gateways.has(ben.payoutProvider));
+            const until = hasMethod ? coolingOffUntil(ben.payoutMethodChangedAt, coolOffMs, at) : null;
+            const ready = hasMethod && !until;
             await tx.payoutLine.create({
               data: {
                 batchId: b.id, beneficiaryAccountId: ben.accountId, amountMinor: BigInt(amount), provider: ben.payoutProvider, destination: ben.payoutDestination,
-                status: ready ? "PENDING" : "SKIPPED", ...(ready ? {} : { failure: "no payout method: the balance rolls over" }),
+                status: ready ? "PENDING" : until ? "HELD" : "SKIPPED",
+                ...(ready ? {} : { failure: until ? heldReason(until) : "no payout method: the balance rolls over" }),
               },
             });
             if (ready) {
@@ -164,7 +185,8 @@ export function createPayouts(deps: { db: Db; gateways: Gateways; logger: Logger
           where: { id: b.id },
           data: { totalMinor: BigInt(total), lineCount: lines, duesCreated: dues, ...(lines === 0 ? { status: "COMPLETED", decidedAt: at } : {}) },
         });
-        await writeOutbox(tx, audit({ actorId: by?.userId ?? null, action: "payout:prepare", resource: { type: "payout_batch", id: b.id }, outcome: "EXECUTED", reason: `${lines} payouts, ${dues} payment dues` }));
+        const held = await tx.payoutLine.count({ where: { batchId: b.id, status: "HELD" } });
+        await writeOutbox(tx, audit({ actorId: by?.userId ?? null, action: "payout:prepare", resource: { type: "payout_batch", id: b.id }, outcome: "EXECUTED", reason: `${lines} payouts, ${dues} payment dues${held ? `, ${held} held (payout method changed recently)` : ""}` }));
         return updated;
       });
       return { batch: batchView(batch), created: true };

@@ -19,6 +19,7 @@ import { AppError, badRequest, conflict, forbidden, notFound } from "../lib/erro
 import type { Realtime } from "../lib/realtime.js";
 import { accounts, post } from "../ledger/ledger.js";
 import { audit, writeOutbox } from "../outbox/outbox.js";
+import { completedMismatches, cancelledMismatches, type Mismatch, type TripLookup } from "../lib/trips.js";
 import { canSeePayment } from "./access.js";
 import { afterPosting } from "./balances.js";
 import { collectReceivable, settleCancellationFee, settleTripFare, type Source } from "./settlement.js";
@@ -49,6 +50,11 @@ export interface PaymentsDeps {
   notifyUrl: (provider: string) => string;
   /** seconds to wait before each retry of a declined charge; its length is the number of retries */
   retryDelaysSeconds: number[];
+  /**
+   * trip-service's own record of a trip: every trip event is checked against it before money is
+   * posted (required in production, TRIP_EVENT_CHECK). Absent = not checked (tests, local runs).
+   */
+  trips?: TripLookup;
   now?: () => Date;
 }
 
@@ -137,6 +143,26 @@ export function createPayments(deps: PaymentsDeps) {
   async function once(tx: Tx, eventId: string, topic: string) {
     const r = await tx.$executeRaw`INSERT INTO inbox (event_id, topic) VALUES (${eventId}, ${topic}) ON CONFLICT DO NOTHING`;
     return r === 1;
+  }
+
+  /**
+   * Defence in depth: does the event's money agree with trip-service's record of the trip? An
+   * event that disagrees is consumed without posting: a trip_event_anomaly row, an audit event and
+   * a loud log. trip-service unreachable throws, so the event is retried, never posted unchecked.
+   * Returns true when the event may be posted.
+   */
+  async function verified(topic: "trip.completed" | "trip.cancelled", e: TripCompletedEvent | TripCancelledEvent, compare: () => Promise<Mismatch[]>): Promise<boolean> {
+    if (!deps.trips) return true;
+    if (await db.inbox.findUnique({ where: { eventId: e.eventId } })) return true; // a replay: `once` makes it a no-op
+    const mismatches = await compare();
+    if (mismatches.length === 0) return true;
+    await db.$transaction(async (tx) => {
+      if (!(await once(tx, e.eventId, topic))) return;
+      await tx.tripEventAnomaly.create({ data: { eventId: e.eventId, topic, tripId: e.tripId, mismatches: mismatches as unknown as Prisma.InputJsonValue, event: e as unknown as Prisma.InputJsonValue } });
+      await writeOutbox(tx, audit({ actorId: null, action: "trip_event:reject", resource: { type: "trip", id: e.tripId }, outcome: "EXECUTED", reason: `${topic} disagrees with trip-service on ${mismatches.map((m) => m.field).join(", ")}; nothing posted` }));
+    });
+    logger.error({ topic, eventId: e.eventId, tripId: e.tripId, mismatches }, "TRIP EVENT ANOMALY: the event's money disagrees with trip-service's record; nothing posted");
+    return false;
   }
 
   async function startCharge(paymentId: string): Promise<void> {
@@ -237,8 +263,24 @@ export function createPayments(deps: PaymentsDeps) {
     return "captured";
   }
 
+  /**
+   * Lock the payment row and say how much can still be refunded: the amount less what is refunded
+   * and being refunded (approved), and, for a new request, what waits for approval. An approval
+   * (`approving` = that refund) counts only refunded and approved ones: each request is checked
+   * again when it is approved.
+   */
+  async function refundable(tx: Tx, paymentId: string, approving?: string) {
+    await tx.$queryRaw`SELECT id FROM payment WHERE id = ${paymentId}::uuid FOR UPDATE`;
+    const pay = await tx.payment.findUniqueOrThrow({ where: { id: paymentId }, include: { refunds: true } });
+    const counted = approving ? ["PROCESSING"] : ["PENDING_APPROVAL", "PROCESSING"];
+    const open = pay.refunds.filter((x) => x.id !== approving && counted.includes(x.status)).reduce((s, x) => s + Number(x.amountMinor), 0);
+    return { pay, left: Number(pay.amountMinor - pay.refundedMinor) - open };
+  }
+
   async function refundDone(r: Refund, notice: { providerRef: string | null; status: "SUCCEEDED" | "FAILED"; failure?: string }) {
     return db.$transaction(async (tx) => {
+      // the payment row first (the lock requests and approvals take), then the refund
+      await tx.$queryRaw`SELECT id FROM payment WHERE id = ${r.paymentId}::uuid FOR UPDATE`;
       const current = await tx.refund.findUniqueOrThrow({ where: { id: r.id }, include: { payment: true } });
       if (current.status !== "PROCESSING") return "duplicate";
       const pay = current.payment;
@@ -258,7 +300,12 @@ export function createPayments(deps: PaymentsDeps) {
           beneficiaryAccountId ? { account: { id: beneficiaryAccountId }, amountMinor: -amount } : { account: accounts.goodwill(), amountMinor: -amount },
         ],
       });
-      const refunded = pay.refundedMinor + r.amountMinor;
+      let refunded = pay.refundedMinor + r.amountMinor;
+      if (refunded > pay.amountMinor) {
+        // approvals keep within the amount, so the provider refunded more than we let through
+        logger.error({ paymentId: pay.id, refundId: r.id, amountMinor: Number(pay.amountMinor), refundedMinor: Number(refunded) }, "REFUND ANOMALY: refunds passed the amount paid; recorded as fully refunded, check with the provider");
+        refunded = pay.amountMinor;
+      }
       await tx.payment.update({ where: { id: pay.id }, data: { refundedMinor: refunded, status: refunded >= pay.amountMinor ? "REFUNDED" : "PARTIALLY_REFUNDED" } });
       await tx.refund.update({ where: { id: r.id }, data: { status: "SUCCEEDED", providerRef: notice.providerRef ?? current.providerRef, journalEntryId: posted.entryId, completedAt: now() } });
       if (beneficiaryAccountId) await afterPosting(tx, beneficiaryAccountId, { creditMinor: 0, now: now() });
@@ -271,6 +318,7 @@ export function createPayments(deps: PaymentsDeps) {
     // ── Kafka (consumer) ──────────────────────────────────────────────────────
     /** Cash and corporate trips settle at once; digital ones start a charge. Returns the payment to charge. */
     async onTripCompleted(e: TripCompletedEvent): Promise<string | null> {
+      if (!(await verified("trip.completed", e, async () => completedMismatches(e, await deps.trips!.get(e.tripId))))) return null;
       const created = await db.$transaction(async (tx) => {
         if (!(await once(tx, e.eventId, "trip.completed"))) return null;
         // a promo discount: the rider pays fare − discount (never below 0); the driver earns on the full fare
@@ -303,6 +351,7 @@ export function createPayments(deps: PaymentsDeps) {
 
     /** A fee: charged digitally, or a receivable for cash riders; the driver's compensation either way. */
     async onTripCancelled(e: TripCancelledEvent & { billingOrgId?: string }): Promise<string | null> {
+      if (e.feeMinor > 0 && !(await verified("trip.cancelled", e, async () => cancelledMismatches(e, await deps.trips!.get(e.tripId))))) return null;
       const created = await db.$transaction(async (tx) => {
         if (!(await once(tx, e.eventId, "trip.cancelled"))) return null;
         if (e.feeMinor <= 0) return null;
@@ -474,15 +523,19 @@ export function createPayments(deps: PaymentsDeps) {
       return paymentView(await db.payment.findUniqueOrThrow({ where: { id } }));
     },
 
+    /**
+     * Support asks for a refund. The payment row is locked while the request is counted, so
+     * parallel requests can't together ask for more than was paid: what is refunded, being
+     * refunded and waiting for approval all count against the amount.
+     */
     async requestRefund(p: Principal, paymentId: string, input: { amountMinor: number; reason: string; driverAtFault: boolean }) {
-      const pay = await db.payment.findUnique({ where: { id: paymentId }, include: { refunds: true } });
-      if (!pay) throw notFound("payment");
-      authorize(p, "refund:request", { cityId: pay.cityId });
-      if (!["SUCCEEDED", "PARTIALLY_REFUNDED"].includes(pay.status)) throw conflict("only a paid payment can be refunded", "invalid_state");
-      const pending = pay.refunds.filter((r) => r.status === "PENDING_APPROVAL" || r.status === "PROCESSING").reduce((s, r) => s + Number(r.amountMinor), 0);
-      const left = Number(pay.amountMinor - pay.refundedMinor) - pending;
-      if (input.amountMinor > left) throw badRequest(`at most ${(left / 100).toFixed(2)} ETB can still be refunded`, "refund_too_large");
+      const found = await db.payment.findUnique({ where: { id: paymentId } });
+      if (!found) throw notFound("payment");
+      authorize(p, "refund:request", { cityId: found.cityId });
       return db.$transaction(async (tx) => {
+        const { pay, left } = await refundable(tx, paymentId);
+        if (!["SUCCEEDED", "PARTIALLY_REFUNDED"].includes(pay.status)) throw conflict("only a paid payment can be refunded", "invalid_state");
+        if (input.amountMinor > left) throw badRequest(`at most ${(left / 100).toFixed(2)} ETB can still be refunded`, "refund_too_large");
         const r = await tx.refund.create({ data: { paymentId, amountMinor: BigInt(input.amountMinor), reason: input.reason, driverAtFault: input.driverAtFault, requestedBy: p.userId } });
         await writeOutbox(tx, audit({ actorId: p.userId, action: "refund:request", resource: { type: "payment", id: paymentId }, outcome: "EXECUTED", reason: input.reason }));
         return refundView(r);
@@ -510,9 +563,15 @@ export function createPayments(deps: PaymentsDeps) {
         await db.$transaction((tx) => writeOutbox(tx, audit({ actorId: p.userId, action: "refund:reject", resource: { type: "refund", id: r.id }, outcome: "EXECUTED", reason })));
         return refundView(await db.refund.findUniqueOrThrow({ where: { id: r.id } }));
       }
-      const { count } = await db.refund.updateMany({ where: { id: r.id, status: "PENDING_APPROVAL" }, data: { status: "PROCESSING", approvedBy: p.userId, decisionReason: reason ?? null, decidedAt: now() } });
-      if (count === 0) throw conflict("the refund was already decided", "invalid_state");
-      await db.$transaction((tx) => writeOutbox(tx, audit({ actorId: p.userId, action: "refund:approve", resource: { type: "refund", id: r.id }, outcome: "EXECUTED", ...(reason ? { reason } : {}) })));
+      // approval re-checks what is left, under the payment's lock (other refunds may have gone through since the request)
+      await db.$transaction(async (tx) => {
+        const { pay, left } = await refundable(tx, r.paymentId, r.id);
+        if (!["SUCCEEDED", "PARTIALLY_REFUNDED"].includes(pay.status)) throw conflict("only a paid payment can be refunded", "invalid_state");
+        if (Number(r.amountMinor) > left) throw conflict(`only ${(left / 100).toFixed(2)} ETB can still be refunded; reject this request and ask for less`, "refund_too_large");
+        const { count } = await tx.refund.updateMany({ where: { id: r.id, status: "PENDING_APPROVAL" }, data: { status: "PROCESSING", approvedBy: p.userId, decisionReason: reason ?? null, decidedAt: now() } });
+        if (count === 0) throw conflict("the refund was already decided", "invalid_state");
+        await writeOutbox(tx, audit({ actorId: p.userId, action: "refund:approve", resource: { type: "refund", id: r.id }, outcome: "EXECUTED", ...(reason ? { reason } : {}) }));
+      });
       try {
         const res = await gateways.get(r.payment.provider).refund({
           reference: makeReference("refund", r.id), chargeReference: makeReference("payment", r.paymentId, Math.max(1, r.payment.attempts)),

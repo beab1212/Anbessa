@@ -86,6 +86,7 @@ The migration comment says production also withholds UPDATE/DELETE grants from t
 | `reference_code` | text | no | | unique, `ANB-XXXXXX` |
 | `payout_provider` | text | yes | | |
 | `payout_destination` | text | yes | | digits (optionally `+`), masked in every response |
+| `payout_method_changed_at` | timestamptz | yes | | when the payout method was last set or changed; payout runs hold the balance for `PAYOUT_METHOD_COOLOFF_HOURS` after it |
 | `created_at` | timestamptz | no | now | |
 
 Indexes: unique `(type, owner_id)`, unique `reference_code`, `state`.
@@ -205,6 +206,20 @@ PK `(trip_id, purpose)`. Indexes: `(beneficiary_account_id, settled_at DESC)` (a
 | `mobile_money_provider` | text | |
 | `updated_at` | timestamptz | |
 
+### `trip_event_anomaly` (`TripEventAnomaly`)
+
+A trip event whose money disagrees with trip-service's record of the trip, or names a trip trip-service doesn't know. Nothing was posted for it (the `inbox` row marks the event consumed).
+
+| Column | Type | Null | Notes |
+|---|---|---|---|
+| `id` | uuid | no | uuidv7 |
+| `event_id` | text | no | unique: the Kafka event's `eventId` |
+| `topic` | text | no | `trip.completed` or `trip.cancelled` |
+| `trip_id` | uuid | no | indexed |
+| `mismatches` | jsonb | no | `[{ field, event, trip }]` (`field: "trip"` = unknown trip) |
+| `event` | jsonb | no | the event as received |
+| `created_at` | timestamptz | no | indexed (newest first) |
+
 ### `refund` (`Refund`)
 
 | Column | Type | Null | Default | Notes |
@@ -287,7 +302,7 @@ Indexes: unique `(beneficiary_account_id, cycle_end)`, `(status, due_at)`.
 | `beneficiary_account_id` | uuid | no | | |
 | `amount_minor` | bigint | no | | CHECK > 0; lowered to the balance at send time |
 | `provider`, `destination` | text | yes | | copied from the beneficiary at run time |
-| `status` | text | no | `PENDING` | CHECK: `PENDING`, `SENT`, `SUCCEEDED`, `FAILED`, `SKIPPED` |
+| `status` | text | no | `PENDING` | CHECK: `PENDING`, `SENT`, `SUCCEEDED`, `FAILED`, `SKIPPED`, `HELD` (payout method cooling off: paid by a later run) |
 | `provider_ref`, `provider_txn_id` | text | yes | | both unique |
 | `failure` | text | yes | | |
 | `journal_entry_id`, `reversal_entry_id` | uuid | yes | | |
@@ -427,6 +442,8 @@ Nothing in the service deletes rows except `idempotency_key` (24 h). `outbox` (p
 | 3 | `20261031100000_report_indexes` | `ix_trip_settlement_day`, `ix_trip_settlement_city_day`, `ix_payment_completed`, `ix_refund_completed`, `ix_top_up_completed` for `GET /api/payments/reports/daily` (all also `@@index` entries in `schema.prisma`). The corporate charges list uses the existing `ix_posting_account` |
 
 | 4 | `20261101100000_money_controls` | Tables `balance_adjustment`, `write_off`, `policy_override`, `incentive_program`, `incentive_award`, `invoice`, `invoice_line`, `invoice_payment`, `invoice_counter` with their indexes and three foreign keys. By hand: CHECK constraints (maker ≠ checker, statuses, amounts, windows), `ux_write_off_pending`, exclusion constraint `ex_policy_override_no_overlap`, function `refuse_invoice_change()` and triggers `trg_invoice_immutable`, `trg_invoice_line_append_only`, `trg_invoice_payment_append_only`, `trg_incentive_award_append_only` (the last three reuse `refuse_ledger_change()`) |
+| 5 | `20261102100000_trip_settlement_promo` | `trip_settlement.promo_discount_minor` with CHECK `ck_trip_settlement_promo` (0 … fare) |
+| 6 | `20261103100000_payout_cooloff_trip_check` | `beneficiary.payout_method_changed_at`; `ck_payout_line_status` gains `HELD`; table `trip_event_anomaly` (unique `event_id`, indexes on `created_at`, `trip_id`); `ck_payment_refunded_within_amount` (`0 ≤ refunded_minor ≤ amount_minor`, NOT VALID) |
 
 To add a migration: `pnpm exec prisma migrate dev --create-only` in the service folder (comment in the root `Makefile`), then add any hand-written SQL to the generated file.
 

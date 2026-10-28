@@ -4,11 +4,12 @@ import { Redis } from "ioredis";
 import { createTokenVerifier, type VerifyAccessToken } from "@ride-app/shared-authz";
 import { createSettingsClient, fetchSettingsSnapshotFrom, type SettingsReader } from "@ride-app/shared-settings";
 import type { Logger } from "@ride-app/shared-utils";
-import type { Config } from "./config/index.js";
+import { tripEventCheck, type Config } from "./config/index.js";
 import { createDb, type Db } from "./db.js";
 import { createGateways } from "./gateways/index.js";
 import { httpDeliver, simStore, type Deliver, type SimStore } from "./gateways/simulator.js";
 import { noRealtime, socketEmitter, type Realtime } from "./lib/realtime.js";
+import { tripLookup, type TripLookup } from "./lib/trips.js";
 import { createEarnings } from "./money/earnings.js";
 import { createReports } from "./money/reports.js";
 import { createBalanceService } from "./money/balance-service.js";
@@ -31,6 +32,8 @@ export interface ContainerOptions {
   /** how the simulator delivers callbacks (tests inject them into the app) */
   deliver?: Deliver;
   simStore?: SimStore;
+  /** trip-service's record of trips (tests inject a fake); used when TRIP_EVENT_CHECK is on */
+  trips?: TripLookup;
   now?: () => Date;
 }
 
@@ -61,11 +64,15 @@ export function createContainer(config: Config, logger: Logger, opts: ContainerO
     { store: opts.simStore ?? simStore(redis), deliver: opts.deliver ?? httpDeliver, logger },
   );
 
-  const payments = createPayments({ db, gateways, settings, realtime, logger, notifyUrl, retryDelaysSeconds: config.PAYMENT_RETRY_SECONDS, now });
+  // every trip event's money is checked against trip-service before it is posted (off only in tests/dev by config)
+  const trips = opts.trips ?? (tripEventCheck(config) ? tripLookup(config.TRIP_INTERNAL_URL, config.INTERNAL_SERVICE_TOKEN) : undefined);
+  if (!trips) logger.warn("TRIP_EVENT_CHECK is off: trip events are posted without checking them against trip-service");
+  const payoutCoolOffMs = config.PAYOUT_METHOD_COOLOFF_HOURS * 3_600_000;
+  const payments = createPayments({ db, gateways, settings, realtime, logger, notifyUrl, retryDelaysSeconds: config.PAYMENT_RETRY_SECONDS, now, ...(trips ? { trips } : {}) });
   const topUps = createTopUps({ db, gateways, realtime, logger, notifyUrl, now });
-  const payouts = createPayouts({ db, gateways, logger, notifyUrl, now });
+  const payouts = createPayouts({ db, gateways, logger, notifyUrl, now, payoutCoolOffMs });
   const ruleChanges = createRuleChanges({ db, now });
-  const balances = createBalanceService({ db, gateways, now });
+  const balances = createBalanceService({ db, gateways, now, payoutCoolOffMs });
   const earnings = createEarnings({ db, now });
   const reports = createReports({ db, now });
   const webhooks = createWebhooks({ db, gateways, payments, topUps, payouts, logger, now });

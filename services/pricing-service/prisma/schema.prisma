@@ -181,6 +181,7 @@ model PromoReservation {
 
   @@index([promoId, status])
   @@index([userId, status, createdAt(sort: Desc)])
+  @@index([tripId], map: "ix_reservation_trip")
   @@map("promo_reservation")
 }
 
@@ -225,4 +226,25 @@ model Outbox {
   publishedAt DateTime? @map("published_at") @db.Timestamptz
 
   @@map("outbox")
+}
+
+/// Something about a promo didn't add up (a trip given a discount pricing never booked for it, a
+/// redemption above the reservation, spending past the budget). Written by the trip.completed
+/// consumer, one row per trip and kind; finance reviews them (docs/operations.md).
+model PromoAnomaly {
+  id            String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  /// DISCOUNT_WITHOUT_RESERVATION | DISCOUNT_ABOVE_RESERVATION | OVER_BUDGET
+  kind          String
+  tripId        String   @map("trip_id") @db.Uuid
+  promoId       String?  @map("promo_id") @db.Uuid
+  quoteId       String?  @map("quote_id")
+  riderId       String?  @map("rider_id") @db.Uuid
+  /// the discount in question (santim)
+  discountMinor Int      @map("discount_minor")
+  details       Json     @default("{}")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([tripId, kind])
+  @@index([createdAt(sort: Desc)])
+  @@map("promo_anomaly")
 }

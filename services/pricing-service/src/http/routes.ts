@@ -84,10 +84,19 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
     });
     internal.get("/internal/quotes/:id", { config: { rateLimit: false } }, async (req) => {
       const { id } = z.object({ id: z.string().min(1).max(100) }).parse(req.params);
-      // reading the quote to book makes its promo discount BOOKED (or drops it when it can't be given)
-      const q = await quotes.forBooking(id);
+      // ?tripId=&userId=: reading the quote to book that trip makes its promo discount BOOKED for
+      // it (or drops it when it can't be given); without them the quote comes without a discount
+      const q0 = z.object({ tripId: z.string().uuid().optional(), userId: z.string().uuid().optional() }).parse(req.query);
+      const q = await quotes.forBooking(id, q0.tripId && q0.userId ? { tripId: q0.tripId, userId: q0.userId } : undefined);
       if (!q) throw notFound("quote");
       return q;
+    });
+
+    // trip-service booked the quote's discount for a trip it then didn't create: hold it again
+    internal.post("/internal/quotes/:id/unbook", { config: { rateLimit: false } }, async (req) => {
+      const { id } = z.object({ id: z.string().min(1).max(100) }).parse(req.params);
+      const { tripId } = z.object({ tripId: z.string().uuid() }).parse(req.body);
+      return { unbooked: await quotes.unbook(id, tripId) };
     });
 
     // a quote made by a service for a user: trip-service re-prices a scheduled ride shortly before

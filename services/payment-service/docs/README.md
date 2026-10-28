@@ -28,7 +28,7 @@ Port **3005**, database **`payment_service`**, Kong prefix **`/api/payments`**.
 
 ## What it does not own
 
-- **Fares, quotes and cancellation fees.** trip-service and pricing-service decide the amounts; this service settles what `trip.completed` and `trip.cancelled` carry.
+- **Fares, quotes and cancellation fees.** trip-service and pricing-service decide the amounts; this service settles what `trip.completed` and `trip.cancelled` carry, once trip-service's own record of the trip (`GET /internal/trips/:id`) agrees with the event (`TRIP_EVENT_CHECK`, required in production).
 - **Whether a payment method is offered.** `payments.methods` is a platform-service setting owned by trip-service; this service only echoes it on `GET /api/payments/methods`.
 - **Matching eligibility.** location-service applies `balance.state_changed` to its Redis state; fleet-service refuses to start a session for a `BLOCKED` balance. This service only publishes the state and answers `GET /internal/balances/state`.
 - **Notifications.** notification-service turns this service's events into pushes and SMS. This service only pushes live socket events to riders and drivers through realtime-gateway's Redis adapter.

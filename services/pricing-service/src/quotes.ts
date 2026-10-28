@@ -200,15 +200,26 @@ export function createQuotes(deps: {
     get: (id: string) => deps.store.get(id),
 
     /**
-     * trip-service reads the quote to book a trip: its promo discount becomes BOOKED. When the
-     * discount can't be given any more, the quote is served without it (the rider pays fareMinor).
+     * trip-service reads the quote to book trip `booking.tripId` for `booking.userId`: its promo
+     * discount becomes BOOKED for that trip. When the discount can't be given (any more), or the
+     * caller didn't say which trip it books (an older trip-service, or a scheduled booking that
+     * only checks the quote), the quote is served without it (the rider pays fareMinor).
      */
-    async forBooking(id: string): Promise<Quote | null> {
+    async forBooking(id: string, booking?: { tripId: string; userId: string }): Promise<Quote | null> {
       const q = await deps.store.get(id);
-      if (!q || !q.promo || !deps.promos) return q;
-      if (await deps.promos.book(q.id)) return q;
+      if (!q || !q.promo) return q;
+      if (booking && deps.promos && (await deps.promos.book(q.id, booking))) return q;
       const { promo: _dropped, ...rest } = q;
       return { ...rest, discountMinor: 0, payableMinor: q.fareMinor };
+    },
+
+    /** trip-service booked the discount for a trip it then couldn't create: hold it again for the rider's retry. */
+    async unbook(id: string, tripId: string): Promise<boolean> {
+      if (!deps.promos) return false;
+      const q = await deps.store.get(id);
+      // the reservation is held until the quote expires (an expired quote can't be booked anyway)
+      const heldUntil = q ? new Date(q.expiresAt) : now();
+      return deps.promos.unbook(id, tripId, heldUntil);
     },
 
     /** The fare card of every vehicle type offered in a city (for the apps' fare info screen). */

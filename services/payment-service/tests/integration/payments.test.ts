@@ -343,6 +343,9 @@ describe("weekly settlement and payouts (workflow 09 D–E)", () => {
     const c = (await h.balanceOf("INDIVIDUAL", closed.id))!;
     await h.ok(h.req("PUT", `/api/payments/balances/${c.accountId}/payout-method`, closed, { provider: "cbebirr", destination: "+251911220000" }));
 
+    // a payout method is used once its cooling-off period (72 h) has passed (security.test.ts holds one)
+    h.clock.now += 73 * 3_600_000;
+
     const debtor = uuid();
     for (let i = 0; i < 2; i++) await h.c.payments.onTripCompleted(h.completed({ driverId: debtor, fareMinor: 100_000 }));
     const b = (await h.balanceOf("INDIVIDUAL", debtor))!;

@@ -196,12 +196,21 @@ describe("promos", () => {
     expect(comfort).toMatchObject({ discountMinor: 0 });
     expect(comfort.promo).toBeUndefined();
 
-    // trip-service books with it, the trip completes
-    const booked = await h.internal(`/internal/quotes/${eco.id}`);
-    expect(booked.json<Json>()).toMatchObject({ discountMinor: 3400, promo: { promoId: p.id } });
-    expect((await h.c.db.promoReservation.findUniqueOrThrow({ where: { quoteId: eco.id } })).status).toBe("BOOKED");
-    expect((await h.req("GET", `/api/pricing/promos/${p.id}`, mk)).json<Json>().promo).toMatchObject({ bookedMinor: 3400, bookedCount: 1 });
+    // read without naming the trip (a scheduled booking's check): no discount, nothing booked
+    expect((await h.internal(`/internal/quotes/${eco.id}`)).json<Json>()).toMatchObject({ discountMinor: 0, payableMinor: 17_400 });
+    expect((await h.c.db.promoReservation.findUniqueOrThrow({ where: { quoteId: eco.id } })).status).toBe("HELD");
+    // someone else can't book the rider's discount
+    expect((await h.internal(`/internal/quotes/${eco.id}?tripId=${uuid()}&userId=${uuid()}`)).json<Json>()).toMatchObject({ discountMinor: 0 });
+
+    // trip-service books with it for one trip, the trip completes
     const trip1 = uuid();
+    const booked = await h.internal(`/internal/quotes/${eco.id}?tripId=${trip1}&userId=${r1.id}`);
+    expect(booked.json<Json>()).toMatchObject({ discountMinor: 3400, promo: { promoId: p.id } });
+    expect(await h.c.db.promoReservation.findUniqueOrThrow({ where: { quoteId: eco.id } })).toMatchObject({ status: "BOOKED", tripId: trip1 });
+    // the same trip asking again keeps it; another trip with the same quote doesn't get it
+    expect((await h.internal(`/internal/quotes/${eco.id}?tripId=${trip1}&userId=${r1.id}`)).json<Json>()).toMatchObject({ discountMinor: 3400 });
+    expect((await h.internal(`/internal/quotes/${eco.id}?tripId=${uuid()}&userId=${r1.id}`)).json<Json>()).toMatchObject({ discountMinor: 0 });
+    expect((await h.req("GET", `/api/pricing/promos/${p.id}`, mk)).json<Json>().promo).toMatchObject({ bookedMinor: 3400, bookedCount: 1 });
     const done = { tripId: trip1, riderId: r1.id, cityId: "addis-ababa", vehicleType: "economy", fareMinor: 17_400, currency: "ETB", completedAt: iso(h.clock.now + HOUR) };
     await h.consumer.handle("trip.completed", JSON.stringify(done));
     await h.consumer.handle("trip.completed", JSON.stringify(done)); // replay: once
@@ -215,8 +224,9 @@ describe("promos", () => {
     const r2 = await h.rider();
     const q2 = (await economy(r2, { promoCode: p.code })).quotes[0];
     expect(q2.discountMinor).toBe(2600);
-    await h.internal(`/internal/quotes/${q2.id}`);
-    await h.consumer.handle("trip.completed", JSON.stringify({ ...done, tripId: uuid(), riderId: r2.id, quoteId: q2.id }));
+    const trip2 = uuid();
+    await h.internal(`/internal/quotes/${q2.id}?tripId=${trip2}&userId=${r2.id}`);
+    await h.consumer.handle("trip.completed", JSON.stringify({ ...done, tripId: trip2, riderId: r2.id, quoteId: q2.id }));
     expect((await h.req("GET", `/api/pricing/promos/${p.id}`, mk)).json<Json>().promo).toMatchObject({ spentMinor: 6000, redemptionCount: 2, status: "EXHAUSTED" });
     expect((await h.outbox("promo.exhausted")).some((e) => e.promoId === p.id)).toBe(true);
     expect((await economy(await h.rider(), { promoCode: p.code })).promo).toMatchObject({ applied: false, reason: "exhausted" });
@@ -236,16 +246,22 @@ describe("promos", () => {
     const rider = await h.rider();
     const q = (await economy(rider, { promoCode: p.code })).quotes[0];
     expect(q).toMatchObject({ fareMinor: 17_400, discountMinor: 2000, payableMinor: 15_400 });
-    await h.internal(`/internal/quotes/${q.id}`);
-    await h.consumer.handle("trip.cancelled", JSON.stringify({ tripId: uuid(), riderId: rider.id, cityId: "addis-ababa" }));
+    const tripA = uuid();
+    await h.internal(`/internal/quotes/${q.id}?tripId=${tripA}&userId=${rider.id}`);
+    // another trip's cancellation doesn't touch it
+    await h.consumer.handle("trip.cancelled", JSON.stringify({ tripId: uuid(), riderId: rider.id, cityId: "addis-ababa", quoteId: q.id }));
+    expect((await h.c.db.promoReservation.findUniqueOrThrow({ where: { quoteId: q.id } })).status).toBe("BOOKED");
+    await h.consumer.handle("trip.cancelled", JSON.stringify({ tripId: tripA, riderId: rider.id, cityId: "addis-ababa", quoteId: q.id }));
     expect((await h.c.db.promoReservation.findUniqueOrThrow({ where: { quoteId: q.id } })).status).toBe("RELEASED");
-    // released: the rider can use it again
+    // the same quote booked again after the cancellation comes without the discount
+    expect((await h.internal(`/internal/quotes/${q.id}?tripId=${uuid()}&userId=${rider.id}`)).json<Json>()).toMatchObject({ discountMinor: 0, payableMinor: 17_400 });
+    // released: the rider can use the code again on a new quote
     expect((await economy(rider, { promoCode: p.code })).promo).toMatchObject({ applied: true });
 
     // paused: the quote already issued is served without the discount
     const q2 = (await economy(await h.rider(), { promoCode: p.code })).quotes[0];
     expect((await h.req("POST", `/api/pricing/promos/${p.id}/pause`, mk)).json<Json>().promo.status).toBe("PAUSED");
-    const served = (await h.internal(`/internal/quotes/${q2.id}`)).json<Json>();
+    const served = (await h.internal(`/internal/quotes/${q2.id}?tripId=${uuid()}&userId=${(await h.c.db.promoReservation.findUniqueOrThrow({ where: { quoteId: q2.id } })).userId}`)).json<Json>();
     expect(served).toMatchObject({ discountMinor: 0, payableMinor: served.fareMinor });
     expect(served.promo).toBeUndefined();
     expect((await economy(await h.rider(), { promoCode: p.code })).promo).toMatchObject({ applied: false, reason: "not_active" });
@@ -259,23 +275,24 @@ describe("promos", () => {
     expect((await h.req("POST", `/api/pricing/promos/${p.id}/archive`, mk)).json<Json>().promo.status).toBe("ARCHIVED");
   });
 
-  it("trip-service's events name the quote: redemption uses the discount it applied, cancellation releases that quote's reservation", async () => {
+  it("each booking is bound to its trip: redemption uses the discount that trip applied, cancellation releases only that trip's", async () => {
     const mk = await marketing();
     const p = (await h.req("POST", "/api/pricing/promos", mk, promo({ type: "AMOUNT_OFF", percentOff: null, amountOffMinor: 2000, maxDiscountMinor: null, budgetMinor: 20_000, perUserLimit: 3 }))).json<Json>().promo;
     await h.req("POST", `/api/pricing/promos/${p.id}/activate`, mk);
     const rider = await h.rider();
 
-    // two booked quotes of the same rider: the event's quoteId picks the right one
+    // two booked quotes of the same rider: the trip id picks the right one
     const qa = (await economy(rider, { promoCode: p.code })).quotes[0];
     const qb = (await economy(rider, { promoCode: p.code })).quotes[0];
-    await h.internal(`/internal/quotes/${qa.id}`);
-    await h.internal(`/internal/quotes/${qb.id}`);
-    await h.consumer.handle("trip.cancelled", JSON.stringify({ tripId: uuid(), riderId: rider.id, cityId: "addis-ababa", quoteId: qa.id }));
+    const tripA = uuid();
+    const tripId = uuid();
+    await h.internal(`/internal/quotes/${qa.id}?tripId=${tripA}&userId=${rider.id}`);
+    await h.internal(`/internal/quotes/${qb.id}?tripId=${tripId}&userId=${rider.id}`);
+    await h.consumer.handle("trip.cancelled", JSON.stringify({ tripId: tripA, riderId: rider.id, cityId: "addis-ababa", quoteId: qa.id }));
     expect((await h.c.db.promoReservation.findUniqueOrThrow({ where: { quoteId: qa.id } })).status).toBe("RELEASED");
     expect((await h.c.db.promoReservation.findUniqueOrThrow({ where: { quoteId: qb.id } })).status).toBe("BOOKED");
 
     // completed with the discount trip-service applied (capped by the final fare there)
-    const tripId = uuid();
     await h.consumer.handle("trip.completed", JSON.stringify({
       tripId, riderId: rider.id, cityId: "addis-ababa", vehicleType: "economy", fareMinor: 18_000, currency: "ETB", completedAt: iso(h.clock.now + HOUR),
       quoteId: qb.id, promoDiscountMinor: 1500,

@@ -1,7 +1,7 @@
 import { v7 as uuidv7 } from "uuid";
 import type {
   BalanceAdjustedEvent, BalanceMoneyEvent, BalanceStateChangedEvent, BalanceWrittenOffEvent, EventEnvelope, IncentiveAwardedEvent, InvoiceEvent,
-  PaymentActionRequiredEvent, PaymentOutcomeEvent, RefundOutcomeEvent, TripSettledEvent,
+  PaymentActionRequiredEvent, PaymentOutcomeEvent, PayoutMethodChangedEvent, RefundOutcomeEvent, TripSettledEvent,
 } from "@ride-app/shared-types";
 import type { Prisma } from "../generated/prisma/client.js";
 
@@ -31,6 +31,7 @@ export type PaymentEvent =
   | { topic: "balance.written_off"; key: string; payload: Body<BalanceWrittenOffEvent> }
   | { topic: "incentive.awarded"; key: string; payload: Body<IncentiveAwardedEvent> }
   | { topic: "invoice.issued" | "invoice.paid"; key: string; payload: Body<InvoiceEvent> }
+  | { topic: "payout_method.changed"; key: string; payload: Body<PayoutMethodChangedEvent> }
   | { topic: "audit.recorded"; key: string; payload: AuditPayload };
 
 /** Write events in the caller's transaction, so they commit atomically with the money movement. */

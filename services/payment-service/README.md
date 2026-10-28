@@ -7,7 +7,8 @@ The money side of every trip ([docs/design/Payment.md](../../docs/design/Payment
 - **Balances.** Each driver or fleet company has one balance, with limits that pause cash trips or block driving.
 - **Rider charges.** Riders pay by mobile money or card, with retries. A charge that keeps failing becomes a rider receivable.
 - **Top-ups.** Drivers and fleets pay in by mobile money, by bank transfer, or with cash at an office.
-- **Payouts.** A weekly settlement pays out positive balances and sends payment dues to negative ones.
+- **Payouts.** A weekly settlement pays out positive balances and sends payment dues to negative ones. A balance whose payout method changed in the last 72 hours (`PAYOUT_METHOD_COOLOFF_HOURS`) is held for a later run, and the owner is told of every change (`payout_method.changed`).
+- **Trip events are checked.** Before posting money for `trip.completed` / `trip.cancelled`, the event is compared with trip-service's own record of the trip; a disagreeing event is not posted (`trip_event_anomaly`), and trip-service being down only delays it (`TRIP_EVENT_CHECK`, required in production).
 - **Refunds.** A refund is requested by one person and approved by another.
 - **Commission and limits.** Commission rules and balance limits change only when one person proposes and another approves.
 
@@ -70,7 +71,7 @@ To go live with a provider, replace its requests with HTTP calls to the provider
 | Public | `GET methods`, `POST webhooks/:provider` (provider callbacks, signature-checked), `GET/POST sim/checkout/:ref` (simulator only, never in production) |
 | Internal | `GET /internal/balances/state` (fleet-service at session start), `/internal/ops/outbox`, `/internal/ops/integrations` (system page) |
 
-Events out: `trip.settled`, `payment.action_required`, `payment.captured`, `payment.failed`, `balance.state_changed`, `balance.topped_up`, `balance.payment_due`, `payout.sent`, `payout.failed`, `refund.succeeded`, `refund.failed`, `audit.recorded`.
+Events out: `trip.settled`, `payment.action_required`, `payment.captured`, `payment.failed`, `balance.state_changed`, `balance.topped_up`, `balance.payment_due`, `payout.sent`, `payout.failed`, `payout_method.changed`, `refund.succeeded`, `refund.failed`, `audit.recorded`.
 
 ## Background jobs (`src/jobs.ts`)
 

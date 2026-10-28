@@ -90,7 +90,7 @@ These POST routes accept an `Idempotency-Key` header (`src/lib/idempotency.ts`):
 | `policy` | `{ mode, warningMinor, cashLimitMinor, hardLimitMinor, prepaidMinimumMinor, minPayoutMinor, dueDays, builtIn }` | `builtIn` true when no approved policy exists |
 | `dues` | `[{ id, cycleEnd (YYYY-MM-DD), amountMinor, minimumMinor, paidMinor, dueAt, status }]` | latest 5 |
 
-`BatchView` (`batchView` in `src/money/payouts.ts`): `id`, `cycleEnd` (YYYY-MM-DD), `status` (`PENDING_APPROVAL`, `SENDING`, `COMPLETED`, `REJECTED`), `preparedBy`, `approvedBy`, `rejectReason`, `totalMinor`, `lineCount`, `duesCreated`, `createdAt`, `decidedAt`, and on `GET payouts/:id` and decisions `lines: [{ id, accountId, amountMinor, provider, destination (masked), status (PENDING, SENT, SUCCEEDED, FAILED, SKIPPED), failure, updatedAt, beneficiary {type, id}, referenceCode }]`.
+`BatchView` (`batchView` in `src/money/payouts.ts`): `id`, `cycleEnd` (YYYY-MM-DD), `status` (`PENDING_APPROVAL`, `SENDING`, `COMPLETED`, `REJECTED`), `preparedBy`, `approvedBy`, `rejectReason`, `totalMinor`, `lineCount`, `duesCreated`, `createdAt`, `decidedAt`, and on `GET payouts/:id` and decisions `lines: [{ id, accountId, amountMinor, provider, destination (masked), status (PENDING, SENT, SUCCEEDED, FAILED, SKIPPED, HELD), failure, updatedAt, beneficiary {type, id}, referenceCode }]`. `HELD`: the payout method changed within the cooling-off period (`failure` says until when); nothing was debited and a later run pays it.
 
 `ChangeView` (`changeView` in `src/money/rule-changes.ts`): `id`, `kind`, `cityId`, `payload`, `reason`, `makerId`, `checkerId`, `status` (`PENDING`, `EXECUTED`, `REJECTED`, `CANCELLED`, `EXPIRED`), `decisionReason`, `createdAt`, `decidedAt`, `expiresAt`.
 
@@ -242,7 +242,7 @@ Where payouts go.
 | `provider` | string 1–30 | must be an enabled gateway (any method) |
 | `destination` | string 6–30 | spaces and dashes removed, then `^\+?\d{6,20}$` |
 
-Permission as for top-ups (owner). 200 `BalanceView`. 400 `unknown_provider`, `invalid_destination`. Writes `audit.recorded` (`payout_method:set`).
+Permission as for top-ups (owner). 200 `BalanceView` (`payoutMethod` gains `changedAt`). 400 `unknown_provider`, `invalid_destination`. A real change (not the same method again) sets `beneficiary.payout_method_changed_at`, writes `payout_method.changed` (to the owner: masked new and previous destination, `payoutsResumeAt`) and `audit.recorded` (`payout_method:set`). Payout runs hold the balance for `PAYOUT_METHOD_COOLOFF_HOURS` (default 72 h) after a change, the first one included.
 
 ### GET /api/payments/top-ups/:id
 
@@ -406,7 +406,7 @@ Request a refund. Idempotent with `Idempotency-Key`.
 | `reason` | `reason` (5–500) | — |
 | `driverAtFault` | boolean | `false` |
 
-Permission `refund:request` @ the payment's city. 201 `RefundView` (`PENDING_APPROVAL`). 404 payment not found; 409 `invalid_state` unless `SUCCEEDED` or `PARTIALLY_REFUNDED`; 400 `refund_too_large` if more than what's left after earlier and pending refunds. Writes `audit.recorded`.
+Permission `refund:request` @ the payment's city. 201 `RefundView` (`PENDING_APPROVAL`). 404 payment not found; 409 `invalid_state` unless `SUCCEEDED` or `PARTIALLY_REFUNDED`; 400 `refund_too_large` if more than what's left after refunded, approved and pending refunds (counted under a lock on the payment row, so parallel requests can't together ask for more). Writes `audit.recorded`.
 
 ### GET /api/payments/refunds
 
@@ -424,6 +424,7 @@ Permission `refund:approve` @ the payment's city; the requester can't decide (40
 | 400 `reason_required` | reject without a reason |
 | 404 | refund not found |
 | 409 `invalid_state` | already decided |
+| 409 `refund_too_large` | approving it would pass the amount paid, counting refunded and approved refunds (re-checked under the payment's lock); the request stays `PENDING_APPROVAL`: reject it and ask for less |
 | 502 `provider_unavailable` | approved, but the provider call failed; the refund stays `PROCESSING` |
 
 ---

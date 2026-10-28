@@ -24,6 +24,7 @@ Source: `src/http/routes.ts`, `src/app.ts`. `/api/pricing/*` is routed by Kong (
 | `GET /api/pricing/fares` | phone app (fare info, before sign-in) | none | `200` |
 | `GET /internal/quotes/:id` | trip-service | service token | `200` |
 | `POST /internal/quotes` | trip-service (scheduled-ride re-pricing at dispatch) | service token | `200` |
+| `POST /internal/quotes/:id/unbook` | trip-service (a booking that didn't become a trip) | service token | `200 { unbooked }` |
 
 ### `POST /api/pricing/estimates`
 
@@ -76,7 +77,11 @@ Types without fare settings are left out. An unknown city id is not an error.
 
 ### `GET /internal/quotes/:id`
 
-Params: `id` string 1–100. Response: the stored `Quote`. Errors: `401 unauthorized` ("invalid service credentials"), `404 not_found` ("quote not found") when expired or unknown.
+Params: `id` string 1–100. Query (both or neither): `tripId` uuid (the id trip-service will give the trip), `userId` uuid (who books). With them, the quote's promo discount is **booked for that one trip** (see the promo table below); without them the quote comes **without** its discount (`discountMinor: 0`, no `promo`) and nothing is booked (scheduled bookings read it this way). Response: the stored `Quote`. Errors: `401 unauthorized` ("invalid service credentials"), `404 not_found` ("quote not found") when expired or unknown.
+
+### `POST /internal/quotes/:id/unbook`
+
+Body `{ tripId: uuid }`. trip-service booked the quote's discount for `tripId` but then didn't create the trip (a policy refusal, an active trip, a lost race): the reservation goes back BOOKED → HELD (until the quote expires) so the rider's retry can book it. Acts only on a reservation BOOKED for that trip id; anything else is a no-op. Response `200 { unbooked: boolean }`.
 
 ### `POST /internal/quotes`
 
@@ -108,7 +113,7 @@ Source: `src/http/admin-routes.ts` (staff and the rider promo check) and `src/ht
 | `POST /api/pricing/estimates` | Optional `promoCode` (3–32 of `[A-Za-z0-9_-]`, case-insensitive). The response gains `promo?: { code, applied: true, discountedQuotes } \| { code, applied: false, reason, message }`; a bad code never fails the estimate. New errors: `400 pickup_not_allowed` (pickup in a NO_PICKUP zone), `400 outside_service_area` also when the city has SERVICE_AREA zones and the pickup is outside all of them, `503 dependency_unavailable` when the rules were never loaded from Postgres |
 | `Quote` | New fields: `fareRuleId` (approved rule used, `null` = live settings), `zoneIds`, `discountMinor` (0 = none), `payableMinor` (= `fareMinor − discountMinor`), `promo?: { promoId, code, discountMinor, fundedBy }`. `breakdown` gains `surgeMultiplier` (1 = none) and `zoneFeeMinor` (0 = none). `fareMinor` stays the full fare (the driver's earning is computed on it) |
 | `GET /api/pricing/fares` | The card is the approved rule in force, else the live settings |
-| `GET /internal/quotes/:id` | Reading a quote with a promo books its discount (reservation HELD → BOOKED). If it can't be given any more (promo paused or used up, rider's per-user limit reached with another booking, reservation expired) the quote is returned **without** `promo`, with `discountMinor: 0` and `payableMinor = fareMinor` |
+| `GET /internal/quotes/:id?tripId=&userId=` | Reading a quote with a promo books its discount for that trip (reservation HELD → BOOKED, `trip_id` set). Asking again for the same trip keeps it. It is served **without** `promo` (`discountMinor: 0`, `payableMinor = fareMinor`) when: no `tripId`/`userId` given; `userId` isn't the quote's rider; the reservation is BOOKED for another trip; it was RELEASED (its trip was cancelled: a rebooked quote never gets the discount again), REDEEMED or EXPIRED; the promo is no longer ACTIVE; or, counted under the promo's row lock, the rider's `perUserLimit`, `maxRedemptions` (redeemed + booked) or the budget (spent + booked + this discount) would be passed |
 
 ### Routes
 
@@ -132,7 +137,8 @@ Source: `src/http/admin-routes.ts` (staff and the rider promo check) and `src/ht
 | `POST /api/pricing/promos` | `promo:manage` in every city of `cityIds` (empty `cityIds` = every city, needs a GLOBAL role); Idempotency-Key | `201 { promo }` (status `DRAFT`) |
 | `GET /api/pricing/promos/:id` | readers in one of its cities (else 404) | `200 { promo }` |
 | `PUT /api/pricing/promos/:id` | `promo:manage`; drafts only (`409 not_draft`) | `200 { promo }` |
-| `POST /api/pricing/promos/:id/activate` | `promo:manage`; if `budgetMinor > PROMO_APPROVAL_THRESHOLD_MINOR`: `incentive:approve` in its cities **and** not the creator | `200 { promo }` (status `ACTIVE`) |
+| `POST /api/pricing/promos/:id/activate` | `promo:manage`; when this budget plus the live (ACTIVE or PAUSED) budgets of the same creator, or of any of its cities (every-city promos count in each city), passes `PROMO_APPROVAL_THRESHOLD_MINOR`: `incentive:approve` in its cities **and** not the creator (`403 approval_required`, `403 maker_is_checker`) | `200 { promo }` (status `ACTIVE`) |
+| `GET /api/pricing/promos/anomalies?limit=` | `incentive:approve` in every city (GLOBAL) | `200 { anomalies: [{ id, kind: DISCOUNT_WITHOUT_RESERVATION \| DISCOUNT_ABOVE_RESERVATION \| OVER_BUDGET, tripId, promoId, quoteId, riderId, discountMinor, details, createdAt }] }` newest first |
 | `POST /api/pricing/promos/:id/pause` · `/resume` · `/archive` | `promo:manage` | `200 { promo }` |
 | `GET /api/pricing/promos/:id/redemptions?limit=&before=` | readers | `200 { redemptions: [{ id, tripId, userId, cityId, fareMinor, discountMinor, redeemedAt }], next }` |
 | `POST /api/pricing/promos/check` `{ code, cityId? \| pickup? }` | any signed-in user (`ride-app` or `ride-admin`) | `200 { valid: true, promo } \| { valid: false, reason, message, promo? }`; `promo` = `{ code, name, description, type, percentOff, amountOffMinor, maxDiscountMinor, vehicleTypes, endsAt }` |

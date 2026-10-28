@@ -7,7 +7,7 @@
 | phone app | `POST /api/pricing/estimates`, `GET /api/pricing/fares` (no token) | `ride-app` token for estimates | — | `packages/core/lib/src/api/service_apis.dart`, `packages/core/lib/src/models/quote.dart` |
 | web, partner page | `POST /api/pricing/estimates` (`vehicleTypes: ["economy"]`) | partner (`ride-app`) token | — | `apps/web/src/pages/partner/Partner.tsx` |
 | web, call-center phone booking | `POST /api/pricing/estimates` | staff (`ride-admin`) token | — | `apps/web/src/pages/staff/PhoneBooking.tsx` |
-| trip-service | `GET /internal/quotes/:id` | service token | 2.5 s; 404 → no quote; other errors thrown | `services/trip-service/src/quotes.ts` `pricingQuotes` (used when `PRICING=service`, the default) |
+| trip-service | `GET /internal/quotes/:id?tripId=&userId=` (books the discount for that trip), `POST /internal/quotes/:id/unbook` (the trip wasn't created) | service token | 2.5 s; 404 → no quote; other errors thrown (unbook failures are only logged) | `services/trip-service/src/quotes.ts` `pricingQuotes` (used when `PRICING=service`, the default) |
 | trip-service | `POST /internal/quotes` (re-price a scheduled ride at dispatch) | service token | 5 s; 404/405 or any error → the scheduler keeps the booked quote; the fare is the lower of the two | `services/trip-service/src/quotes.ts` `reprice`, called from `src/trips/scheduled.ts` `dispatchOne` |
 
 ## Whom pricing-service calls
@@ -120,6 +120,6 @@ Fares are live settings. A super admin proposes `PUT /api/platform/settings/fare
 
 How a promo reaches the rider's bill (built):
 
-- **trip-service** copies the booked quote's `discountMinor` and `promo.code` onto the trip at request time (`trip.promo_discount_minor`, clamped to 0 … fare) and sends `quoteId` + `promoDiscountMinor` (the discount actually applied, ≤ the final fare) on `trip.completed`, and `quoteId` on `trip.cancelled`, so redemption and release find the reservation by quote id.
+- **trip-service** picks the trip id first, reads the quote with it (`?tripId=&userId=`), copies the booked quote's `discountMinor` and `promo.code` onto the trip (`trip.promo_discount_minor`, clamped to 0 … fare) and sends `promoDiscountMinor` (the discount actually applied, ≤ the final fare) on `trip.completed`; redemption and release find the reservation by trip id. A quote has at most one non-cancelled trip (unique index `ux_trip_quote_live`); a quote rebooked after its trip was cancelled comes without the discount.
 - **payment-service** settles with the rider paying `fare − discount` (nothing charged when it covers the whole fare), the driver's earning computed on the full fare, and the discount debited to `PROMO_EXPENSE:{cityId}` in the same journal entry (Payment.md §6.4), from `trip.completed`'s `promoDiscountMinor`. It does not consume `promo.redeemed`.
 - Not covered: scheduled rides (dispatch re-prices without a promo, and a BOOKED reservation expires after 24 h); partner-funded promos are expensed like platform ones.

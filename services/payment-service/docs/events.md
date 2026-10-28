@@ -12,8 +12,8 @@ Every event this service produces carries `eventId` (UUIDv7), `version` (`1`) an
 
 | Topic | Producer | Key | What payment-service does |
 |---|---|---|---|
-| `trip.completed` | trip-service | `tripId` | `payments.onTripCompleted`: cash and company-account trips settle at once; mobile money and card trips with something left to pay (`fareMinor − promoDiscountMinor > 0`) create a `payment` for that amount and start the charge after commit; a digital trip fully covered by a promo settles at once with nothing charged |
-| `trip.cancelled` | trip-service | `tripId` | `payments.onTripCancelled`: nothing if `feeMinor ≤ 0`; a digital fee creates a `CANCELLATION_FEE` payment; a cash fee becomes a rider receivable; corporate with `billingOrgId` a company receivable. The beneficiary gets `driverCompensationMinor` (capped at the fee) at once |
+| `trip.completed` | trip-service | `tripId` | First (`TRIP_EVENT_CHECK`, required in production) the event is compared with trip-service's record (`GET /internal/trips/:id`: status, rider, city, driver, beneficiary, payment method, billing org, currency, final fare, waiting fee, promo discount); a disagreement or an unknown trip is not posted (`trip_event_anomaly`, `audit.recorded` `trip_event:reject`, error log), trip-service unreachable throws so Kafka retries. Then `payments.onTripCompleted`: cash and company-account trips settle at once; mobile money and card trips with something left to pay (`fareMinor − promoDiscountMinor > 0`) create a `payment` for that amount and start the charge after commit; a digital trip fully covered by a promo settles at once with nothing charged |
+| `trip.cancelled` | trip-service | `tripId` | (fee > 0: checked against trip-service like `trip.completed`) `payments.onTripCancelled`: nothing if `feeMinor ≤ 0`; a digital fee creates a `CANCELLATION_FEE` payment; a cash fee becomes a rider receivable; corporate with `billingOrgId` a company receivable. The beneficiary gets `driverCompensationMinor` (capped at the fee) at once |
 
 Validated fields (zod, `schemas` in `src/events/consumer.ts`):
 
@@ -85,6 +85,7 @@ All through the transactional outbox: `writeOutbox(tx, …)` inserts rows in `ou
 | `incentive.awarded` | beneficiary owner id | `IncentiveAwardedEvent` | a driver reached an incentive's target and was credited at period close | `incentives.ts` `close` |
 | `invoice.issued` | `orgId` | `InvoiceEvent` | finance issued a company's monthly invoice | `invoices.ts` `issue` |
 | `invoice.paid` | `orgId` | `InvoiceEvent` (+ `paidAt`) | the last bank payment made an invoice fully paid | `invoices.ts` `recordPayment` |
+| `payout_method.changed` | beneficiary owner id | `PayoutMethodChangedEvent` | a balance's payout method was set or changed: `accountId`, `beneficiary`, `provider`, `destinationMasked`, `previousProvider`, `previousDestinationMasked`, `changedBy`, `changedAt`, `payoutsResumeAt` (payouts are held until then). Only masked destinations. **No consumer yet**: notification-service should tell the owner (push/SMS: "your payout method changed; if this wasn't you, contact support before {payoutsResumeAt}") | `balance-service.ts` `setPayoutMethod` |
 | `audit.recorded` | actor user id, or `system` | `AuditPayload` (`src/outbox/outbox.ts`) | a staff or owner action (list below) | modules |
 
 Payload fields:
@@ -103,7 +104,7 @@ Payload fields:
 | `InvoiceEvent` | `invoiceId`, `orgId`, `number`, `period` (YYYY-MM), `totalMinor`, `paidMinor`, `currency`, `dueAt`, `paidAt?` |
 | `AuditPayload` | `actorId` (null for the scheduled run), `action`, `resource: { type, id }`, `outcome` (`EXECUTED` in every current call), `reason?`, `service: "payment-service"` |
 
-`audit.recorded` actions: `payout_method:set`, `refund:request`, `refund:approve`, `refund:reject`, `topup:record_cash`, `topup:approve_cash`, `topup:reject_cash`, `payout:prepare`, `payout:approve`, `payout:reject`, `commission_rule:propose`, `commission_rule:approve`, `balance_policy:propose`, `balance_policy:approve`, `rule_change:reject`, `rule_change:cancel`, `adjustment:request`, `adjustment:approve`, `adjustment:reject`, `adjustment:cancel`, `writeoff:request`, `writeoff:approve`, `writeoff:reject`, `writeoff:cancel`, `policy_override:request`, `policy_override:approve`, `policy_override:reject`, `policy_override:cancel`, `policy_override:revoke`, `incentive:propose`, `incentive:approve`, `incentive:reject`, `incentive:cancel`, `incentive:close` (actor null), `invoice:issue`, `invoice:record_payment`.
+`audit.recorded` actions: `payout_method:set`, `trip_event:reject` (actor null: a trip event disagreed with trip-service, nothing posted), `refund:request`, `refund:approve`, `refund:reject`, `topup:record_cash`, `topup:approve_cash`, `topup:reject_cash`, `payout:prepare`, `payout:approve`, `payout:reject`, `commission_rule:propose`, `commission_rule:approve`, `balance_policy:propose`, `balance_policy:approve`, `rule_change:reject`, `rule_change:cancel`, `adjustment:request`, `adjustment:approve`, `adjustment:reject`, `adjustment:cancel`, `writeoff:request`, `writeoff:approve`, `writeoff:reject`, `writeoff:cancel`, `policy_override:request`, `policy_override:approve`, `policy_override:reject`, `policy_override:cancel`, `policy_override:revoke`, `incentive:propose`, `incentive:approve`, `incentive:reject`, `incentive:cancel`, `incentive:close` (actor null), `invoice:issue`, `invoice:record_payment`.
 
 ### Who consumes them
 

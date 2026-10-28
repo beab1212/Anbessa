@@ -11,13 +11,18 @@ import { buildApp } from "../../src/app.js";
 import { loadConfig } from "../../src/config/index.js";
 import { createContainer } from "../../src/container.js";
 import { simStore } from "../../src/gateways/simulator.js";
+import type { TripFacts, TripLookup } from "../../src/lib/trips.js";
 import { TEST_DATABASE_URL } from "./global-setup.js";
 
 const ISSUER = "http://localhost:3001";
 export const CITY = "addis-ababa";
 export const uuid = () => crypto.randomUUID();
 
-export async function createHarness() {
+/**
+ * `env` overrides the test config; `trips` is trip-service's record of trips (the trip event check
+ * is on when given: a Map of trip id → facts, or a lookup that throws to play trip-service down).
+ */
+export async function createHarness(opts: { env?: Record<string, string>; trips?: Map<string, TripFacts> | TripLookup } = {}) {
   const clock = { now: Date.now() };
   const pushes: { userId: string; event: string; payload: unknown }[] = [];
   const callbacks = { drop: false, delivered: 0 };
@@ -25,8 +30,9 @@ export async function createHarness() {
   const config = loadConfig({
     NODE_ENV: "test", DATABASE_URL: TEST_DATABASE_URL, INTERNAL_SERVICE_TOKEN: "t".repeat(64), PUBLIC_URL: "http://pay.test",
     TELEBIRR_WEBHOOK_SECRET: "a".repeat(48), CBEBIRR_WEBHOOK_SECRET: "b".repeat(48), CHAPA_WEBHOOK_SECRET: "c".repeat(48),
-    SIM_AUTO_APPROVE_SECONDS: "0", SIM_PAYOUT_SECONDS: "0", PAYMENT_RETRY_SECONDS: "60,600",
+    SIM_AUTO_APPROVE_SECONDS: "0", SIM_PAYOUT_SECONDS: "0", PAYMENT_RETRY_SECONDS: "60,600", ...opts.env,
   });
+  const trips: TripLookup | undefined = opts.trips instanceof Map ? { get: async (id) => (opts.trips as Map<string, TripFacts>).get(id) ?? null } : opts.trips;
 
   const { publicKey, privateKey } = await generateKeyPair("ES256");
   const jwk = { ...(await exportJWK(publicKey)), kid: "k", alg: "ES256" };
@@ -37,7 +43,7 @@ export async function createHarness() {
   let app: Awaited<ReturnType<typeof buildApp>> | undefined;
   const settings = staticSettings();
   const c = createContainer(config, pino({ level: "silent" }), {
-    now: () => new Date(clock.now), settings, simStore: simStore(),
+    now: () => new Date(clock.now), settings, simStore: simStore(), ...(trips ? { trips } : {}),
     realtime: { toUser: (userId, event, payload) => void pushes.push({ userId, event, payload }) },
     verifyAccessToken: createTokenVerifier({ issuer: ISSUER, keySet: createLocalJWKSet({ keys: [jwk as never] }) }),
     // the provider calls our webhook (a dropped callback is what reconciliation recovers)
@@ -79,6 +85,20 @@ export async function createHarness() {
     };
   }
 
+  /** trip-service's record of the trip an event is about (what /internal/trips/:id answers). */
+  function factsOf(e: TripCompletedEvent | TripCancelledEvent): TripFacts {
+    const done = "fareMinor" in e;
+    return {
+      id: e.tripId, status: done ? "completed" : "cancelled", cityId: e.cityId, riderUserId: e.riderId, paymentMethod: e.paymentMethod,
+      billing: { type: e.billingOrgId ? "CORPORATE" : "PERSONAL", orgId: e.billingOrgId ?? null },
+      driver: e.driverId ? { userId: e.driverId } : null, beneficiary: e.beneficiary ?? null,
+      fare: done
+        ? { finalMinor: e.fareMinor, waitingFeeMinor: e.waitingFeeMinor, promoDiscountMinor: e.promoDiscountMinor ?? 0, currency: e.currency }
+        : { finalMinor: null, waitingFeeMinor: null, promoDiscountMinor: 0, currency: e.currency },
+      cancellation: done ? null : { feeMinor: e.feeMinor, driverCompensationMinor: e.driverCompensationMinor },
+    };
+  }
+
   function cancelled(input: { driverId: string; feeMinor: number; compensationMinor: number; paymentMethod?: TripCancelledEvent["paymentMethod"]; riderId?: string }): TripCancelledEvent {
     return {
       ...envelope(), tripId: uuid(), riderId: input.riderId ?? uuid(), driverId: input.driverId, cityId: CITY, by: "RIDER", reason: "CHANGED_PLANS",
@@ -100,7 +120,7 @@ export async function createHarness() {
 
   return {
     app, c, clock, settings, pushes, callbacks, person, staff, driver, financeOfficer, financeManager, req, ok,
-    completed, cancelled, balanceOf, accountBalance, outbox, until,
+    completed, cancelled, factsOf, balanceOf, accountBalance, outbox, until,
     async close() {
       await app!.close();
       await c.close();
