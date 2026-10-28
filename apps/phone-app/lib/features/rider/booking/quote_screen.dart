@@ -1,11 +1,15 @@
-// The choose-ride stage in the map shell (workflow 05 B–C). The map (drawn by the shell) shows the
-// road growing from the pickup, "N min" at the pickup and "Arrive HH:MM" at the drop-off. The sheet:
-// the route summary on top; a carousel of vehicle classes (our car art, seats, ETA, the price, the
-// original struck through when a promo lowers it; the chosen one ringed in amber), the fare details
-// to expand, the pickup time, payment, promo and a company ride's purpose; the amber
-// "Request <class> · <price>" button at the bottom. Quotes last 10 minutes: the expiry counts down
-// in its own small widget, and a new price is fetched when one expires. Changing a place refetches
-// in place: skeleton cards while the old road stays on the map, dimmed.
+// The choose-ride stage in the map shell (workflow 05 B–C), drawn as the GoRide kit's "choose
+// ride": the route card (pickup, destination) over the map, where the road grows from the pickup
+// with "N min" at the pickup and "Arrive HH:MM" at the drop-off; a back button above the sheet.
+// The sheet: the vehicle classes as rows (our car art, name, "4 min · 4 passengers", the price;
+// a promo's price with a seal and the old one struck through; the chosen one tinted with an
+// amber border), then "Payment  Cash ›", "Promos / Vouchers ›" with the code in use, the pickup
+// time when booking for later, the fare details to fold out, and a company ride's purpose. At
+// the bottom: the round calendar (book for later) and "Book <class>". Quotes last 10 minutes:
+// the expiry counts down in its own small widget, and a new price is fetched when one expires.
+// Changing a place refetches in place: skeleton rows while the old road stays on the map, dimmed.
+// "Choose Payment Method" and "Promos / Vouchers" are pages of their own (the kit's, without
+// wallets or a voucher list).
 // Also: booking for later (workflow 12, flag `scheduledRides`), a promo code (workflow 15, flag
 // `promos`) and a company ride's purpose and policy refusal (workflow 11).
 
@@ -17,6 +21,7 @@ import '../../../core/l10n/l10n.dart';
 import '../../../core/router/routes.dart';
 import '../../../core/session/session_controller.dart';
 import '../../config/client_config_provider.dart';
+import '../shell/map_intent.dart' show minutesCeil;
 import '../trip/active_trip_controller.dart';
 import 'booking_actions.dart';
 import 'booking_controller.dart';
@@ -95,57 +100,62 @@ Future<void> scheduleRide(BuildContext context, WidgetRef ref) => _submit(contex
       context.go(Routes.riderActivity);
     });
 
-/// The route on top of the sheet: pickup → drop-off, distance and time, Edit.
-class QuoteHeader extends ConsumerWidget {
-  const QuoteHeader({super.key});
+/// The route over the map: pickup and destination; a tap edits that place.
+class QuoteRouteCard extends ConsumerWidget {
+  const QuoteRouteCard({super.key});
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l = context.l10n;
-    final c = context.colors;
     final b = ref.watch(bookingProvider);
-    final quote = b.quote;
-    final summary = b.route ?? (quote == null ? null : QuoteRoute(polyline6: '', distanceMeters: quote.distanceMeters, durationSeconds: quote.durationSeconds, approximate: quote.approximate));
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Row(
-        children: [
-          Column(
+    void edit(String focus) => context.pushReplacement('${Routes.riderRoute}?focus=$focus');
+    return RoutePointsCard(
+      points: [
+        RoutePointsCard.pickup(b.pickup?.name ?? l.pickupLabel, onTap: () => edit('pickup')),
+        RoutePointsCard.destination(b.dropoff?.name ?? l.dropoffLabel, onTap: () => edit('dropoff')),
+      ],
+    );
+  }
+}
+
+/// A row of the choose-ride sheet: "Payment ……… Cash ›".
+class _OptionRow extends StatelessWidget {
+  const _OptionRow({super.key, required this.title, this.value, this.valueWidget, this.onTap, this.chevron = true});
+  final String title;
+  final String? value;
+  final Widget? valueWidget;
+  final VoidCallback? onTap;
+  final bool chevron;
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return Semantics(
+      button: onTap != null,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AnbessaRadius.sm),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Row(
             children: [
-              Container(width: 10, height: 10, decoration: BoxDecoration(color: c.accent, shape: BoxShape.circle)),
-              Container(width: 2, height: 14, color: c.border),
-              Container(width: 10, height: 10, decoration: BoxDecoration(color: c.text, borderRadius: BorderRadius.circular(2))),
-            ],
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(b.pickup?.name ?? '—', maxLines: 1, overflow: TextOverflow.ellipsis, style: AnbessaType.body2.copyWith(color: c.text2)),
-                const SizedBox(height: 6),
-                Text(b.dropoff?.name ?? '—', maxLines: 1, overflow: TextOverflow.ellipsis, style: AnbessaType.body.copyWith(fontWeight: FontWeight.w600, color: c.text)),
+              Expanded(child: Text(title, style: AnbessaType.body.copyWith(color: c.text, fontWeight: FontWeight.w600))),
+              if (value != null) ...[
+                const SizedBox(width: 12),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 150),
+                  child: Text(value!, maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.end, style: AnbessaType.body2.copyWith(color: c.text, fontWeight: FontWeight.w600)),
+                ),
               ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              if (summary != null) Text(l.distanceTime(km(summary.distanceMeters), minutesOf(summary.durationSeconds)), style: AnbessaType.caption.copyWith(color: c.muted, fontFeatures: AnbessaType.tabular)),
-              TextButton(
-                onPressed: () => context.pushReplacement('${Routes.riderRoute}?focus=dropoff'),
-                style: TextButton.styleFrom(visualDensity: VisualDensity.compact, padding: EdgeInsets.zero, minimumSize: const Size(48, 36)),
-                child: Text(l.edit),
-              ),
+              if (valueWidget != null) ...[const SizedBox(width: 8), valueWidget!],
+              if (chevron) ...[const SizedBox(width: 6), ExcludeSemantics(child: Icon(Icons.chevron_right_rounded, color: onTap == null ? c.faint : c.text))],
             ],
           ),
-        ],
+        ),
       ),
     );
   }
 }
 
-/// The classes, the fare details and the ride's options.
+/// The classes, the payment and promo rows, the fare details and the ride's options.
 class QuoteSheet extends ConsumerStatefulWidget {
   const QuoteSheet({super.key});
   @override
@@ -178,7 +188,7 @@ class _QuoteSheetState extends ConsumerState<QuoteSheet> {
 
   Future<void> _enterPromo() async {
     final b = ref.read(bookingProvider);
-    final code = await showModalBottomSheet<String>(context: context, isScrollControlled: true, builder: (ctx) => _PromoSheet(initial: b.promoCode ?? b.promo?.code ?? '', applied: b.promoCode != null));
+    final code = await Navigator.of(context, rootNavigator: true).push<String>(MaterialPageRoute(builder: (_) => PromoCodePage(initial: b.promoCode ?? b.promo?.code ?? '', applied: b.promoCode)));
     if (code == null || !mounted) return;
     final booking = ref.read(bookingProvider.notifier);
     if (code.isEmpty) return booking.removePromo();
@@ -188,22 +198,8 @@ class _QuoteSheetState extends ConsumerState<QuoteSheet> {
   }
 
   Future<void> _choosePayment(List<PaymentMethod> offered, Session? session) async {
-    final l = context.l10n;
-    final c = context.colors;
     final b = ref.read(bookingProvider);
-    final picked = await showModalBottomSheet<PaymentMethod>(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(padding: const EdgeInsets.fromLTRB(20, 4, 20, 8), child: Align(alignment: Alignment.centerLeft, child: Text(l.paymentMethod, style: AnbessaType.h2.copyWith(color: c.text)))),
-            for (final m in offered) ChoiceRow(leading: Icon(_methodIcon(m)), title: paymentMethodLabel(l, m), selected: b.paymentMethod == m, onTap: () => Navigator.pop(ctx, m)),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
+    final picked = await Navigator.of(context, rootNavigator: true).push<PaymentMethod>(MaterialPageRoute(builder: (_) => ChoosePaymentPage(offered: offered, selected: b.paymentMethod)));
     if (picked != null) ref.read(bookingProvider.notifier).pay(picked, billingOrgId: picked == PaymentMethod.corporate ? session?.claims.orgIds.firstOrNull : null);
   }
 
@@ -216,7 +212,6 @@ class _QuoteSheetState extends ConsumerState<QuoteSheet> {
     final cfg = ref.watch(configProvider);
     final session = ref.watch(currentSessionProvider);
     final promos = ref.watch(featureProvider(Feature.promos));
-    final schedulingOn = ref.watch(featureProvider(Feature.scheduledRides));
     final corporate = b.paymentMethod == PaymentMethod.corporate && b.billingOrgId != null;
     final policy = corporate ? ref.watch(corporatePolicyProvider(b.billingOrgId!)).value : null;
     final quote = b.quote;
@@ -226,117 +221,105 @@ class _QuoteSheetState extends ConsumerState<QuoteSheet> {
       WidgetsBinding.instance.addPostFrameCallback((_) => ref.read(bookingProvider.notifier).pay(offered.first));
     }
     final locale = context.localeTag;
+    int? seatsOf(String code) => cfg.vehicleTypes.where((v) => v.code == code).firstOrNull?.seatsMax;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (b.quoteError != null) Problem(b.quoteError, describe: (e) => describeError(l, e), onRetry: () => ref.read(bookingProvider.notifier).quote(), retryLabel: l.retry),
+        if (b.quoteError != null) Padding(padding: const EdgeInsets.only(bottom: 10), child: Problem(b.quoteError, describe: (e) => describeError(l, e), onRetry: () => ref.read(bookingProvider.notifier).quote(), retryLabel: l.retry)),
         if (quote?.approximate ?? false) Padding(padding: const EdgeInsets.only(bottom: 10), child: Notice(l.estimateApproximate, tone: NoticeTone.info)),
         // the classes: skeletons while (re)quoting
-        SingleChildScrollView(
-          key: const ValueKey('classes'),
-          scrollDirection: Axis.horizontal,
-          clipBehavior: Clip.none,
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          child: b.quotes.isEmpty && (b.quoting || b.quoteError == null)
-              ? Row(children: [for (var i = 0; i < 3; i++) const Padding(padding: EdgeInsets.only(right: 10), child: Skeleton.box(width: 132, height: 156, radius: AnbessaRadius.lg))])
-              : Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    for (final (i, q) in b.quotes.indexed)
-                      FadeSlideIn(
-                        key: ValueKey('in-${q.vehicleType}'),
-                        delay: Duration(milliseconds: 60 * i),
-                        child: Padding(
-                          padding: const EdgeInsets.only(right: 10),
-                          child: Opacity(
-                            opacity: expired ? 0.5 : 1,
-                            child: VehicleClassCard(
-                              key: ValueKey('class-${q.vehicleType}'),
-                              code: q.vehicleType,
-                              name: vehicleName(cfg, q.vehicleType),
-                              fareMinor: q.fareMinor,
-                              payableMinor: q.payableMinor,
-                              seats: cfg.vehicleTypes.where((v) => v.code == q.vehicleType).firstOrNull?.seatsMax,
-                              etaSeconds: q.etaToPickupSeconds,
-                              // the ETA is about now: none when booking for later
-                              minuteLabel: b.scheduling ? null : (m) => l.rideMinutes(m),
-                              selected: q.vehicleType == b.vehicleType,
-                              locale: locale,
-                              onTap: () {
-                                Haptics.selection();
-                                ref.read(bookingProvider.notifier).choose(q.vehicleType);
-                              },
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
+        if (b.quotes.isEmpty && (b.quoting || b.quoteError == null))
+          for (var i = 0; i < 3; i++) const Padding(padding: EdgeInsets.only(bottom: 12), child: Skeleton.box(height: 76, radius: AnbessaRadius.md))
+        else
+          for (final (i, q) in b.quotes.indexed)
+            FadeSlideIn(
+              key: ValueKey('in-${q.vehicleType}'),
+              delay: Duration(milliseconds: 50 * i),
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Opacity(
+                  opacity: expired ? 0.5 : 1,
+                  child: RideClassTile(
+                    key: ValueKey('class-${q.vehicleType}'),
+                    code: q.vehicleType,
+                    name: vehicleName(cfg, q.vehicleType),
+                    fareMinor: q.fareMinor,
+                    payableMinor: q.payableMinor,
+                    // the ETA is about now: none when booking for later
+                    etaLabel: b.scheduling || q.etaToPickupSeconds == null ? null : l.rideMinutes(minutesCeil(q.etaToPickupSeconds!)),
+                    seatsLabel: seatsOf(q.vehicleType) == null ? null : l.grPassengers(seatsOf(q.vehicleType)!),
+                    selected: q.vehicleType == b.vehicleType,
+                    locale: locale,
+                    onTap: () => ref.read(bookingProvider.notifier).choose(q.vehicleType),
+                  ),
                 ),
-        ),
-        if (quote != null) ...[
-          // the details of the chosen class, folded
-          InkWell(
-            key: const ValueKey('fare-details'),
-            borderRadius: BorderRadius.circular(AnbessaRadius.md),
-            onTap: () => setState(() => _detailsOpen = !_detailsOpen),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
-              child: Row(
-                children: [
-                  Icon(Icons.receipt_long_rounded, size: 18, color: c.muted),
-                  const SizedBox(width: 8),
-                  Expanded(child: Text(l.fareBreakdown, style: AnbessaType.body2.copyWith(fontWeight: FontWeight.w600, color: c.text))),
-                  Text(l.fareFixed, style: AnbessaType.caption.copyWith(color: c.muted)),
-                  AnimatedRotation(turns: _detailsOpen ? 0.5 : 0, duration: AnbessaMotion.of(context, AnbessaMotion.base), child: Icon(Icons.expand_more_rounded, color: c.muted)),
-                ],
               ),
             ),
+        if (quote != null) ...[
+          Divider(height: 12, color: c.border),
+          _OptionRow(
+            key: const ValueKey('payment-row'),
+            title: l.grPayment,
+            value: paymentMethodLabel(l, b.paymentMethod),
+            onTap: offered.length > 1 ? () => _choosePayment(offered, session) : null,
+            chevron: offered.length > 1,
+          ),
+          if (promos)
+            _OptionRow(
+              key: const ValueKey('promo-row'),
+              title: l.grPromosVouchers,
+              valueWidget: b.promoCode == null ? null : OutlineBadge(b.promoCode!),
+              onTap: b.quoting ? null : _enterPromo,
+            ),
+          if (promos && b.promo != null) Padding(padding: const EdgeInsets.only(bottom: 6), child: _PromoLine(outcome: b.promo!, quote: quote)),
+          if (b.scheduling) _OptionRow(title: l.pickupTime, value: dayAndTime(b.scheduledFor, locale: locale), onTap: () => chooseRideTime(context, ref)),
+          _OptionRow(
+            key: const ValueKey('fare-details'),
+            title: l.grFareDetails,
+            value: l.fareFixed,
+            onTap: () => setState(() => _detailsOpen = !_detailsOpen),
+            chevron: false,
+            valueWidget: AnimatedRotation(turns: _detailsOpen ? 0.5 : 0, duration: AnbessaMotion.of(context, AnbessaMotion.base), child: Icon(Icons.expand_more_rounded, color: c.muted)),
           ),
           AnimatedSwitcherX(
             child: !_detailsOpen
                 ? const SizedBox.shrink(key: ValueKey('nodetails'))
                 : Padding(
                     key: const ValueKey('details'),
-                    padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
-                    child: Column(
-                      children: [
-                        _InfoRow(l.distanceTime(km(quote.distanceMeters), minutesOf(quote.durationSeconds)), null),
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: KeyValueCard(
+                      rows: [
+                        KeyValueCard.row(l.grDistance, km(quote.distanceMeters)),
+                        KeyValueCard.row(l.grDuration, minutesOf(quote.durationSeconds)),
                         if (quote.breakdown != null) ...[
-                          _BdRow(l.baseFare, quote.breakdown!.baseMinor),
-                          _BdRow(l.distanceFare, quote.breakdown!.distanceMinor),
-                          _BdRow(l.timeFare, quote.breakdown!.timeMinor),
+                          KeyValueCard.row(l.baseFare, birr(quote.breakdown!.baseMinor, locale: locale)),
+                          KeyValueCard.row(l.distanceFare, birr(quote.breakdown!.distanceMinor, locale: locale)),
+                          KeyValueCard.row(l.timeFare, birr(quote.breakdown!.timeMinor, locale: locale)),
                         ],
-                        if (quote.discounted) _BdRow(l.promoCode, -quote.discountMinor),
-                        if (quote.breakdown?.minimumApplied ?? false) Padding(padding: const EdgeInsets.only(top: 6), child: Text(l.minimumFareApplied, style: AnbessaType.caption.copyWith(color: c.muted))),
+                        if (quote.discounted) KeyValueCard.row(l.grDiscounts, '−${birr(quote.discountMinor, locale: locale)}', valueColor: c.success),
                       ],
+                      total: KeyValueCard.row(l.totalLabel, birr(quote.payableMinor, locale: locale)),
                     ),
                   ),
           ),
-          const SizedBox(height: 4),
-          SectionGroup(
-            margin: EdgeInsets.zero,
-            children: [
-              if (schedulingOn) SettingsValueTile(icon: Icons.schedule_rounded, title: l.pickupTime, value: b.scheduling ? dayAndTime(b.scheduledFor, locale: locale) : l.now, onTap: () => chooseRideTime(context, ref)),
-              SettingsValueTile(icon: _methodIcon(b.paymentMethod), title: l.paymentMethod, value: paymentMethodLabel(l, b.paymentMethod), onTap: offered.length > 1 ? () => _choosePayment(offered, session) : null),
-              if (promos) SettingsValueTile(icon: Icons.local_offer_rounded, title: l.promoCode, value: b.promoCode ?? l.promoAdd, onTap: b.quoting ? null : _enterPromo),
-            ],
-          ),
-          if (promos && b.promo != null) Padding(padding: const EdgeInsets.fromLTRB(4, 8, 4, 0), child: _PromoLine(outcome: b.promo!, quote: quote)),
+          if (quote.breakdown?.minimumApplied ?? false) Padding(padding: const EdgeInsets.only(bottom: 6), child: Text(l.minimumFareApplied, style: AnbessaType.caption.copyWith(color: c.muted))),
           if (corporate) ...[
-            const SizedBox(height: 10),
-            TextField(
+            const SizedBox(height: 8),
+            FilledField(
               controller: _purpose,
               maxLength: 200,
+              hint: l.purposeLabel,
               onChanged: (v) {
                 ref.read(bookingProvider.notifier).setPurpose(v);
                 if (ui.policyRefused) ref.read(quoteUiProvider.notifier).fail(null);
               },
-              decoration: InputDecoration(labelText: l.purposeLabel, helperText: (policy?.requirePurpose ?? false) ? l.purposeRequired : l.purposeOptional, counterText: ''),
             ),
+            const SizedBox(height: 4),
+            Text((policy?.requirePurpose ?? false) ? l.purposeRequired : l.purposeOptional, style: AnbessaType.caption.copyWith(color: c.muted)),
           ],
           if (b.scheduling) Padding(padding: const EdgeInsets.only(top: 10), child: Text(l.scheduleRepriceNote, style: AnbessaType.caption.copyWith(color: c.muted))),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           // the expiry counts down by itself; only its end rebuilds the sheet
           if (expired)
             Text(l.quoteExpired, style: AnbessaType.caption.copyWith(color: c.danger))
@@ -354,21 +337,7 @@ class _QuoteSheetState extends ConsumerState<QuoteSheet> {
   }
 }
 
-class _InfoRow extends StatelessWidget {
-  const _InfoRow(this.label, this.value);
-  final String label;
-  final String? value;
-  @override
-  Widget build(BuildContext context) {
-    final c = context.colors;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(children: [Expanded(child: Text(label, style: AnbessaType.body2.copyWith(color: c.text2))), if (value != null) Text(value!, style: AnbessaType.body2.copyWith(color: c.text))]),
-    );
-  }
-}
-
-/// Notices and the amber Request (or Schedule) button, pinned under the sheet.
+/// Notices, the round calendar (book for later) and "Book Economy", pinned under the sheet.
 class QuoteFooter extends ConsumerWidget {
   const QuoteFooter({super.key});
   @override
@@ -377,6 +346,7 @@ class QuoteFooter extends ConsumerWidget {
     final b = ref.watch(bookingProvider);
     final ui = ref.watch(quoteUiProvider);
     final cfg = ref.watch(configProvider);
+    final schedulingOn = ref.watch(featureProvider(Feature.scheduledRides));
     final paused = cfg.maintenance.newTripsPaused;
     final quote = b.quote;
     final expired = quoteExpired(quote, ui);
@@ -385,6 +355,18 @@ class QuoteFooter extends ConsumerWidget {
     final purposeMissing = corporate && (policy?.requirePurpose ?? false) && b.purpose.trim().isEmpty;
     final offered = offeredMethods(ref);
     final name = vehicleName(cfg, quote?.vehicleType ?? '');
+    final Widget main;
+    if (b.quotes.isEmpty && !b.quoting) {
+      main = const SizedBox.shrink();
+    } else if (expired) {
+      main = PrimaryButton(label: l.getNewQuote, icon: Icons.refresh_rounded, onPressed: () => ref.read(bookingProvider.notifier).quote());
+    } else {
+      main = PrimaryButton(
+        label: b.scheduling ? l.scheduleFor(name) : l.grBook(name),
+        busy: ui.requesting || b.quoting,
+        onPressed: paused || quote == null || purposeMissing ? null : () => b.scheduling ? scheduleRide(context, ref) : requestRide(context, ref),
+      );
+    }
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -410,48 +392,99 @@ class QuoteFooter extends ConsumerWidget {
         ] else
           Problem(ui.error, describe: (e) => describeError(l, e)),
         if (ui.error != null && !ui.policyRefused) const SizedBox(height: 10),
-        if (b.quotes.isEmpty && !b.quoting)
-          const SizedBox.shrink()
-        else if (expired)
-          PrimaryButton(label: l.getNewQuote, icon: Icons.refresh_rounded, onPressed: () => ref.read(bookingProvider.notifier).quote())
-        else
-          PrimaryButton(
-            label: b.scheduling ? l.scheduleFor(name) : l.requestRide(name),
-            trailing: quote == null ? null : birr(quote.payableMinor, locale: context.localeTag),
-            busy: ui.requesting || b.quoting,
-            onPressed: paused || quote == null || purposeMissing ? null : () => b.scheduling ? scheduleRide(context, ref) : requestRide(context, ref),
-          ),
+        Row(
+          children: [
+            if (schedulingOn && !expired) ...[
+              CircleActionButton(key: const ValueKey('schedule-button'), icon: Icons.calendar_month_outlined, size: 56, tooltip: l.grScheduleRide, onTap: () => chooseRideTime(context, ref)),
+              const SizedBox(width: 12),
+            ],
+            Expanded(child: main),
+          ],
+        ),
       ],
     );
   }
 }
 
-IconData _methodIcon(PaymentMethod m) => switch (m) {
-      PaymentMethod.cash => Icons.payments_outlined,
-      PaymentMethod.mobileMoney => Icons.phone_iphone,
-      PaymentMethod.card => Icons.credit_card,
-      PaymentMethod.corporate => Icons.business_center_outlined,
-      _ => Icons.payment,
-    };
+/// The kit's "Choose Payment Method": our methods as cards (an icon, the name, a line about it),
+/// the chosen one tinted with a check; OK takes it.
+class ChoosePaymentPage extends ConsumerStatefulWidget {
+  const ChoosePaymentPage({super.key, required this.offered, required this.selected});
+  final List<PaymentMethod> offered;
+  final PaymentMethod selected;
+  @override
+  ConsumerState<ChoosePaymentPage> createState() => _ChoosePaymentPageState();
+}
 
-class _BdRow extends StatelessWidget {
-  const _BdRow(this.label, this.minor);
-  final String label;
-  final int minor;
+class _ChoosePaymentPageState extends ConsumerState<ChoosePaymentPage> {
+  late PaymentMethod _picked = widget.selected;
+
   @override
   Widget build(BuildContext context) {
+    final l = context.l10n;
     final c = context.colors;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        children: [
-          Expanded(child: Text(label, style: AnbessaType.body2.copyWith(color: c.text2))),
-          MoneyText(minor, locale: context.localeTag, style: AnbessaType.body2.copyWith(color: c.text)),
-        ],
+    final providers = ref.watch(paymentMethodsProvider).value?.providers ?? const <PaymentProvider>[];
+    String sub(PaymentMethod m) => switch (m) {
+          PaymentMethod.cash => l.grCashSub,
+          PaymentMethod.mobileMoney => providers.where((p) => p.takesMobileMoney).map((p) => p.label).join(', ').ifEmpty(l.grMobileMoneySub),
+          PaymentMethod.card => l.grCardSub,
+          PaymentMethod.corporate => l.grCorporateSub,
+          _ => '',
+        };
+    return Scaffold(
+      backgroundColor: c.groupedPage,
+      appBar: AppTopBar(title: l.grChoosePaymentMethod, background: c.groupedPage),
+      body: ListView.separated(
+        padding: const EdgeInsets.fromLTRB(AnbessaSpace.page, 8, AnbessaSpace.page, 24),
+        itemCount: widget.offered.length,
+        separatorBuilder: (_, _) => const SizedBox(height: 16),
+        itemBuilder: (_, i) {
+          final m = widget.offered[i];
+          return SelectableCard(
+            key: ValueKey('method-${m.name}'),
+            selected: _picked == m,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+            onTap: () => setState(() => _picked = m),
+            child: Row(
+              children: [
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(shape: BoxShape.circle, color: m == PaymentMethod.cash ? c.success : c.primaryFill),
+                  child: Icon(methodIcon(m), color: m == PaymentMethod.cash ? Colors.white : c.onAccent, size: 24),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(paymentMethodLabel(l, m), style: AnbessaType.title.copyWith(color: c.text)),
+                      if (sub(m).isNotEmpty) ...[const SizedBox(height: 4), Text(sub(m), maxLines: 2, overflow: TextOverflow.ellipsis, style: AnbessaType.caption.copyWith(color: c.muted))],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
       ),
+      bottomNavigationBar: BottomActionBar(child: PrimaryButton(label: l.ok, onPressed: () => Navigator.of(context).pop(_picked))),
     );
   }
 }
+
+extension on String {
+  String ifEmpty(String other) => isEmpty ? other : this;
+}
+
+IconData methodIcon(PaymentMethod m) => switch (m) {
+      PaymentMethod.cash => Icons.attach_money_rounded,
+      PaymentMethod.mobileMoney => Icons.phone_iphone_rounded,
+      PaymentMethod.card => Icons.credit_card_rounded,
+      PaymentMethod.corporate => Icons.business_center_rounded,
+      _ => Icons.payment_rounded,
+    };
+
 
 /// Under the promo row: applied (and what it saves on the chosen ride), or why it wasn't.
 class _PromoLine extends StatelessWidget {
@@ -469,17 +502,19 @@ class _PromoLine extends StatelessWidget {
   }
 }
 
-/// Type a code, Apply; or remove the one in use. Pops the code, '' to remove, null to leave.
-class _PromoSheet extends StatefulWidget {
-  const _PromoSheet({required this.initial, required this.applied});
+/// The kit's "Promos / Vouchers" with only its "Have a Promo Code?" card: type a code and Redeem;
+/// the code in use shows as a chosen card with Remove. Pops the code, '' to remove, null to leave.
+class PromoCodePage extends StatefulWidget {
+  const PromoCodePage({super.key, required this.initial, this.applied});
   final String initial;
-  final bool applied;
+  /// the code in use now
+  final String? applied;
   @override
-  State<_PromoSheet> createState() => _PromoSheetState();
+  State<PromoCodePage> createState() => _PromoCodePageState();
 }
 
-class _PromoSheetState extends State<_PromoSheet> {
-  late final _code = TextEditingController(text: widget.initial);
+class _PromoCodePageState extends State<PromoCodePage> {
+  late final _code = TextEditingController(text: widget.applied == null ? widget.initial : '');
 
   @override
   void dispose() {
@@ -487,35 +522,76 @@ class _PromoSheetState extends State<_PromoSheet> {
     super.dispose();
   }
 
+  void _redeem() {
+    final v = _code.text.trim();
+    if (v.isNotEmpty) Navigator.pop(context, v);
+  }
+
   @override
   Widget build(BuildContext context) {
     final l = context.l10n;
     final c = context.colors;
-    return Padding(
-      padding: EdgeInsets.fromLTRB(20, 4, 20, 16 + MediaQuery.viewInsetsOf(context).bottom),
-      child: SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(l.promoCode, style: AnbessaType.h2.copyWith(color: c.text)),
-            const SizedBox(height: 12),
-            TextField(
-              key: const ValueKey('promo-code'),
-              controller: _code,
-              autofocus: true,
-              textCapitalization: TextCapitalization.characters,
-              maxLength: 32,
-              decoration: InputDecoration(hintText: l.promoCodeHint, counterText: ''),
-              onChanged: (_) => setState(() {}),
-              onSubmitted: (v) => v.trim().isEmpty ? null : Navigator.pop(context, v.trim()),
+    final ready = _code.text.trim().isNotEmpty;
+    return Scaffold(
+      backgroundColor: c.groupedPage,
+      appBar: AppTopBar(title: l.grPromosVouchers, background: c.groupedPage),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(AnbessaSpace.page, 8, AnbessaSpace.page, 24),
+        children: [
+          AppCard(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(l.grHaveAPromoCode, style: AnbessaType.title.copyWith(color: c.text)),
+                Divider(height: 25, color: c.border),
+                Row(
+                  children: [
+                    Expanded(
+                      child: FilledField(
+                        key: const ValueKey('promo-code'),
+                        controller: _code,
+                        hint: l.grEnterCodeHere,
+                        autofocus: widget.applied == null,
+                        textCapitalization: TextCapitalization.characters,
+                        maxLength: 32,
+                        onChanged: (_) => setState(() {}),
+                        onSubmitted: (_) => _redeem(),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    PillButton(key: const ValueKey('promo-redeem'), label: l.grRedeem, compact: true, expand: false, onPressed: ready ? _redeem : null),
+                  ],
+                ),
+              ],
             ),
-            const SizedBox(height: 12),
-            PrimaryButton(label: l.apply, onPressed: _code.text.trim().isEmpty ? null : () => Navigator.pop(context, _code.text.trim())),
-            if (widget.applied) TextButton(onPressed: () => Navigator.pop(context, ''), child: Text(l.promoRemove)),
+          ),
+          if (widget.applied != null) ...[
+            const SizedBox(height: 16),
+            SelectableCard(
+              selected: true,
+              child: Row(
+                children: [
+                  Container(width: 44, height: 44, decoration: BoxDecoration(shape: BoxShape.circle, color: c.primaryFill), child: Icon(Icons.local_offer_rounded, color: c.onAccent, size: 22)),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(widget.applied!, style: AnbessaType.title.copyWith(color: c.text)),
+                        const SizedBox(height: 4),
+                        Text(l.grCodeInUse, style: AnbessaType.caption.copyWith(color: c.muted)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Align(alignment: AlignmentDirectional.centerEnd, child: TextButton(onPressed: () => Navigator.pop(context, ''), child: Text(l.promoRemove))),
           ],
-        ),
+        ],
       ),
+      bottomNavigationBar: BottomActionBar(child: PrimaryButton(label: l.ok, onPressed: ready ? _redeem : () => Navigator.pop(context))),
     );
   }
 }

@@ -1,10 +1,14 @@
-// The search stage in the map shell (workflow 05 A1–2): the sheet rises nearly to the top with the
-// map still behind it. Pickup (dot) and destination (square) fields with a swap; as you type,
+// The search stage in the map shell (workflow 05 A1–2), drawn as the GoRide kit's "Where do you
+// want to go?" page over the shell (the map stays alive under it): ✕ and the title; a card with
+// the pickup (amber dot, "Current location" by default) and destination (red pin) fields and the
+// chips "Select from map", "Use my location" (while the pickup is being filled), Home, Work and
+// the other saved places; Recent | Suggested tabs while nothing is typed; as you type,
 // mapping-service search (debounced 300 ms, biased to the city the rider is in) with the saved,
-// recent and common places, each row led by an icon for its kind (airport, church, hotel, bus
-// stop, hospital, school, shop, food…) and the distance from the pickup on the right. "Use my
-// location", or "Choose on the map": the sheet becomes a small card and the place is whatever is
-// under the centre pin (pin_picker.dart). With both places set, the choose-ride stage replaces it.
+// recent and popular places. Each row: the place's kind in a hairline circle (airport, church,
+// hotel, hospital…, a pin otherwise), the name, the address, the distance from the pickup, and a
+// bookmark that saves or forgets it. "Select from map": the page gives way to the map and the
+// sheet becomes "Set pickup location" / "Set destination" with the place under the centre pin
+// (pin_picker.dart). With both places set, the choose-ride stage replaces it.
 
 import 'dart:async';
 
@@ -17,6 +21,7 @@ import '../../../core/l10n/l10n.dart';
 import '../../../core/location/location_source.dart';
 import '../../../core/network/providers.dart';
 import '../../../core/router/routes.dart';
+import '../../shell/shells.dart' show bannerHeightProvider;
 import '../places/saved_places_controller.dart';
 import '../shell/map_intent.dart';
 import 'booking_actions.dart';
@@ -182,20 +187,46 @@ void openPinPicker(BuildContext context, WidgetRef ref) {
   ref.read(pinPickerProvider.notifier).open(start, pickup: s.active == RouteField.pickup, language: context.localeTag);
 }
 
-/// The two fields at the top of the search sheet.
-class SearchHeader extends ConsumerStatefulWidget {
-  const SearchHeader({super.key, this.focusPickup = false});
-  final bool focusPickup;
-  @override
-  ConsumerState<SearchHeader> createState() => _SearchHeaderState();
+bool _samePlace(double aLat, double aLng, double bLat, double bLng) => (aLat - bLat).abs() < 1e-5 && (aLng - bLng).abs() < 1e-5;
+
+/// The saved place at [p], if the rider saved it.
+SavedPlace? savedAt(List<SavedPlace> saved, Place p) => saved.where((s) => _samePlace(s.lat, s.lng, p.lat, p.lng)).firstOrNull;
+
+/// The bookmark of a row: save the place, or forget it.
+Future<void> toggleSaved(BuildContext context, WidgetRef ref, Place p) async {
+  final l = context.l10n;
+  final ctrl = ref.read(savedPlacesProvider.notifier);
+  final existing = savedAt(ref.read(savedPlacesProvider).value ?? const [], p);
+  Haptics.selection();
+  try {
+    if (existing != null) {
+      await ctrl.remove(existing.id);
+      if (context.mounted) showToast(context, l.grPlaceRemoved);
+    } else {
+      await ctrl.add(p);
+      if (context.mounted) showToast(context, l.placeSaved, tone: NoticeTone.ok);
+    }
+  } catch (e) {
+    if (context.mounted) showToast(context, describeError(l, e), tone: NoticeTone.error);
+  }
 }
 
-class _SearchHeaderState extends ConsumerState<SearchHeader> {
+enum _SearchTab { recent, suggested }
+
+/// "Where do you want to go?": the full page of the search stage.
+class SearchPage extends ConsumerStatefulWidget {
+  const SearchPage({super.key, this.focusPickup = false});
+  final bool focusPickup;
+  @override
+  ConsumerState<SearchPage> createState() => _SearchPageState();
+}
+
+class _SearchPageState extends ConsumerState<SearchPage> {
   final _pickup = TextEditingController();
   final _dropoff = TextEditingController();
   final _pickupFocus = FocusNode();
   final _dropoffFocus = FocusNode();
-  double _swapTurns = 0;
+  _SearchTab? _tab;
 
   @override
   void initState() {
@@ -205,9 +236,11 @@ class _SearchHeaderState extends ConsumerState<SearchHeader> {
     _dropoff.text = b.dropoff?.name ?? '';
     _pickupFocus.addListener(() {
       if (_pickupFocus.hasFocus) ref.read(routeSearchProvider.notifier).focus(RouteField.pickup);
+      if (mounted) setState(() {});
     });
     _dropoffFocus.addListener(() {
       if (_dropoffFocus.hasFocus) ref.read(routeSearchProvider.notifier).focus(RouteField.dropoff);
+      if (mounted) setState(() {});
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -230,43 +263,47 @@ class _SearchHeaderState extends ConsumerState<SearchHeader> {
     super.dispose();
   }
 
-  void _swap() {
-    Haptics.selection();
-    setState(() => _swapTurns += 0.5);
-    ref.read(bookingProvider.notifier).swap();
+  void _close() {
+    FocusScope.of(context).unfocus();
+    context.canPop() ? context.pop() : context.go(Routes.riderHome);
   }
 
   Widget _field(TextEditingController ctrl, FocusNode focus, {required bool pickup}) {
     final l = context.l10n;
     final c = context.colors;
-    final mark = Container(width: 10, height: 10, decoration: BoxDecoration(color: pickup ? c.accent : c.text, shape: pickup ? BoxShape.circle : BoxShape.rectangle, borderRadius: pickup ? null : BorderRadius.circular(2)));
-    return TextField(
+    final mark = pickup
+        ? Container(
+            width: 16,
+            height: 16,
+            decoration: BoxDecoration(shape: BoxShape.circle, color: c.accent.withValues(alpha: 0.25)),
+            alignment: Alignment.center,
+            child: Container(width: 9, height: 9, decoration: BoxDecoration(shape: BoxShape.circle, color: c.accent)),
+          )
+        : Icon(Icons.location_on_rounded, size: 20, color: c.danger);
+    return FilledField(
       key: ValueKey(pickup ? 'search-pickup' : 'search-dropoff'),
       controller: ctrl,
       focusNode: focus,
+      hint: pickup ? l.grYourCurrentLocation : l.dropoffHint,
       textInputAction: TextInputAction.search,
+      prefix: Padding(padding: const EdgeInsetsDirectional.only(start: 16, end: 12), child: SizedBox(width: 20, child: Center(child: mark))),
       onChanged: (v) {
         setState(() {});
         ref.read(routeSearchProvider.notifier).setQuery(v, language: context.localeTag);
       },
       onTap: () => ctrl.selection = TextSelection(baseOffset: 0, extentOffset: ctrl.text.length),
-      decoration: InputDecoration(
-        hintText: pickup ? l.pickupHint : l.dropoffHint,
-        prefixIcon: Center(widthFactor: 1, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 14), child: mark)),
-        suffixIcon: ctrl.text.isNotEmpty && focus.hasFocus
-            ? IconButton(
-                tooltip: l.close,
-                icon: const Icon(Icons.close_rounded, size: 18),
-                onPressed: () {
-                  ctrl.clear();
-                  setState(() {});
-                  ref.read(routeSearchProvider.notifier).setQuery('', language: context.localeTag);
-                },
-              )
-            : null,
-        isDense: true,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-      ),
+      suffix: ctrl.text.isNotEmpty && focus.hasFocus
+          ? IconButton(
+              tooltip: l.close,
+              visualDensity: VisualDensity.compact,
+              icon: Icon(Icons.close_rounded, size: 18, color: c.muted),
+              onPressed: () {
+                ctrl.clear();
+                setState(() {});
+                ref.read(routeSearchProvider.notifier).setQuery('', language: context.localeTag);
+              },
+            )
+          : null,
     );
   }
 
@@ -274,7 +311,7 @@ class _SearchHeaderState extends ConsumerState<SearchHeader> {
   Widget build(BuildContext context) {
     final l = context.l10n;
     final c = context.colors;
-    // a pick (or a swap) shows in the fields; the focus follows the app's moves
+    // a pick shows in the fields; the focus follows the app's moves
     ref.listen(bookingProvider.select((b) => b.pickup), (_, p) => _pickup.text = p?.name ?? '');
     ref.listen(bookingProvider.select((b) => b.dropoff), (_, p) => _dropoff.text = p?.name ?? '');
     ref.listen(routeSearchProvider.select((s) => s.focusTick), (_, _) {
@@ -283,57 +320,98 @@ class _SearchHeaderState extends ConsumerState<SearchHeader> {
       final ctrl = f == RouteField.pickup ? _pickup : _dropoff;
       ctrl.selection = TextSelection(baseOffset: 0, extentOffset: ctrl.text.length);
     });
-    final ready = ref.watch(bookingProvider.select((b) => b.ready));
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Row(
+    final s = ref.watch(routeSearchProvider);
+    final home = ref.watch(homePlaceProvider);
+    final work = ref.watch(workPlaceProvider);
+    final saved = ref.watch(savedPlacesProvider).value ?? const <SavedPlace>[];
+    final recent = ref.watch(recentPlacesProvider);
+    final others = saved.where((p) => p.label == PlaceLabel.other).toList();
+    final typing = s.query.length >= 2;
+    final tab = _tab ?? (recent.isEmpty ? _SearchTab.suggested : _SearchTab.recent);
+
+    final card = AppCard(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          IconButton(tooltip: l.back, icon: const Icon(Icons.arrow_back_rounded), onPressed: () => context.canPop() ? context.pop() : context.go(Routes.riderHome)),
-          Expanded(
-            child: Column(
-              children: [
-                _field(_pickup, _pickupFocus, pickup: true),
-                // the line between the dot and the square
-                Align(alignment: AlignmentDirectional.centerStart, child: Container(margin: const EdgeInsetsDirectional.only(start: 18), width: 2, height: 6, color: c.border)),
-                _field(_dropoff, _dropoffFocus, pickup: false),
-              ],
-            ),
-          ),
-          IconButton(
-            tooltip: l.swapPlaces,
-            onPressed: ready ? _swap : null,
-            icon: AnimatedRotation(turns: _swapTurns, duration: AnbessaMotion.of(context, AnbessaMotion.medium), curve: AnbessaMotion.springSoft, child: const Icon(Icons.swap_vert_rounded)),
+          _field(_pickup, _pickupFocus, pickup: true),
+          Divider(height: 25, color: c.border),
+          _field(_dropoff, _dropoffFocus, pickup: false),
+          Divider(height: 25, color: c.border),
+          ChipRow(
+            padding: EdgeInsets.zero,
+            children: [
+              OutlineChip(key: const ValueKey('choose-on-map'), label: l.grSelectFromMap, icon: Icons.map_outlined, onTap: () => openPinPicker(context, ref)),
+              if (s.active == RouteField.pickup)
+                OutlineChip(key: const ValueKey('use-location'), label: s.locating ? '…' : l.useCurrentLocation, icon: Icons.my_location_rounded, onTap: s.locating ? null : () => useMyLocation(context, ref)),
+              if (home != null) OutlineChip(key: const ValueKey('chip-home'), label: l.savedHome, onTap: () => pickRoutePlace(context, ref, home.place)),
+              if (work != null) OutlineChip(key: const ValueKey('chip-work'), label: l.savedWork, onTap: () => pickRoutePlace(context, ref, work.place)),
+              for (final p in others) OutlineChip(key: ValueKey('chip-${p.id}'), label: p.name, onTap: () => pickRoutePlace(context, ref, p.place)),
+            ],
           ),
         ],
       ),
     );
+
+    // the banners (announcements, connection) float over the shell: the page starts under them
+    final bannerH = ref.watch(bannerHeightProvider);
+    final page = Scaffold(
+      backgroundColor: c.page,
+      appBar: AppTopBar(title: l.grWhereDoYouWantToGo, leadingKind: TopBarLeading.close, centerTitle: false, onLeading: _close, leadingTooltip: l.close),
+      body: BackButtonListener(
+        onBackButtonPressed: () async {
+          _close();
+          return true;
+        },
+        child: ListView(
+          padding: EdgeInsets.fromLTRB(AnbessaSpace.page, 4, AnbessaSpace.page, 24 + MediaQuery.paddingOf(context).bottom),
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          children: [
+            card,
+            const SizedBox(height: 16),
+            Problem(s.error, describe: (e) => describeError(l, e)),
+            if (s.searchDown && typing) Padding(padding: const EdgeInsets.only(bottom: 8), child: Notice(l.searchDown, tone: NoticeTone.warning)),
+            if (!typing) ...[
+              SegmentedTabs<_SearchTab>(
+                items: [(_SearchTab.recent, l.recentPlaces), (_SearchTab.suggested, l.grSuggested)],
+                selected: tab,
+                onChanged: (t) => setState(() => _tab = t),
+              ),
+              const SizedBox(height: 4),
+            ],
+            _SearchResults(tab: typing ? null : tab),
+          ],
+        ),
+      ),
+    );
+    if (bannerH <= 0) return page;
+    return ColoredBox(
+      color: c.page,
+      child: Padding(padding: EdgeInsets.only(top: bannerH), child: MediaQuery.removePadding(context: context, removeTop: true, child: page)),
+    );
   }
 }
 
-sealed class _Item {
-  const _Item();
-}
-
-class _HeaderItem extends _Item {
-  const _HeaderItem(this.text);
-  final String text;
-}
-
-class _PlaceItem extends _Item {
-  const _PlaceItem(this.key, this.place, this.icon, {this.subtitle});
+class _PlaceItem {
+  const _PlaceItem(this.key, this.place, this.icon, {this.subtitle, this.recent = false});
   final String key;
   final Place place;
   final IconData icon;
   final String? subtitle;
+  /// a recent place: swipe to forget it
+  final bool recent;
 }
 
-/// Saved, recent and found places for the field being filled, built lazily.
-class SearchSuggestions extends ConsumerWidget {
-  const SearchSuggestions({super.key});
+/// The rows of the search page: the tab's places, or what matches what was typed.
+class _SearchResults extends ConsumerWidget {
+  const _SearchResults({required this.tab});
+  /// null while typing (every match in one list)
+  final _SearchTab? tab;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l = context.l10n;
+    final c = context.colors;
     final s = ref.watch(routeSearchProvider);
     final b = ref.watch(bookingProvider);
     final city = ref.watch(riderCityProvider);
@@ -342,75 +420,77 @@ class SearchSuggestions extends ConsumerWidget {
     final me = ref.watch(lastPositionProvider);
     final q = s.query.toLowerCase();
     bool match(Place p) => q.isEmpty || '${p.name} ${p.label ?? ''}'.toLowerCase().contains(q);
-    final common = (commonPlaces[city.id] ?? const <Place>[]).where(match).take(q.isEmpty ? 6 : 8).toList();
-    final remote = q.length >= 2 && s.remoteFor.toLowerCase() == q ? s.remote.where((r) => !common.any((x) => x.name == r.name)).toList() : const <Place>[];
-    final savedHits = saved.where((p) => match(p.place)).toList();
-    final recentHits = recent.where(match).take(q.isEmpty ? 4 : 8).toList();
+    IconData kindIcon(Place p) => p.category == null ? Icons.location_on_outlined : placeIcon(p.category, p.type);
+    IconData savedIcon(SavedPlace p) => switch (p.label) { PlaceLabel.home => Icons.home_outlined, PlaceLabel.work => Icons.work_outline_rounded, _ => Icons.location_on_outlined };
 
     // distances from the pickup (from the rider while the pickup itself is being chosen)
     final origin = s.active == RouteField.dropoff && b.pickup != null ? (lat: b.pickup!.lat, lng: b.pickup!.lng) : (me == null ? null : (lat: me.lat, lng: me.lng));
     String? distance(Place p) => origin == null ? null : formatDistance(haversineMeters(origin.lat, origin.lng, p.lat, p.lng));
 
-    final items = <_Item>[
-      if (savedHits.isNotEmpty) ...[
-        _HeaderItem(l.savedPlacesHeader),
-        for (final p in savedHits)
-          _PlaceItem('saved:${p.id}', p.place, switch (p.label) { PlaceLabel.home => Icons.home_rounded, PlaceLabel.work => Icons.work_rounded, _ => Icons.star_rounded }, subtitle: p.address),
-      ],
-      if (recentHits.isNotEmpty) ...[
-        _HeaderItem(l.recentPlaces),
-        for (final p in recentHits) _PlaceItem('recent:${p.lat},${p.lng},${p.name}', p, p.category == null ? Icons.history_rounded : placeIcon(p.category, p.type)),
-      ],
-      if (common.isNotEmpty || remote.isNotEmpty) _HeaderItem(q.length >= 2 ? l.searchResults : l.commonPlaces),
-      for (final p in common) _PlaceItem('common:${p.name}', p, placeIcon(p.category, p.type)),
-      for (final p in remote) _PlaceItem('found:${p.lat},${p.lng},${p.name}', p, placeIcon(p.category, p.type)),
-    ];
-    final nothing = q.length >= 2 && items.isEmpty && !s.searching && !s.searchDown;
+    final items = <_PlaceItem>[];
+    switch (tab) {
+      case _SearchTab.recent:
+        items.addAll([for (final p in recent.take(8)) _PlaceItem('recent:${p.lat},${p.lng},${p.name}', p, kindIcon(p), recent: true)]);
+      case _SearchTab.suggested:
+        items.addAll([
+          for (final p in saved) _PlaceItem('saved:${p.id}', p.place, savedIcon(p), subtitle: p.address),
+          for (final p in (commonPlaces[city.id] ?? const <Place>[]).take(8)) _PlaceItem('common:${p.name}', p, kindIcon(p)),
+        ]);
+      case null:
+        final common = (commonPlaces[city.id] ?? const <Place>[]).where(match).take(8).toList();
+        final remote = s.remoteFor.toLowerCase() == q ? s.remote.where((r) => !common.any((x) => x.name == r.name)).toList() : const <Place>[];
+        items.addAll([
+          for (final p in saved.where((p) => match(p.place))) _PlaceItem('saved:${p.id}', p.place, savedIcon(p), subtitle: p.address),
+          for (final p in recent.where(match).take(8)) _PlaceItem('recent:${p.lat},${p.lng},${p.name}', p, kindIcon(p), recent: true),
+          for (final p in common) _PlaceItem('common:${p.name}', p, kindIcon(p)),
+          for (final p in remote) _PlaceItem('found:${p.lat},${p.lng},${p.name}', p, kindIcon(p)),
+        ]);
+    }
+    final nothing = tab == null && items.isEmpty && !s.searching && !s.searchDown;
+
+    Widget row(_PlaceItem it) {
+      final isSaved = savedAt(saved, it.place) != null;
+      final tile = ListRowTile(
+        key: ValueKey(it.key),
+        leading: CircleIcon(it.icon),
+        title: it.place.name,
+        subtitle: it.subtitle ?? it.place.label,
+        value: distance(it.place),
+        divider: true,
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        trailing: IconButton(
+          tooltip: isSaved ? l.grUnsavePlace : l.grSavePlace,
+          visualDensity: VisualDensity.compact,
+          onPressed: () => toggleSaved(context, ref, it.place),
+          icon: Icon(isSaved ? Icons.bookmark_rounded : Icons.bookmark_border_rounded, color: isSaved ? c.accentText : c.text, size: 22),
+        ),
+        onTap: () => pickRoutePlace(context, ref, it.place),
+      );
+      if (!it.recent) return tile;
+      return Dismissible(
+        key: ValueKey('dismiss:${it.key}'),
+        direction: DismissDirection.endToStart,
+        background: Container(alignment: AlignmentDirectional.centerEnd, padding: const EdgeInsetsDirectional.only(end: 20), child: Icon(Icons.delete_outline_rounded, color: c.danger)),
+        onDismissed: (_) => ref.read(bookingProvider.notifier).forget(it.place),
+        child: tile,
+      );
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Problem(s.error, describe: (e) => describeError(l, e)),
-        SuggestionRow(key: const ValueKey('use-location'), icon: Icons.my_location_rounded, title: l.useCurrentLocation, highlight: true, trailing: s.locating ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : null, onTap: s.locating ? null : () => useMyLocation(context, ref)),
-        SuggestionRow(key: const ValueKey('choose-on-map'), icon: Icons.map_rounded, title: l.chooseOnMap, highlight: true, onTap: () => openPinPicker(context, ref)),
-        const Divider(height: 12),
-        if (s.searchDown && q.length >= 2) Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Notice(l.searchDown, tone: NoticeTone.warning)),
-        if (s.searching) const SkeletonList(rows: 3),
-        ListView.builder(
-          // the sheet scrolls; the list sizes to its rows
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          padding: EdgeInsets.zero,
-          itemCount: items.length,
-          itemBuilder: (context, i) => switch (items[i]) {
-            _HeaderItem(:final text) => _Header(key: ValueKey('h:$text'), text: text),
-            final _PlaceItem it => SuggestionRow(
-                key: ValueKey(it.key),
-                icon: it.icon,
-                title: it.place.name,
-                subtitle: it.subtitle ?? it.place.label,
-                distance: distance(it.place),
-                onTap: () => pickRoutePlace(context, ref, it.place),
-              ),
-          },
-        ),
+        if (s.searching) const Padding(padding: EdgeInsets.only(top: 8), child: SkeletonList(rows: 3)),
+        for (final it in items) row(it),
+        if (tab == _SearchTab.recent && items.isEmpty)
+          Padding(padding: const EdgeInsets.symmetric(vertical: 24), child: Text(l.grNoRecent, textAlign: TextAlign.center, style: AnbessaType.body2.copyWith(color: c.muted))),
         if (nothing) IllustratedEmpty(illustration: AnbessaIllustration.searchEmpty, title: l.noResults, compact: true),
       ],
     );
   }
 }
 
-class _Header extends StatelessWidget {
-  const _Header({super.key, required this.text});
-  final String text;
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.fromLTRB(4, 12, 4, 4),
-        child: Text(text, style: AnbessaType.label.copyWith(color: context.colors.muted, letterSpacing: 0.4)),
-      );
-}
-
-/// The sheet in pin mode: the address under the pin (looked up as the map settles) and Confirm.
+/// The sheet of "Select from map" (the kit's "Set pickup location"): the place under the pin,
+/// looked up as the map settles, ✎ back to the search, and Next.
 class PinCard extends ConsumerWidget {
   const PinCard({super.key});
   @override
@@ -426,43 +506,44 @@ class PinCard extends ConsumerWidget {
         return true;
       },
       child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text(l.rideMovePin, style: AnbessaType.caption.copyWith(color: c.muted)),
-        const SizedBox(height: 8),
-        if (p.error != null) Padding(padding: const EdgeInsets.only(bottom: 8), child: Problem(p.error, describe: (e) => describeError(l, e))),
-        Row(
-          children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(color: c.accentSoft, shape: BoxShape.circle),
-              child: Icon(p.place == null ? Icons.place_rounded : placeIcon(p.place!.category, p.place!.type), color: c.text, size: 20),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: AnimatedSwitcherX(
-                child: busy
-                    ? const Column(key: ValueKey('busy'), crossAxisAlignment: CrossAxisAlignment.start, children: [Skeleton.line(width: 180, height: 18), SizedBox(height: 6), Skeleton.line(width: 120, height: 12)])
-                    : Column(
-                        key: ValueKey('place:${p.place?.name}'),
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(p.place?.name ?? '—', style: AnbessaType.title.copyWith(color: c.text), maxLines: 1, overflow: TextOverflow.ellipsis),
-                          if ((p.place?.label ?? '').isNotEmpty) Text(p.place!.label!, style: AnbessaType.caption.copyWith(color: c.muted), maxLines: 1, overflow: TextOverflow.ellipsis),
-                        ],
-                      ),
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Semantics(header: true, child: Text(p.pickup ? l.grSetPickupLocation : l.grSetDestination, style: AnbessaType.h2.copyWith(color: c.text))),
+          Divider(height: 25, color: c.border),
+          if (p.error != null) Padding(padding: const EdgeInsets.only(bottom: 8), child: Problem(p.error, describe: (e) => describeError(l, e))),
+          Row(
+            children: [
+              CircleIcon(p.place == null ? Icons.location_on_outlined : (p.place!.category == null ? Icons.location_on_outlined : placeIcon(p.place!.category, p.place!.type))),
+              const SizedBox(width: 14),
+              Expanded(
+                child: AnimatedSwitcherX(
+                  alignment: Alignment.centerLeft,
+                  child: busy
+                      ? const Column(key: ValueKey('busy'), crossAxisAlignment: CrossAxisAlignment.start, children: [Skeleton.line(width: 180, height: 18), SizedBox(height: 6), Skeleton.line(width: 120, height: 12)])
+                      : Column(
+                          key: ValueKey('place:${p.place?.name}'),
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(p.place?.name ?? '—', style: AnbessaType.title.copyWith(color: c.text), maxLines: 1, overflow: TextOverflow.ellipsis),
+                            if ((p.place?.label ?? '').isNotEmpty) ...[
+                              const SizedBox(height: 4),
+                              Text(p.place!.label!, style: AnbessaType.caption.copyWith(color: c.muted), maxLines: 1, overflow: TextOverflow.ellipsis),
+                            ],
+                          ],
+                        ),
+                ),
               ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 14),
-        PrimaryButton(
-          label: p.pickup ? l.confirmPickup : l.confirmDropoff,
-          icon: Icons.check_rounded,
-          onPressed: busy || p.place == null ? null : () => pickRoutePlace(context, ref, p.place!),
-        ),
-      ],
+              IconButton(tooltip: l.edit, icon: Icon(Icons.edit_outlined, color: c.text), onPressed: () => ref.read(pinPickerProvider.notifier).close()),
+            ],
+          ),
+          Divider(height: 25, color: c.border),
+          const SizedBox(height: 4),
+          PrimaryButton(
+            key: const ValueKey('pin-confirm'),
+            label: l.next,
+            onPressed: busy || p.place == null ? null : () => pickRoutePlace(context, ref, p.place!),
+          ),
+        ],
       ),
     );
   }

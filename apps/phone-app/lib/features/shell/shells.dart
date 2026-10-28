@@ -37,24 +37,33 @@ class RiderShell extends ConsumerWidget {
       body: _Body(audience: 'rider', shell: shell),
       bottomNavigationBar: hidden
           ? null
-          : NavigationBar(
+          : _TopHairline(child: NavigationBar(
         selectedIndex: shell.currentIndex,
         onDestinationSelected: (i) {
           Haptics.selection();
           shell.goBranch(i, initialLocation: i == shell.currentIndex);
         },
         destinations: [
-          NavigationDestination(icon: const Icon(Icons.explore_outlined), selectedIcon: const Icon(Icons.explore), label: l.tabHome),
+          // the kit's tab bar: outlined icons, the selected one filled in amber, a small label
+          NavigationDestination(icon: const Icon(Icons.home_outlined), selectedIcon: const Icon(Icons.home_rounded), label: l.tabHome),
           NavigationDestination(
-            icon: Badge(isLabelVisible: due, smallSize: 8, child: const Icon(Icons.receipt_long_outlined)),
-            selectedIcon: Badge(isLabelVisible: due, smallSize: 8, child: const Icon(Icons.receipt_long)),
+            icon: Badge(isLabelVisible: due, smallSize: 8, child: const Icon(Icons.description_outlined)),
+            selectedIcon: Badge(isLabelVisible: due, smallSize: 8, child: const Icon(Icons.description_rounded)),
             label: l.tabActivity,
           ),
-          NavigationDestination(icon: const Icon(Icons.person_outline), selectedIcon: const Icon(Icons.person), label: l.tabAccount),
+          NavigationDestination(icon: const Icon(Icons.person_outline_rounded), selectedIcon: const Icon(Icons.person_rounded), label: l.tabAccount),
         ],
-      ),
+      )),
     );
   }
+}
+
+/// The kit's hairline between the page and the tab bar.
+class _TopHairline extends StatelessWidget {
+  const _TopHairline({required this.child});
+  final Widget child;
+  @override
+  Widget build(BuildContext context) => DecoratedBox(decoration: BoxDecoration(border: Border(top: BorderSide(color: context.colors.border))), child: child);
 }
 
 class DriverShell extends ConsumerWidget {

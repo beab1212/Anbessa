@@ -1,15 +1,20 @@
-// The rider's map shell: ONE map from home to the end of a trip.
+// The rider's map shell: ONE map from home to the end of a trip, in the GoRide kit's look.
 //
 // A go_router ShellRoute (riderMapShellRoute, inside the rider's Home tab) whose child routes are
 // the stages: /rider/home, /rider/book/route (search), /rider/book/quote (choose ride) and
 // /rider/trip/:id. The shell reads the stage from the location and shows:
 //   - the map (one AnbessaMap for every stage, so routes, pins and cars animate between stages
-//     instead of a new map loading), fed by the stage's MapIntent (map_intent.dart);
-//   - the stage's top overlays (home bar, back, share and SOS);
+//     instead of a new map loading), fed by the stage's MapIntent (map_intent.dart), with the
+//     kit's round controls;
+//   - the stage's floating pieces (the layers button on home; the route card on choose ride and
+//     on a trip; back, share and SOS as round buttons);
 //   - one RiderSheet (an AppSheet with an AppSheetController): its snap points change per stage
 //     and the sheet glides to the stage's resting size, while the content switches with a
 //     shared-axis transition. The sheet's height goes to the map as a ValueListenable, so dragging
-//     it never rebuilds the screen.
+//     it never rebuilds the screen;
+//   - what covers the map for a while: the "Where do you want to go?" page while searching (the
+//     map stays alive under it), "Searching your location..." rings, and the end of a trip ("You
+//     have arrived!" over the dimmed map, "Ride has been canceled!").
 // The stage pages themselves are empty (the go_router child navigator is kept in the tree only
 // for back navigation). Pay and rate stay full-screen pages on the root navigator.
 //
@@ -30,6 +35,7 @@ import '../../../core/location/location_source.dart';
 import '../../../core/perf.dart';
 import '../../../core/router/routes.dart';
 import '../../../core/router/transitions.dart';
+import '../../../core/session/session_controller.dart';
 import '../../maps/anbessa_map.dart';
 import '../../maps/nearby_cars_layer.dart';
 import '../../shell/shells.dart';
@@ -88,14 +94,28 @@ class SheetStops {
   const SheetStops(this.snaps, [this.initial = 0]);
   final List<double> snaps;
   final int initial;
+  @override
+  bool operator ==(Object other) => other is SheetStops && listEquals(other.snaps, snaps) && other.initial == initial;
+  @override
+  int get hashCode => Object.hash(Object.hashAll(snaps), initial);
 }
 
-SheetStops sheetStopsFor(RiderMapStage s, {required bool pin}) => switch (s.kind) {
-      RiderMapStageKind.home => const SheetStops([0.4, 0.62, 0.92]),
-      RiderMapStageKind.search => pin ? const SheetStops([0.3, 0.5]) : const SheetStops([0.5, 0.94], 1),
-      RiderMapStageKind.quote => const SheetStops([0.52, 0.94]),
-      RiderMapStageKind.trip => const SheetStops([0.42, 0.86]),
-    };
+/// Where the sheet rests at each stage. Short stages are sized to their content in pixels
+/// (scaled with the text) over the shell's [height]; [tripStage] picks the trip's.
+SheetStops sheetStopsFor(RiderMapStage s, {required bool pin, double height = 700, double textScale = 1, RiderStage? tripStage, bool locating = false}) {
+  final k = 1 + (textScale - 1) * 0.85;
+  double px(double v) => (v * k / height).clamp(0.18, 0.9);
+  return switch (s.kind) {
+    RiderMapStageKind.home => SheetStops([px(locating ? 172 : 212)]),
+    RiderMapStageKind.search => pin ? SheetStops([px(262)]) : SheetStops([px(212)]),
+    RiderMapStageKind.quote => SheetStops([0.56, 0.92]),
+    RiderMapStageKind.trip => switch (tripStage) {
+        RiderStage.finding => SheetStops([px(292)]),
+        RiderStage.completed || RiderStage.cancelled => SheetStops([px(212)]),
+        _ => SheetStops([px(300), 0.88]),
+      },
+  };
+}
 
 class RiderMapShell extends ConsumerStatefulWidget {
   const RiderMapShell({super.key, required this.location, required this.child});
@@ -220,14 +240,18 @@ class RiderMapShellState extends ConsumerState<RiderMapShell> with TickerProvide
     }
   }
 
-  /// After a stage (or pin mode) change the sheet glides to the new stage's resting size.
-  void _restSheet(Object key, SheetStops stops) {
+  /// After a stage (or pin mode) change the sheet glides to the new stage's resting size. The map
+  /// hears the height even when the sheet doesn't move (a sheet that is built at its size, or
+  /// already there, reports nothing by itself).
+  void _restSheet(Object key, SheetStops stops, double height) {
     if (key == _restingFor) return;
     final first = _restingFor == null;
     _restingFor = key;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted || _restingFor != key) return;
-      sheet.animateTo(stops.initial, duration: first ? const Duration(milliseconds: 1) : AnbessaMotion.of(context, AnbessaMotion.sheet));
+      if (first) _onSheetHeight(stops.snaps[stops.initial] * height);
+      await sheet.animateTo(stops.initial, duration: first ? const Duration(milliseconds: 1) : AnbessaMotion.of(context, AnbessaMotion.sheet));
+      if (mounted && _restingFor == key) _onSheetHeight(sheet.size * height);
     });
   }
 
@@ -239,21 +263,48 @@ class RiderMapShellState extends ConsumerState<RiderMapShell> with TickerProvide
       if (p != null && _stage.kind == RiderMapStageKind.home && _visible) ref.read(nearbyCarsProvider.notifier).watch(p.lat, p.lng);
     });
     final pin = _stage.kind == RiderMapStageKind.search && ref.watch(pinPickerProvider.select((p) => p.active));
-    final stops = sheetStopsFor(_stage, pin: pin);
-    _restSheet((_stage, pin), stops);
+    final tripStage = _stage.tripId == null ? null : ref.watch(tripViewProvider(_stage.tripId!).select((v) => v?.stage));
+    final locating = _stage.kind == RiderMapStageKind.home && ref.watch(riderLocatingProvider);
+    final searching = _stage.kind == RiderMapStageKind.search && !pin;
+    final ended = tripStage == RiderStage.completed || tripStage == RiderStage.cancelled;
     final c = context.colors;
+    final textScale = MediaQuery.textScalerOf(context).scale(16) / 16;
     return RiderMapScope(
       shell: this,
-      child: Stack(
-        children: [
-          // the stage pages: empty, kept for go_router's back navigation
-          Positioned.fill(child: IgnorePointer(child: widget.child)),
-          Positioned.fill(child: _RiderMapView(stage: _stage)),
-          if (pin) const _DropPin(),
-          _StageOverlays(stage: _stage, pin: pin),
-          RiderSheet(stage: _stage, pin: pin, stops: stops),
-          Align(alignment: Alignment.topCenter, child: IgnorePointer(child: ConfettiWidget(confettiController: confetti, blastDirectionality: BlastDirectionality.explosive, numberOfParticles: 24, colors: [c.accent, c.success, c.info]))),
-        ],
+      child: LayoutBuilder(
+        builder: (context, box) {
+          final stops = sheetStopsFor(_stage, pin: pin, height: box.maxHeight, textScale: textScale, tripStage: tripStage, locating: locating);
+          _restSheet((_stage, pin, tripStage, locating, stops), stops, box.maxHeight);
+          return Stack(
+            children: [
+              // the stage pages: empty, kept for go_router's back navigation
+              Positioned.fill(child: IgnorePointer(child: widget.child)),
+              Positioned.fill(child: _RiderMapView(stage: _stage)),
+              if (pin) const _DropPin(),
+              if (locating) const _LocatingRings(),
+              _StageOverlays(stage: _stage, pin: pin, tripStage: tripStage),
+              RiderSheet(stage: _stage, pin: pin, stops: stops, locating: locating),
+              // over everything for a while: the search page, the end of a trip
+              Positioned.fill(
+                child: AnimatedSwitcher(
+                  duration: AnbessaMotion.of(context, AnbessaMotion.medium),
+                  switchInCurve: AnbessaMotion.emphasizedDecelerate,
+                  switchOutCurve: AnbessaMotion.emphasizedAccelerate,
+                  transitionBuilder: (child, a) => FadeTransition(
+                    opacity: a,
+                    child: SlideTransition(position: Tween(begin: const Offset(0, 0.06), end: Offset.zero).animate(a), child: child),
+                  ),
+                  child: searching
+                      ? SearchPage(key: const ValueKey('search-page'), focusPickup: _stage.focusPickup)
+                      : ended
+                          ? TripEndLayer(key: ValueKey('end-${_stage.tripId}-$tripStage'), tripId: _stage.tripId!)
+                          : const SizedBox.shrink(key: ValueKey('none')),
+                ),
+              ),
+              Align(alignment: Alignment.topCenter, child: IgnorePointer(child: ConfettiWidget(confettiController: confetti, blastDirectionality: BlastDirectionality.explosive, numberOfParticles: 24, colors: [c.accent, c.success, c.info]))),
+            ],
+          );
+        },
       ),
     );
   }
@@ -261,26 +312,26 @@ class RiderMapShellState extends ConsumerState<RiderMapShell> with TickerProvide
 
 /// The one sheet: snap points per stage, content switched with a shared-axis transition.
 class RiderSheet extends StatelessWidget {
-  const RiderSheet({super.key, required this.stage, required this.pin, required this.stops});
+  const RiderSheet({super.key, required this.stage, required this.pin, required this.stops, this.locating = false});
   final RiderMapStage stage;
   final bool pin;
   final SheetStops stops;
+  /// home without a position yet: "Searching your location..."
+  final bool locating;
 
   @override
   Widget build(BuildContext context) {
     final shell = RiderMapScope.of(context);
-    final key = ValueKey((stage.kind, stage.tripId, pin));
-    Widget? header;
+    final key = ValueKey((stage.kind, stage.tripId, pin, locating));
     Widget? footer;
     Widget body;
     switch (stage.kind) {
       case RiderMapStageKind.home:
-        body = const HomeSheet();
+        body = locating ? const LocatingSheet() : const HomeSheet();
       case RiderMapStageKind.search:
-        header = pin ? null : SearchHeader(focusPickup: stage.focusPickup);
-        body = pin ? const PinCard() : const SearchSuggestions();
+        // the search itself is a page over the shell; the sheet waits under it
+        body = pin ? const PinCard() : const SizedBox.shrink();
       case RiderMapStageKind.quote:
-        header = const QuoteHeader();
         footer = const QuoteFooter();
         body = const QuoteSheet();
       case RiderMapStageKind.trip:
@@ -291,10 +342,35 @@ class RiderSheet extends StatelessWidget {
       snaps: stops.snaps,
       initialSnap: stops.initial,
       onHeightChanged: shell._onSheetHeight,
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
-      header: header == null ? null : AnimatedSwitcherX(child: KeyedSubtree(key: key, child: header)),
+      padding: const EdgeInsets.fromLTRB(AnbessaSpace.page, 4, AnbessaSpace.page, 16),
       footer: footer == null ? null : AnimatedSwitcherX(child: KeyedSubtree(key: key, child: footer)),
       builder: (context, _) => SharedAxisSwitcher(child: KeyedSubtree(key: key, child: body)),
+    );
+  }
+}
+
+/// Home before the first position: the kit's rings around the rider's avatar in the middle of
+/// the map, above the sheet.
+class _LocatingRings extends ConsumerWidget {
+  const _LocatingRings();
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final shell = RiderMapScope.of(context);
+    final session = ref.watch(currentSessionProvider);
+    return ValueListenableBuilder<double>(
+      valueListenable: shell.sheetHeight,
+      builder: (_, h, child) => Positioned(left: 0, right: 0, top: 0, bottom: h, child: child!),
+      child: IgnorePointer(
+        child: Center(
+          child: RadarRings(
+            size: 230,
+            child: Container(
+              decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: context.colors.accent, width: 4)),
+              child: AvatarImage(src: session?.profile.image, name: session?.displayName ?? '', size: 64),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -354,6 +430,11 @@ class _RiderMapViewState extends ConsumerState<_RiderMapView> with SingleTickerP
     _syncReveal(intent.revealKey);
     final pin = ref.read(pinPickerProvider.notifier);
     final top = MediaQuery.paddingOf(context).top;
+    final session = ref.watch(currentSessionProvider);
+    final person = MapPerson(photo: session?.profile.image, name: session?.displayName ?? '');
+    // the route card covers the top on choose ride and on a trip (and a pin's label needs room
+    // above it: the camera keeps fitted points 48 px under the inset)
+    final cardTop = stage.kind == RiderMapStageKind.quote || stage.kind == RiderMapStageKind.trip ? 168.0 : 64.0;
     final callouts = [
       for (final k in intent.callouts)
         MapCallout(
@@ -374,7 +455,7 @@ class _RiderMapViewState extends ConsumerState<_RiderMapView> with SingleTickerP
             ? intent.routes
             : [RouteLine(routePrefix(intent.routes.first.points, t), kind: intent.routes.first.kind), ...intent.routes.skip(1)];
         return AnbessaMap(
-          mePose: me == null ? null : MePose(position: LatLng(me.lat, me.lng), heading: me.heading, accuracy: me.accuracy),
+          mePose: me == null || !intent.showMe ? null : MePose(position: LatLng(me.lat, me.lng), heading: me.heading, accuracy: me.accuracy),
           nearbyCars: intent.nearby ? shell.nearby.frames : null,
           nearbyLabel: etaSeconds == null ? null : l.rideMinutes(minutesCeil(etaSeconds)),
           driverCar: car,
@@ -387,9 +468,20 @@ class _RiderMapViewState extends ConsumerState<_RiderMapView> with SingleTickerP
           follow: intent.follow,
           followZoom: intent.followZoom,
           callouts: callouts,
-          overlays: [if (intent.radarAt != null) MapOverlay(point: intent.radarAt!, size: const Size(160, 160), child: RadarPulse(color: c.accent, size: 160))],
+          overlays: [
+            if (intent.radarAt != null)
+              MapOverlay(
+                point: intent.radarAt!,
+                size: const Size(220, 220),
+                child: RadarRings(size: 220, color: c.accent, child: _RingAvatar(person: person)),
+              ),
+          ],
+          person: person,
+          meAsAvatar: intent.meAvatar,
+          roundControls: true,
+          showModeSwitch: false,
           // pin mode: the camera centre is exactly the screen centre, where the pin stands
-          topInset: intent.pin ? 0 : top + bannerH + 64,
+          topInset: intent.pin ? 0 : top + bannerH + cardTop,
           sheetHeight: intent.pin ? null : shell.sheetHeight,
           padding: intent.pin ? EdgeInsets.zero : const EdgeInsets.all(48),
           showControls: intent.controls,
@@ -406,24 +498,41 @@ class _RiderMapViewState extends ConsumerState<_RiderMapView> with SingleTickerP
 /// centres, and the centre MapLibre reports after a drag, are half the difference lower.
 const _pinCentreOffset = (48 - 32) / 2;
 
-/// The centre pin of "choose on the map": lifts while the map moves, drops with a bounce.
+/// The rider's avatar in a white-edged amber ring, in the middle of the "finding a driver" rings.
+class _RingAvatar extends StatelessWidget {
+  const _RingAvatar({required this.person});
+  final MapPerson person;
+  @override
+  Widget build(BuildContext context) => Container(
+        decoration: BoxDecoration(shape: BoxShape.circle, color: context.colors.accent),
+        padding: const EdgeInsets.all(4),
+        child: AvatarImage(src: person.photo, name: person.name, size: 56),
+      );
+}
+
+/// The centre pin of "Select from map": the rider's avatar pin for a pickup, the red pin for a
+/// destination; it lifts while the map moves and drops with a bounce.
 class _DropPin extends ConsumerWidget {
   const _DropPin();
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final p = ref.watch(pinPickerProvider);
+    final session = ref.watch(currentSessionProvider);
     final lifted = p.lifted;
     final d = AnbessaMotion.of(context, lifted ? AnbessaMotion.base : AnbessaMotion.slow);
+    final size = p.pickup ? avatarPinSize(52) : destinationPinSize(40);
+    final pinWidget = p.pickup ? MapAvatarPin(photo: session?.profile.image, name: session?.displayName ?? '', diameter: 52) : const DestinationPin(diameter: 40);
     return IgnorePointer(
       child: Center(
         child: Padding(
-          padding: const EdgeInsets.only(bottom: 41 - 2 * _pinCentreOffset),
+          // the pin's tip sits on the camera centre
+          padding: EdgeInsets.only(bottom: size.height - 2 * _pinCentreOffset),
           child: AnimatedSlide(
             key: const ValueKey('drop-pin'),
             duration: d,
             curve: lifted ? AnbessaMotion.emphasizedDecelerate : AnbessaMotion.spring,
-            offset: lifted ? const Offset(0, -0.35) : Offset.zero,
-            child: PinMarker(tone: p.pickup ? PinTone.pickup : PinTone.dropoff, lifted: lifted),
+            offset: lifted ? const Offset(0, -0.25) : Offset.zero,
+            child: pinWidget,
           ),
         ),
       ),
@@ -431,33 +540,40 @@ class _DropPin extends ConsumerWidget {
   }
 }
 
-/// What floats over the map at each stage: the home bar and the nearby-cars chip; a back button;
-/// share and SOS on a trip.
+/// What floats over the map at each stage: the layers button on home; back on "Select from
+/// map"; the route card with back on choose ride; the route card with share and SOS on a trip.
 class _StageOverlays extends ConsumerWidget {
-  const _StageOverlays({required this.stage, required this.pin});
+  const _StageOverlays({required this.stage, required this.pin, this.tripStage});
   final RiderMapStage stage;
   final bool pin;
+  final RiderStage? tripStage;
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l = context.l10n;
     final top = MediaQuery.paddingOf(context).top + 8 + ref.watch(bannerHeightProvider);
     final shell = RiderMapScope.of(context);
-    Widget back(VoidCallback onTap) => RoundIconButton(icon: Icons.arrow_back_rounded, tooltip: l.back, onTap: onTap);
     final Widget bar = switch (stage.kind) {
       RiderMapStageKind.home => const HomeTopBar(key: ValueKey('home-bar')),
-      RiderMapStageKind.search when pin => Align(key: const ValueKey('pin-bar'), alignment: Alignment.centerLeft, child: back(() => ref.read(pinPickerProvider.notifier).close())),
+      RiderMapStageKind.search when pin => Align(
+          key: const ValueKey('pin-bar'),
+          alignment: AlignmentDirectional.centerStart,
+          child: RoundIconButton(icon: Icons.arrow_back_rounded, tooltip: l.back, onTap: () => ref.read(pinPickerProvider.notifier).close()),
+        ),
       RiderMapStageKind.search => const SizedBox.shrink(key: ValueKey('search-bar')),
-      RiderMapStageKind.quote => Align(key: const ValueKey('quote-bar'), alignment: Alignment.centerLeft, child: back(() => leaveQuote(context))),
+      RiderMapStageKind.quote => const QuoteRouteCard(key: ValueKey('quote-bar')),
       RiderMapStageKind.trip => TripTopBar(key: ValueKey('trip-bar-${stage.tripId}'), tripId: stage.tripId!),
     };
+    // back, bottom-left above the sheet (the kit's "<")
+    final back = stage.kind == RiderMapStageKind.quote;
     return Stack(
       children: [
         Positioned(top: top, left: 16, right: 16, child: AnimatedSwitcherX(child: bar)),
-        if (stage.kind == RiderMapStageKind.home)
+        if (back)
           ValueListenableBuilder<double>(
             valueListenable: shell.sheetHeight,
-            builder: (_, h, child) => Positioned(left: 16, bottom: h + 12, child: child!),
-            child: const NearbyChip(),
+            // clear of the map credit
+            builder: (_, h, child) => Positioned(left: 16, bottom: h + 28, child: child!),
+            child: RoundIconButton(icon: Icons.chevron_left_rounded, tooltip: l.back, onTap: () => leaveQuote(context)),
           ),
       ],
     );

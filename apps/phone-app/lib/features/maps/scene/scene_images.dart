@@ -1,111 +1,100 @@
-// The images the native layers draw, painted on a canvas (our own shapes, no assets): the car
-// seen from above pointing north (the layer turns it with `icon-rotate`), the small anonymous
-// car, the pickup ring and drop-off square pins, the person's dot and heading cone, and the
-// labels over cars. Each is painted [scale] times larger than it is shown.
+// The images the native layers draw, painted on a canvas with the design system's map markers
+// (ride_app_core map_markers.dart, the GoRide kit's look): the white top-down car pointing north
+// (the layer turns it with `icon-rotate`) for the followed car and the cars around the rider, the
+// person as an avatar in an amber ring with a tail (their photo, else their initials, else a
+// person glyph) for the pickup and for "you" on the home map, the red destination pin, the small
+// position dot and heading cone, and the labels over cars. Each is painted [scale] times larger
+// than it is shown (the device's pixel ratio, up to 3), so it stays crisp.
 
+import 'dart:async';
 import 'dart:math';
+import 'dart:ui' as ui;
 
-import 'package:flutter/painting.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/material.dart';
 import 'package:ride_app_core/ride_app_core.dart';
 
-/// One image: its logical size and how to paint it (already scaled).
+/// One image: its pixel size and how to paint it (already scaled).
 typedef SceneImage = ({int width, int height, void Function(Canvas) paint});
 
-const _ink = Color(0xFF111214);
+/// The person the avatar markers show: a decoded photo, else initials, else a person glyph.
+@immutable
+class ScenePerson {
+  const ScenePerson({this.photo, this.initials = ''});
+  final ui.Image? photo;
+  final String initials;
+  static const nobody = ScenePerson();
+}
 
-/// The followed car, 24 × 44 logical: amber body with an ink outline (grey when [stale]).
-SceneImage carImage(AnbessaColors c, double scale, {bool stale = false}) {
-  const w = 24.0, h = 44.0;
-  final body = stale ? c.faint : c.accent;
+/// Room around a car for its soft shadow, in logical pixels.
+const _carPad = 4.0;
+
+/// The width of the followed car and of the cars around the rider (logical pixels).
+const driverCarWidth = 24.0;
+const nearbyCarWidth = 20.0;
+
+/// The avatar pin's circle (the pickup and "you") and the destination pin's, in logical pixels.
+const avatarPinDiameter = 46.0;
+const destinationPinDiameter = 36.0;
+
+SceneImage _car(double scale, double width, {required Color body, required Color glass}) {
+  final s = topDownCarSize(width);
   return (
-    width: ((w + 8) * scale).ceil(),
-    height: ((h + 8) * scale).ceil(),
+    width: ((s.width + _carPad * 2) * scale).ceil(),
+    height: ((s.height + _carPad * 2) * scale).ceil(),
     paint: (canvas) {
       canvas.scale(scale);
-      canvas.translate(4, 4);
-      _paintCar(canvas, w, h, body: body, outline: _ink, glass: const Color(0xE6202328), shadow: true);
+      canvas.translate(_carPad, _carPad);
+      paintTopDownCar(canvas, s, body: body, glass: glass);
     },
   );
 }
 
-/// A car around the rider, 16 × 30 logical: ink (light map) or light grey (dark map).
-SceneImage nearbyCarImage(AnbessaColors c, double scale) {
-  const w = 16.0, h = 30.0;
-  final body = c.isDark ? const Color(0xFFC9CDD3) : c.text2;
-  final outline = c.isDark ? _ink : const Color(0xFFFFFFFF);
+/// The followed car, white like the kit's (grey when [stale]).
+SceneImage carImage(AnbessaColors c, double scale, {bool stale = false}) =>
+    _car(scale, driverCarWidth, body: stale ? const Color(0xFFB9BCC2) : Colors.white, glass: const Color(0xFF2B2F36));
+
+/// A car around the rider: the same white top-down car, a little smaller.
+SceneImage nearbyCarImage(AnbessaColors c, double scale) => _car(scale, nearbyCarWidth, body: Colors.white, glass: const Color(0xFF2B2F36));
+
+/// The person as a pin (the tip, at the bottom centre, is the point): their photo in an amber
+/// ring; initials on amber-soft without one; a person glyph without a name.
+SceneImage avatarPinImage(AnbessaColors c, double scale, ScenePerson who) {
+  final s = avatarPinSize(avatarPinDiameter);
   return (
-    width: ((w + 6) * scale).ceil(),
-    height: ((h + 6) * scale).ceil(),
+    width: (s.width * scale).ceil(),
+    height: (s.height * scale).ceil(),
     paint: (canvas) {
       canvas.scale(scale);
-      canvas.translate(3, 3);
-      _paintCar(canvas, w, h, body: body, outline: outline, glass: c.isDark ? const Color(0xFF5A5F66) : const Color(0xFF3A3D42), shadow: false);
+      paintAvatarPin(canvas, s, ring: c.accent, photo: who.photo, initials: who.initials.isEmpty ? null : who.initials, fill: const Color(0xFFFFF4D6), initialsColor: const Color(0xFF17191D));
+      if (who.photo == null && who.initials.isEmpty) _paintPersonGlyph(canvas, Offset(s.width / 2, s.width / 2), s.width * 0.42);
     },
   );
 }
 
-void _paintCar(Canvas canvas, double w, double h, {required Color body, required Color outline, required Color glass, required bool shadow}) {
-  final r = Radius.circular(w * 0.38);
-  final shape = RRect.fromRectAndCorners(Rect.fromLTWH(0, 0, w, h), topLeft: r, topRight: r, bottomLeft: Radius.circular(w * 0.28), bottomRight: Radius.circular(w * 0.28));
-  if (shadow) {
-    canvas.drawRRect(shape.shift(const Offset(0, 1.5)), Paint()
-      ..color = const Color(0x55000000)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2.5));
-  }
-  canvas.drawRRect(shape, Paint()..color = body);
-  canvas.drawRRect(shape.deflate(0.75), Paint()
-    ..color = outline
-    ..style = PaintingStyle.stroke
-    ..strokeWidth = 1.5);
-  // windscreen (front, at the top), rear window, and the roof between them
-  final ws = Path()
-    ..moveTo(w * 0.16, h * 0.30)
-    ..quadraticBezierTo(w * 0.5, h * 0.22, w * 0.84, h * 0.30)
-    ..lineTo(w * 0.76, h * 0.42)
-    ..lineTo(w * 0.24, h * 0.42)
-    ..close();
-  canvas.drawPath(ws, Paint()..color = glass);
-  final rear = Path()
-    ..moveTo(w * 0.24, h * 0.76)
-    ..lineTo(w * 0.76, h * 0.76)
-    ..lineTo(w * 0.82, h * 0.86)
-    ..quadraticBezierTo(w * 0.5, h * 0.9, w * 0.18, h * 0.86)
-    ..close();
-  canvas.drawPath(rear, Paint()..color = glass);
-  canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTRB(w * 0.24, h * 0.45, w * 0.76, h * 0.73), Radius.circular(w * 0.12)), Paint()..color = Color.lerp(body, const Color(0xFFFFFFFF), 0.18)!);
-  // headlights
-  final light = Paint()..color = const Color(0xFFFFF4D0);
-  canvas.drawOval(Rect.fromCenter(center: Offset(w * 0.24, h * 0.06), width: w * 0.2, height: h * 0.04), light);
-  canvas.drawOval(Rect.fromCenter(center: Offset(w * 0.76, h * 0.06), width: w * 0.2, height: h * 0.04), light);
+void _paintPersonGlyph(Canvas canvas, Offset center, double size) {
+  const icon = Icons.person_rounded;
+  final tp = TextPainter(
+    text: TextSpan(text: String.fromCharCode(icon.codePoint), style: TextStyle(fontFamily: icon.fontFamily, package: icon.fontPackage, fontSize: size, color: const Color(0xFF8F5B00))),
+    textDirection: TextDirection.ltr,
+  )..layout();
+  tp.paint(canvas, center - Offset(tp.width / 2, tp.height / 2));
 }
 
-/// A pin whose tip (the bottom centre) is the point: 36 × 44 logical. Pickup: a ring;
-/// drop-off: a filled square.
-SceneImage pinImage(AnbessaColors c, double scale, {required bool pickup}) {
-  const w = 36.0, h = 44.0;
-  final ink = c.isDark ? const Color(0xFFFFFFFF) : c.text;
+/// The destination: the kit's red ring pin with a white face and a red dot.
+SceneImage destinationPinImage(AnbessaColors c, double scale) {
+  final s = destinationPinSize(destinationPinDiameter);
   return (
-    width: (w * scale).ceil(),
-    height: (h * scale).ceil(),
+    width: (s.width * scale).ceil(),
+    height: (s.height * scale).ceil(),
     paint: (canvas) {
       canvas.scale(scale);
-      // ground shadow, stem, head
-      canvas.drawOval(Rect.fromCenter(center: const Offset(w / 2, h - 1.5), width: 8, height: 3), Paint()..color = const Color(0x44000000));
-      canvas.drawRect(Rect.fromLTWH(w / 2 - 1.5, h - 19, 3, 16), Paint()..color = ink);
-      const center = Offset(w / 2, 13);
-      if (pickup) {
-        canvas.drawCircle(center, 11, Paint()..color = ink);
-        canvas.drawCircle(center, 5, Paint()..color = c.surface);
-      } else {
-        final sq = RRect.fromRectAndRadius(Rect.fromCenter(center: center, width: 20, height: 20), const Radius.circular(4));
-        canvas.drawRRect(sq, Paint()..color = c.surface);
-        canvas.drawRRect(sq.deflate(3), Paint()..color = ink);
-      }
+      paintDestinationPin(canvas, s, color: c.danger);
     },
   );
 }
 
-/// The person's dot, 28 × 28 logical.
+/// The person's position as a small dot (screens that don't show them as an avatar), 28 × 28.
 SceneImage meDotImage(AnbessaColors c, double scale) {
   const s = 28.0;
   return (
@@ -160,7 +149,7 @@ SceneImage labelImage(AnbessaColors c, double scale, String text) {
     paint: (canvas) {
       canvas.scale(scale);
       canvas.translate(2, 0);
-      final body = RRect.fromRectAndRadius(Rect.fromLTWH(0, 0, w, bodyH), const Radius.circular(AnbessaRadius.sm));
+      final body = RRect.fromRectAndRadius(Rect.fromLTWH(0, 0, w, bodyH), const Radius.circular(bodyH / 2));
       final tailPath = Path()
         ..moveTo(w / 2 - tail, bodyH - 0.5)
         ..lineTo(w / 2, bodyH + tail)
@@ -184,3 +173,37 @@ SceneImage labelImage(AnbessaColors c, double scale, String text) {
 
 /// The image scale for a device: as many pixels as the screen has, at most 3×.
 double sceneImageScale(double devicePixelRatio) => max(1.0, min(3.0, devicePixelRatio)).ceilToDouble();
+
+/// A person's picture (a data URL or an https URL) decoded for painting on the map; null when
+/// there is none or it doesn't load within [timeout].
+Future<ui.Image?> loadAvatarImage(String? src, {Duration timeout = const Duration(seconds: 8)}) async {
+  if (src == null || src.isEmpty) return null;
+  final ImageProvider provider;
+  if (src.startsWith('data:')) {
+    final m = AvatarImage.memoryImageOf(src);
+    if (m == null) return null;
+    provider = m;
+  } else if (src.startsWith('https://') || src.startsWith('http://')) {
+    provider = CachedNetworkImageProvider(src);
+  } else {
+    return null;
+  }
+  final done = Completer<ui.Image?>();
+  final stream = provider.resolve(const ImageConfiguration(size: Size(96, 96)));
+  late final ImageStreamListener listener;
+  listener = ImageStreamListener(
+    (info, _) {
+      if (!done.isCompleted) done.complete(info.image.clone());
+      info.dispose();
+    },
+    onError: (_, _) {
+      if (!done.isCompleted) done.complete(null);
+    },
+  );
+  stream.addListener(listener);
+  try {
+    return await done.future.timeout(timeout, onTimeout: () => null);
+  } finally {
+    stream.removeListener(listener);
+  }
+}

@@ -1,5 +1,6 @@
-// The choose-ride stage's extras (in the rider map shell) against a fake backend: a promo code (discount on the card and the
-// button, the code sent, refusals explained, malformed codes never sent), booking for later
+// The choose-ride stage's extras (in the rider map shell) against a fake backend: a promo code
+// through "Promos / Vouchers" (discount on the class row, the code on its row, the code sent,
+// refusals explained, malformed codes never sent), booking for later
 // (POST /api/trips/scheduled, then Activity), and a company ride's purpose and policy refusal.
 
 import 'package:flutter/material.dart';
@@ -109,26 +110,38 @@ void ready(ProviderContainer c) {
 
 PrimaryButton mainButton(WidgetTester tester) => tester.widget<PrimaryButton>(find.byType(PrimaryButton).last);
 
+/// What the rider pays for the economy class, as its row shows it.
+int? economyPays(WidgetTester tester) => tester.widget<RideClassTile>(find.byKey(const ValueKey('class-economy'))).payableMinor;
+
+/// Promos / Vouchers → type [code] → Redeem.
+Future<void> redeem(WidgetTester tester, String code) async {
+  await tapText(tester, 'Promos / Vouchers');
+  expect(find.text('Have a Promo Code?'), findsOneWidget);
+  await tester.enterText(find.byKey(const ValueKey('promo-code')), code);
+  await tester.pump();
+  await tester.tap(find.byKey(const ValueKey('promo-redeem')));
+  await settle(tester);
+}
+
 void main() {
   for (final b in Brightness.values) {
-    testWidgets('a promo code discounts the ride: struck-through fare, payable on the button, code sent (${b.name})', (tester) async {
+    testWidgets('a promo code discounts the ride: struck-through fare, the code on its row, code sent (${b.name})', (tester) async {
       final backend = FakeBackend();
       routeEstimates(backend);
       backend.on('POST', '/api/trips', (_) => fixture('trip.json'));
       final h = await pumpQuote(tester, backend, flags: {'promos': true}, brightness: b, before: ready);
-      expect(mainButton(tester).trailing, birr(26000));
+      expect(economyPays(tester), 26000);
 
-      await tapText(tester, 'Promo code');
-      await tester.enterText(find.byKey(const ValueKey('promo-code')), ' welcome50 ');
-      await tapText(tester, 'Apply');
+      await redeem(tester, ' welcome50 ');
 
       expect(backend.bodies('POST', '/api/pricing/estimates').last['promoCode'], 'WELCOME50');
       expect(find.textContaining('WELCOME50 applied'), findsOneWidget);
+      expect(find.widgetWithText(OutlineBadge, 'WELCOME50'), findsOneWidget);
       expect(find.byWidgetPredicate((w) => w is Text && w.data == birr(26000) && w.style?.decoration == TextDecoration.lineThrough), findsOneWidget);
-      expect(mainButton(tester).trailing, birr(21000));
+      expect(economyPays(tester), 21000);
       expect(tester.takeException(), isNull);
 
-      await tapText(tester, 'Request Economy');
+      await tapText(tester, 'Book Economy');
       expect(backend.bodies('POST', '/api/trips').single['quoteId'], 'q_0b7c4a10-0000-4000-8000-000000000001');
       expect(locationOf(h.router), Routes.riderTrip(Trip.fromJson(fixture('trip.json')).id));
       await endShell(tester, h);
@@ -140,16 +153,12 @@ void main() {
     routeEstimates(backend, promo: {'code': 'OLD10', 'applied': false, 'reason': 'expired', 'message': 'This code has expired.'});
     await pumpQuote(tester, backend, flags: {'promos': true}, before: ready);
 
-    await tapText(tester, 'Promo code');
-    await tester.enterText(find.byKey(const ValueKey('promo-code')), 'old10');
-    await tapText(tester, 'Apply');
+    await redeem(tester, 'old10');
     expect(find.text('This code has expired.'), findsOneWidget);
-    expect(mainButton(tester).trailing, birr(26000));
+    expect(economyPays(tester), 26000);
 
     final sent = backend.bodies('POST', '/api/pricing/estimates').length;
-    await tapText(tester, 'Promo code');
-    await tester.enterText(find.byKey(const ValueKey('promo-code')), 'x!');
-    await tapText(tester, 'Apply');
+    await redeem(tester, 'x!');
     expect(find.text('Codes are 3 to 32 letters, digits, _ or -.'), findsOneWidget);
     expect(backend.bodies('POST', '/api/pricing/estimates').length, sent);
     expect(tester.takeException(), isNull);
@@ -159,8 +168,9 @@ void main() {
     final backend = FakeBackend();
     routeEstimates(backend);
     await pumpQuote(tester, backend, before: ready);
-    expect(find.text('Promo code'), findsNothing);
+    expect(find.text('Promos / Vouchers'), findsNothing);
     expect(find.text('Pickup time'), findsNothing);
+    expect(find.byKey(const ValueKey('schedule-button')), findsNothing);
   });
 
   testWidgets('booking for later posts the pickup time and opens Activity (dark)', (tester) async {
@@ -176,7 +186,8 @@ void main() {
     expect(find.text('Pickup time'), findsOneWidget);
     expect(find.text(dayAndTime(at)), findsOneWidget);
     expect(find.text('We check the price again shortly before pickup. You pay the lower one.'), findsOneWidget);
-    expect(find.byType(EtaBadge), findsNothing); // the ETA is about now
+    expect(tester.widget<RideClassTile>(find.byKey(const ValueKey('class-economy'))).etaLabel, isNull); // the ETA is about now
+    expect(find.byKey(const ValueKey('schedule-button')), findsOneWidget);
     expect(tester.takeException(), isNull);
 
     await tapText(tester, 'Schedule Economy');
@@ -204,7 +215,7 @@ void main() {
     await settle(tester);
     expect(mainButton(tester).onPressed, isNotNull);
 
-    await tapText(tester, 'Request Economy');
+    await tapText(tester, 'Book Economy');
     final sent = backend.bodies('POST', '/api/trips').single;
     expect(sent['purpose'], 'Client visit');
     expect(sent['billingOrgId'], 'org-1');

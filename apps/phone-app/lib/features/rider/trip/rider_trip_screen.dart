@@ -1,9 +1,14 @@
-// The trip stage in the rider map shell (workflows 05 D–E, 06, 07): finding a driver (a pulse at
-// the pickup and the time spent searching) → driver assigned (their photo, rating, car and plate;
-// the car gliding along its road with "N min" over it) → arrived (the PIN) → riding ("Arrive
-// HH:MM"; the road behind turns grey) → done (the total, confetti, Pay). Share and SOS float over
-// the map. The map is the shell's (map_intent.dart: tripMapIntentProvider); this file is the
-// sheet and the top bar. Clocks (time searching, the free-cancel window, a stale position) tick in
+// The trip stage in the rider map shell (workflows 05 D–E, 06, 07), drawn as the GoRide kit's
+// trip screens: finding a driver (the rings around the rider's avatar at the pickup, "Finding you
+// a nearby driver...", the time spent searching, Cancel Ride) → the driver heading to the pickup
+// (the white car gliding along its road with "N min" over it; the sheet: "Driver is heading to
+// your location...", "Driver will arrive in N min...", the car and plate, the driver's photo,
+// name and rating (a tap opens Driver Information), the trip PIN, the ride and fare cards, Cancel
+// Ride) → arrived → heading to the destination ("Arrive HH:MM"; the road behind turns grey) →
+// "You have arrived!" over the dimmed map (duration, distance, average speed, the fare, Finish),
+// or "Ride has been canceled!". The route card, share and SOS float over the map. The map is the
+// shell's (map_intent.dart: tripMapIntentProvider); this file is the sheet, the top bar and the
+// end of the trip. Clocks (time searching, the free-cancel window, a stale position) tick in
 // their own small widgets: nothing here rebuilds every second.
 
 import 'package:flutter/material.dart';
@@ -15,6 +20,8 @@ import '../../../core/l10n/l10n.dart';
 import '../../../core/network/providers.dart';
 import '../../../core/router/routes.dart';
 import '../../config/client_config_provider.dart';
+import '../../shell/shells.dart' show bannerHeightProvider;
+import '../booking/quote_screen.dart' show vehicleName;
 import '../shell/map_intent.dart';
 import '../shell/rider_map_shell.dart';
 import 'active_trip_controller.dart';
@@ -136,11 +143,10 @@ class _TripSheetState extends ConsumerState<TripSheet> {
         key: ValueKey(stage),
         child: switch (stage) {
           RiderStage.finding => _Finding(trip: t, busy: _busy, error: _error, onCancel: () => _cancel(t)),
-          RiderStage.driverAssigned || RiderStage.driverArrived => _DriverCard(
-              trip: t, parties: parties, arrived: stage == RiderStage.driverArrived, live: view.live, etaSeconds: view.etaSeconds, pinOn: pinOn, busy: _busy, error: _error, onCancel: () => _cancel(t)),
-          RiderStage.inTrip => _InTrip(trip: t, parties: parties, etaSeconds: view.etaSeconds),
-          RiderStage.completed => _Ended(trip: t, parties: parties, completed: true),
-          RiderStage.cancelled => _Ended(trip: t, parties: parties, completed: false),
+          RiderStage.driverAssigned || RiderStage.driverArrived || RiderStage.inTrip => _DriverStage(
+              trip: t, stage: stage, parties: parties, live: view.live, etaSeconds: view.etaSeconds, pinOn: pinOn, busy: _busy, error: _error, onCancel: () => _cancel(t)),
+          // the end of the trip covers the shell (TripEndLayer); the sheet waits under it
+          RiderStage.completed || RiderStage.cancelled => const SizedBox(height: 120),
           RiderStage.unknown => Text(tripStatusLabel(l, t.status)),
         },
       ),
@@ -148,7 +154,7 @@ class _TripSheetState extends ConsumerState<TripSheet> {
   }
 }
 
-/// Share and SOS over the map (back once the trip is over).
+/// Over the map during a trip: the route card (pickup, destination), and share and SOS under it.
 class TripTopBar extends ConsumerWidget {
   const TripTopBar({super.key, required this.tripId});
   final String tripId;
@@ -157,51 +163,46 @@ class TripTopBar extends ConsumerWidget {
     final l = context.l10n;
     final t = ref.watch(tripProvider(tripId)).value;
     final sosOn = ref.watch(featureProvider(Feature.sos));
-    if (t == null) return const SizedBox.shrink();
-    return Row(
+    if (t == null || !t.isActive) return const SizedBox.shrink();
+    final share = t.status != TripStatus.requested;
+    // SOS on a trip with a driver, and for 30 min after drop-off (support-service's window)
+    final sos = sosOn && sosAvailable(t, DateTime.now());
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (!t.isActive) RoundIconButton(icon: Icons.arrow_back_rounded, tooltip: l.back, onTap: () => context.go(Routes.riderHome)),
-        const Spacer(),
-        if (t.isActive && t.status != TripStatus.requested) ...[_ShareButton(tripId: t.id), const SizedBox(width: 10)],
-        // SOS on a trip with a driver, and for 30 min after drop-off (support-service's window)
-        if (sosOn && sosAvailable(t, DateTime.now())) RoundIconButton(icon: Icons.sos_rounded, tooltip: l.sos, danger: true, onTap: () => context.push('${Routes.sos}?trip=${t.id}')),
+        RoutePointsCard(points: [RoutePointsCard.pickup(t.pickup.address ?? l.pickupLabel), RoutePointsCard.destination(t.dropoff.address ?? l.dropoffLabel)]),
+        if (share || sos) ...[
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              if (share) _ShareButton(tripId: t.id),
+              if (share && sos) const SizedBox(width: 10),
+              if (sos) RoundIconButton(icon: Icons.sos_rounded, tooltip: l.sos, danger: true, onTap: () => context.push('${Routes.sos}?trip=${t.id}')),
+            ],
+          ),
+        ],
       ],
     );
   }
 }
 
-/// matched → on the way → arrived → riding
-class _Progress extends StatelessWidget {
-  const _Progress({required this.step});
-  final int step;
+/// A centred headline, a grey line under it (and an optional third), as the kit's trip sheets.
+class _Headline extends StatelessWidget {
+  const _Headline({required this.title, this.lede, this.extra});
+  final String title;
+  final String? lede;
+  final Widget? extra;
   @override
   Widget build(BuildContext context) {
-    final l = context.l10n;
     final c = context.colors;
-    final labels = [l.progressMatched, l.progressEnRoute, l.progressArrived, l.progressRiding];
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            for (var i = 0; i < 4; i++) ...[
-              if (i > 0) const SizedBox(width: 4),
-              Expanded(
-                child: AnimatedContainer(
-                  duration: AnbessaMotion.of(context, AnbessaMotion.slow),
-                  height: 4,
-                  decoration: BoxDecoration(color: i <= step ? c.accent : c.border, borderRadius: BorderRadius.circular(2)),
-                ),
-              ),
-            ],
-          ],
-        ),
         const SizedBox(height: 6),
-        Row(
-          children: [
-            for (var i = 0; i < 4; i++)
-              Expanded(child: Text(labels[i], textAlign: i == 0 ? TextAlign.start : i == 3 ? TextAlign.end : TextAlign.center, style: AnbessaType.caption.copyWith(color: i == step ? c.text : c.muted, fontWeight: i == step ? FontWeight.w600 : FontWeight.w400, fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis)),
-          ],
-        ),
+        Semantics(header: true, liveRegion: true, child: Text(title, textAlign: TextAlign.center, style: AnbessaType.h2.copyWith(color: c.text))),
+        if (lede != null) ...[const SizedBox(height: 8), Text(lede!, textAlign: TextAlign.center, style: AnbessaType.body2.copyWith(color: c.muted, fontWeight: FontWeight.w400))],
+        if (extra != null) ...[const SizedBox(height: 4), extra!],
       ],
     );
   }
@@ -221,29 +222,22 @@ class _Finding extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            Flexible(child: StatusPill(l.statusRequested, tone: Tone.amber, pulse: true)),
-            const SizedBox(width: 8),
-            ElapsedText(key: const ValueKey('searching-for'), since: trip.times.requestedAt, format: mmss, style: AnbessaType.label.copyWith(color: c.muted, fontFeatures: AnbessaType.tabular)),
-          ],
+        _Headline(
+          title: l.grFindingDriver,
+          lede: l.grFindingDriverLede,
+          extra: ElapsedText(
+            key: const ValueKey('searching-for'),
+            since: trip.times.requestedAt,
+            format: (d) => l.grSearchingFor(mmss(d)),
+            textAlign: TextAlign.center,
+            style: AnbessaType.caption.copyWith(color: c.faint, fontFeatures: AnbessaType.tabular),
+          ),
         ),
-        const SizedBox(height: 12),
-        Text(l.findingDriver, style: AnbessaType.h2.copyWith(color: c.text)),
-        const SizedBox(height: 4),
-        Text(l.findingDriverLede, style: AnbessaType.body2.copyWith(color: c.text2)),
-        const SizedBox(height: 14),
-        Row(
-          children: [
-            Container(width: 10, height: 10, decoration: BoxDecoration(color: c.text, borderRadius: BorderRadius.circular(2))),
-            const SizedBox(width: 10),
-            Expanded(child: Text(trip.dropoff.address ?? l.dropoffLabel, maxLines: 1, overflow: TextOverflow.ellipsis, style: AnbessaType.body.copyWith(fontWeight: FontWeight.w500))),
-            MoneyText(trip.fare.estimateMinor, locale: context.localeTag, style: AnbessaType.title),
-          ],
-        ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 16),
+        const Center(child: LocatingDot()),
+        const SizedBox(height: 20),
         Problem(error, describe: (e) => describeError(l, e)),
-        OutlinedButton(onPressed: busy ? null : onCancel, child: Text(l.cancelTrip)),
+        PillButton(key: const ValueKey('cancel-ride'), label: l.grCancelRide, variant: PillVariant.outlineDanger, busy: busy, onPressed: busy ? null : onCancel),
       ],
     );
   }
@@ -251,20 +245,108 @@ class _Finding extends StatelessWidget {
 
 /// The driver's photo, flying to the pay and rating pages.
 class _DriverAvatar extends StatelessWidget {
-  const _DriverAvatar({required this.tripId, required this.photo, required this.name, this.size = 56});
+  const _DriverAvatar({required this.tripId, required this.photo, required this.name});
   final String tripId;
   final String? photo;
   final String name;
-  final double size;
   @override
-  Widget build(BuildContext context) => Hero(tag: driverAvatarHeroTag(tripId), child: AvatarImage(src: photo, name: name, size: size, ring: true));
+  Widget build(BuildContext context) => Hero(tag: driverAvatarHeroTag(tripId), child: AvatarImage(src: photo, name: name, size: 52));
 }
 
-class _DriverCard extends StatelessWidget {
-  const _DriverCard({required this.trip, required this.parties, required this.arrived, required this.live, required this.etaSeconds, required this.pinOn, required this.busy, required this.error, required this.onCancel});
+/// "Hyundai Atos, Blue · 3-A40402".
+String vehicleLine(PartyVehicle v) {
+  final car = [v.make, v.model].where((s) => s.isNotEmpty).join(' ');
+  final named = [car, v.color].where((s) => s.isNotEmpty).join(', ');
+  return [named, v.plateNumber].where((s) => s.isNotEmpty).join(' · ');
+}
+
+/// The kit's driver row: photo, name, ★ rating; a tap opens Driver Information.
+class _DriverLine extends StatelessWidget {
+  const _DriverLine({required this.trip, required this.parties});
   final Trip trip;
   final TripParties? parties;
-  final bool arrived;
+  @override
+  Widget build(BuildContext context) {
+    final l = context.l10n;
+    final c = context.colors;
+    final name = parties?.driverName ?? l.driverLabel;
+    final rating = parties?.driverRating;
+    final meta = AnbessaType.caption.copyWith(color: c.muted);
+    return Semantics(
+      button: true,
+      label: l.grDriverDetails,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AnbessaRadius.md),
+        onTap: () => Navigator.of(context, rootNavigator: true).push(MaterialPageRoute<void>(builder: (_) => DriverInfoPage(tripId: trip.id))),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Row(
+            children: [
+              _DriverAvatar(tripId: trip.id, photo: parties?.driverPhoto, name: name),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: AnbessaType.title.copyWith(fontSize: 18, color: c.text)),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Icon(Icons.star_rounded, size: 15, color: c.accent),
+                        const SizedBox(width: 3),
+                        Flexible(child: Text(rating == null ? l.newDriver : '${rating.toStringAsFixed(1)} (${parties?.driverRatingCount ?? 0})', maxLines: 1, overflow: TextOverflow.ellipsis, style: meta)),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              ExcludeSemantics(child: Icon(Icons.chevron_right_rounded, color: c.muted)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The ride and fare cards ("Ride · Economy", "Payment · Cash"; "Trip Fare", "Discounts",
+/// "Total").
+class TripCards extends ConsumerWidget {
+  const TripCards({super.key, required this.trip, this.paid = false});
+  final Trip trip;
+  /// after the trip: "Total Paid"
+  final bool paid;
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final l = context.l10n;
+    final c = context.colors;
+    final loc = context.localeTag;
+    final cfg = ref.watch(configProvider);
+    final f = trip.fare;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        KeyValueCard(rows: [KeyValueCard.row(l.grRide, vehicleName(cfg, trip.vehicleType)), KeyValueCard.row(l.grPayment, paymentMethodLabel(l, trip.paymentMethod))]),
+        const SizedBox(height: 12),
+        KeyValueCard(
+          rows: [
+            KeyValueCard.row(l.grTripFare, birr(f.chargedMinor, locale: loc)),
+            if ((f.waitingFeeMinor ?? 0) > 0) KeyValueCard.row(l.waitingFeeLabel, birr(f.waitingFeeMinor, locale: loc)),
+            if (f.promoDiscountMinor > 0) KeyValueCard.row(f.promoCode == null ? l.grDiscounts : '${l.grDiscounts} (${f.promoCode})', '−${birr(f.promoDiscountMinor, locale: loc)}', valueColor: c.success),
+          ],
+          total: KeyValueCard.row(paid ? l.grTotalPaid : l.totalLabel, birr(f.payableMinor, locale: loc)),
+        ),
+      ],
+    );
+  }
+}
+
+/// The driver heading to the pickup, waiting there, and the ride itself.
+class _DriverStage extends ConsumerWidget {
+  const _DriverStage({required this.trip, required this.stage, required this.parties, required this.live, required this.etaSeconds, required this.pinOn, required this.busy, required this.error, required this.onCancel});
+  final Trip trip;
+  final RiderStage stage;
+  final TripParties? parties;
   final DriverLive? live;
   final int? etaSeconds;
   final bool pinOn;
@@ -273,213 +355,267 @@ class _DriverCard extends StatelessWidget {
   final VoidCallback onCancel;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final l = context.l10n;
     final c = context.colors;
-    final name = parties?.driverName ?? l.driverLabel;
     final vehicle = parties?.vehicle;
-    final step = arrived ? 2 : (trip.status == TripStatus.enRoute ? 1 : 0);
     final sample = live;
+    final eta = etaSeconds;
+    final riding = stage == RiderStage.inTrip;
+    final arrived = stage == RiderStage.driverArrived;
+    final title = riding ? l.grHeadingToDestination : (arrived ? l.grDriverIsHere : l.grDriverHeading);
+    final lede = riding
+        ? (eta == null ? null : l.grArriveDestinationIn(minutesCeil(eta)))
+        : arrived
+            ? l.grDriverIsHereLede
+            : (eta == null ? null : l.grDriverArrivingIn(minutesCeil(eta)));
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(child: Text(arrived ? l.driverArrived(name) : l.driverOnTheWay(name), style: AnbessaType.h2.copyWith(color: c.text), maxLines: 3, overflow: TextOverflow.ellipsis)),
-            if (!arrived && etaSeconds != null) EtaBadge(seconds: etaSeconds, minuteLabel: (m) => l.rideMinutes(m), large: true, icon: Icons.schedule_rounded),
-          ],
+        _Headline(
+          title: title,
+          lede: lede,
+          extra: riding && eta != null
+              ? Text(key: const ValueKey('arrive-at'), l.rideArriveAt(clockHHmm(DateTime.now().add(Duration(seconds: eta)))), textAlign: TextAlign.center, style: AnbessaType.caption.copyWith(color: c.accentText, fontWeight: FontWeight.w700))
+              : null,
         ),
         if (sample != null)
-          Padding(
-            padding: const EdgeInsets.only(top: 4),
-            // stale after 20 s without a position; checked every few seconds, not every frame
-            child: TickingBuilder(
-              interval: const Duration(seconds: 5),
-              builder: (context, now) {
-                final stale = now.toUtc().difference(sample.at) > const Duration(seconds: 20);
-                return Text(stale ? l.positionStale(since(sample.at, now.toUtc())) : l.liveTracking, style: AnbessaType.caption.copyWith(color: stale ? c.warning : c.success, fontWeight: FontWeight.w600));
-              },
-            ),
+          // stale after 20 s without a position; checked every few seconds, not every frame
+          TickingBuilder(
+            interval: const Duration(seconds: 5),
+            builder: (context, now) {
+              final stale = now.toUtc().difference(sample.at) > const Duration(seconds: 20);
+              return stale ? Padding(padding: const EdgeInsets.only(top: 4), child: Text(l.positionStale(since(sample.at, now.toUtc())), textAlign: TextAlign.center, style: AnbessaType.caption.copyWith(color: c.warning, fontWeight: FontWeight.w600))) : const SizedBox.shrink();
+            },
           ),
-        const SizedBox(height: 14),
-        _Progress(step: step),
-        const SizedBox(height: 16),
-        Row(
-          children: [
-            _DriverAvatar(tripId: trip.id, photo: parties?.driverPhoto, name: name),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(name, style: AnbessaType.title.copyWith(color: c.text), maxLines: 1, overflow: TextOverflow.ellipsis),
-                  const SizedBox(height: 2),
-                  RatingSummary(average: parties?.driverRating, count: parties?.driverRatingCount ?? 0, newLabel: l.newDriver),
-                  if (vehicle != null && vehicle.label.isNotEmpty) ...[
-                    const SizedBox(height: 2),
-                    Text(vehicle.label, style: AnbessaType.caption.copyWith(color: c.text2), maxLines: 1, overflow: TextOverflow.ellipsis),
-                  ],
-                ],
-              ),
-            ),
-            if (vehicle != null) ...[const SizedBox(width: 8), PlateBadge(vehicle.plateNumber)],
-          ],
-        ),
-        if (pinOn && trip.pin != null) ...[
-          const SizedBox(height: 14),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(color: c.surface2, borderRadius: BorderRadius.circular(AnbessaRadius.md)),
+        if (vehicle != null) ...[
+          const SizedBox(height: 10),
+          Text(key: const ValueKey('vehicle-line'), vehicleLine(vehicle), textAlign: TextAlign.center, style: AnbessaType.body.copyWith(color: c.text, fontWeight: FontWeight.w600)),
+        ],
+        Divider(height: 33, color: c.border),
+        _DriverLine(trip: trip, parties: parties),
+        Divider(height: 33, color: c.border),
+        if (pinOn && trip.pin != null && !riding) ...[
+          AppCard(
             child: Row(
               children: [
-                Expanded(child: Text(l.tellDriverPin, style: AnbessaType.body2.copyWith(color: c.text2))),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(l.grPinTitle, style: AnbessaType.title.copyWith(color: c.text)),
+                      const SizedBox(height: 4),
+                      Text(l.tellDriverPin, style: AnbessaType.caption.copyWith(color: c.muted)),
+                    ],
+                  ),
+                ),
                 const SizedBox(width: 10),
                 PinDisplay(trip.pin!, size: 36),
               ],
             ),
           ),
+          const SizedBox(height: 12),
         ],
-        const SizedBox(height: 14),
-        Row(
-          children: [
-            Expanded(child: _Fact(label: l.fareLabel, value: birr(trip.fare.payableMinor, locale: context.localeTag))),
-            Expanded(child: _Fact(label: l.paymentMethod, value: paymentMethodLabel(l, trip.paymentMethod))),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Problem(error, describe: (e) => describeError(l, e)),
-        OutlinedButton(onPressed: busy ? null : onCancel, child: Text(l.cancelTrip)),
-        // the free window closes on its own: checked every few seconds
-        TickingBuilder(
-          interval: const Duration(seconds: 5),
-          builder: (context, now) => riderCancelIsFree(trip, now.toUtc())
-              ? const SizedBox.shrink()
-              : Padding(padding: const EdgeInsets.only(top: 6), child: Text(l.cancelFeeWarning(birr(_cancelFeeMinor, locale: context.localeTag)), style: AnbessaType.caption.copyWith(color: c.muted))),
-        ),
-      ],
-    );
-  }
-}
-
-class _Fact extends StatelessWidget {
-  const _Fact({required this.label, required this.value});
-  final String label;
-  final String value;
-  @override
-  Widget build(BuildContext context) {
-    final c = context.colors;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [Text(label, style: AnbessaType.caption.copyWith(color: c.muted)), Text(value, style: AnbessaType.body.copyWith(fontWeight: FontWeight.w600, color: c.text, fontFeatures: AnbessaType.tabular))],
-    );
-  }
-}
-
-class _InTrip extends StatelessWidget {
-  const _InTrip({required this.trip, required this.parties, required this.etaSeconds});
-  final Trip trip;
-  final TripParties? parties;
-  final int? etaSeconds;
-  @override
-  Widget build(BuildContext context) {
-    final l = context.l10n;
-    final c = context.colors;
-    final name = parties?.driverName ?? l.driverLabel;
-    final eta = etaSeconds;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text(l.inTrip(trip.dropoff.address ?? l.dropoffLabel), style: AnbessaType.h2.copyWith(color: c.text), maxLines: 2, overflow: TextOverflow.ellipsis),
-        if (eta != null) ...[
-          const SizedBox(height: 8),
-          Align(
-            alignment: AlignmentDirectional.centerStart,
-            child: StatusPill(key: const ValueKey('arrive-at'), l.rideArriveAt(clockHHmm(DateTime.now().add(Duration(seconds: eta)))), tone: Tone.amber, icon: Icons.flag_rounded),
+        TripCards(trip: trip),
+        if (!riding) ...[
+          const SizedBox(height: 20),
+          Problem(error, describe: (e) => describeError(l, e)),
+          PillButton(key: const ValueKey('cancel-ride'), label: l.grCancelRide, variant: PillVariant.outlineDanger, busy: busy, onPressed: busy ? null : onCancel),
+          // the free window closes on its own: checked every few seconds
+          TickingBuilder(
+            interval: const Duration(seconds: 5),
+            builder: (context, now) => riderCancelIsFree(trip, now.toUtc())
+                ? const SizedBox.shrink()
+                : Padding(padding: const EdgeInsets.only(top: 8), child: Text(l.cancelFeeWarning(birr(_cancelFeeMinor, locale: context.localeTag)), textAlign: TextAlign.center, style: AnbessaType.caption.copyWith(color: c.muted))),
           ),
         ],
-        const SizedBox(height: 14),
-        const _Progress(step: 3),
-        const SizedBox(height: 16),
-        Row(
-          children: [
-            AvatarImage(src: parties?.driverPhoto, name: name, size: 40),
-            const SizedBox(width: 10),
-            Expanded(child: Text(name, style: AnbessaType.body.copyWith(color: c.text2), maxLines: 1, overflow: TextOverflow.ellipsis)),
-            if (parties?.vehicle != null) PlateBadge(parties!.vehicle!.plateNumber),
-          ],
-        ),
-        const SizedBox(height: 14),
-        Row(
-          children: [
-            Expanded(child: _Fact(label: l.fareLabel, value: birr(trip.fare.payableMinor, locale: context.localeTag))),
-            Expanded(child: _Fact(label: l.paymentMethod, value: paymentMethodLabel(l, trip.paymentMethod))),
-          ],
-        ),
       ],
     );
   }
 }
 
-class _Ended extends ConsumerWidget {
-  const _Ended({required this.trip, required this.parties, required this.completed});
-  final Trip trip;
-  final TripParties? parties;
-  final bool completed;
+/// The kit's "Driver Information": photo and name, rating · ratings · class, and the car.
+class DriverInfoPage extends ConsumerWidget {
+  const DriverInfoPage({super.key, required this.tripId});
+  final String tripId;
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l = context.l10n;
     final c = context.colors;
-    final cancelledBy = trip.cancellation?.by.name ?? '';
+    final parties = ref.watch(tripPartiesProvider(tripId)).value;
+    final trip = ref.watch(tripProvider(tripId)).value;
+    final cfg = ref.watch(configProvider);
     final name = parties?.driverName ?? l.driverLabel;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Row(
-          children: [
-            if (completed && trip.driver != null) ...[_DriverAvatar(tripId: trip.id, photo: parties?.driverPhoto, name: name, size: 44), const SizedBox(width: 12)],
-            Expanded(child: Text(completed ? l.tripCompleted : l.tripCancelled, style: AnbessaType.h2.copyWith(color: c.text))),
-          ],
-        ),
-        if (!completed) ...[
-          const SizedBox(height: 8),
-          Text(trip.cancellation?.reason == 'NO_DRIVER_FOUND' ? l.noDriverFound : l.cancelledBy(cancelledBy), style: AnbessaType.body2.copyWith(color: c.text2)),
-          if ((trip.cancellation?.feeMinor ?? 0) > 0) Text(l.cancelFeeWarning(birr(trip.cancellation!.feeMinor, locale: context.localeTag)), style: AnbessaType.body2.copyWith(color: c.warning)),
-        ],
-        if (completed) ...[
-          const SizedBox(height: 14),
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(color: c.surface2, borderRadius: BorderRadius.circular(AnbessaRadius.md)),
-            child: Row(
+    final v = parties?.vehicle;
+    final rating = parties?.driverRating;
+    final count = parties?.driverRatingCount ?? 0;
+    return Scaffold(
+      backgroundColor: c.groupedPage,
+      appBar: AppTopBar(title: l.grDriverInformation, background: c.groupedPage),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(AnbessaSpace.page, 8, AnbessaSpace.page, 24),
+        children: [
+          AppCard(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+            child: Column(
               children: [
-                Expanded(child: Text(l.totalLabel, style: AnbessaType.body.copyWith(color: c.text2))),
-                AnimatedMoney(trip.fare.payableMinor, locale: context.localeTag, style: AnbessaType.h1.copyWith(color: c.text)),
+                AvatarImage(src: parties?.driverPhoto, name: name, size: 104),
+                const SizedBox(height: 16),
+                Text(name, textAlign: TextAlign.center, style: AnbessaType.h2.copyWith(color: c.text)),
+                if (rating == null) ...[const SizedBox(height: 6), Text(l.newDriver, style: AnbessaType.body2.copyWith(color: c.muted))],
               ],
             ),
           ),
-          if (trip.fare.promoDiscountMinor > 0)
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: Text('${promoLabel(l, trip.fare)} · −${birr(trip.fare.promoDiscountMinor, locale: context.localeTag)}', style: AnbessaType.caption.copyWith(color: c.success)),
-            ),
-          const SizedBox(height: 6),
-          Text(l.paidBy(paymentMethodLabel(l, trip.paymentMethod)), style: AnbessaType.caption.copyWith(color: c.muted)),
-        ],
-        const SizedBox(height: 16),
-        if (completed) PrimaryButton(label: trip.isDigital ? l.payTitle : l.receiptTitle, icon: trip.isDigital ? Icons.payments_rounded : Icons.receipt_long_rounded, onPressed: () => context.go(Routes.riderPay(trip.id))),
-        if (!completed)
-          PrimaryButton(
-            label: l.done,
-            onPressed: () {
-              ref.read(activeTripProvider.notifier).clearIfEnded();
-              context.go(Routes.riderHome);
-            },
+          const SizedBox(height: 16),
+          StatTriple(
+            items: [
+              if (rating != null) StatTriple.item(Icons.star_outline_rounded, rating.toStringAsFixed(1), l.grRating),
+              if (count > 0) StatTriple.item(Icons.reviews_outlined, '$count', l.grRatings),
+              StatTriple.item(Icons.directions_car_outlined, vehicleName(cfg, v?.vehicleType ?? trip?.vehicleType ?? ''), l.grCarClass),
+            ],
           ),
+          if (v != null) ...[
+            const SizedBox(height: 16),
+            KeyValueCard(
+              rows: [
+                KeyValueCard.row(l.grCarModel, [v.make, v.model].where((s) => s.isNotEmpty).join(' ')),
+                if (v.color.isNotEmpty) KeyValueCard.row(l.grColor, v.color),
+                KeyValueCard.row(l.grPlateNumber, v.plateNumber),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// The end of a trip over the shell: "You have arrived!" over the dimmed map (the kit's result
+/// sheet with a red pin), or "Ride has been canceled!" as a page.
+class TripEndLayer extends ConsumerWidget {
+  const TripEndLayer({super.key, required this.tripId});
+  final String tripId;
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final t = ref.watch(tripViewProvider(tripId))?.trip;
+    if (t == null) return const SizedBox.shrink();
+    return t.status == TripStatus.completed ? _Arrived(trip: t) : _Canceled(trip: t);
+  }
+}
+
+class _Arrived extends ConsumerWidget {
+  const _Arrived({required this.trip});
+  final Trip trip;
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final l = context.l10n;
+    final c = context.colors;
+    final t = trip;
+    final started = t.times.startedAt, ended = t.times.completedAt;
+    final seconds = started != null && ended != null && ended.isAfter(started) ? ended.difference(started).inSeconds : (t.route.durationSeconds ?? t.route.estDurationSeconds);
+    final meters = t.route.distanceMeters ?? t.route.estDistanceMeters;
+    final kmh = seconds > 0 ? (meters / seconds * 3.6).round() : 0;
+    final address = t.dropoff.address ?? l.dropoffLabel;
+    final comma = address.indexOf(',');
+    final place = comma > 0 ? address.substring(0, comma) : address;
+    final rest = comma > 0 ? address.substring(comma + 1).trim() : null;
+    return Stack(
+      children: [
+        Positioned.fill(child: ColoredBox(color: Colors.black.withValues(alpha: 0.45))),
+        Align(
+          alignment: Alignment.bottomCenter,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height - MediaQuery.paddingOf(context).top - ref.watch(bannerHeightProvider) - 8),
+            child: SingleChildScrollView(
+              child: ResultSheet(
+                title: l.grYouHaveArrived,
+                icon: Icons.location_on_rounded,
+                danger: true,
+                actions: PrimaryButton(
+                  key: const ValueKey('finish'),
+                  label: l.grFinish,
+                  onPressed: () => context.go(t.isDigital ? Routes.riderPay(t.id) : Routes.riderRate(t.id)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Divider(height: 1, color: c.border),
+                    const SizedBox(height: 16),
+                    Text(place, textAlign: TextAlign.center, style: AnbessaType.h2.copyWith(color: c.text)),
+                    if (rest != null && rest.isNotEmpty) ...[const SizedBox(height: 6), Text(rest, textAlign: TextAlign.center, style: AnbessaType.body2.copyWith(color: c.text2, fontWeight: FontWeight.w400))],
+                    const SizedBox(height: 16),
+                    StatTriple(
+                      items: [
+                        StatTriple.item(Icons.schedule_rounded, l.grMinutes((seconds / 60).round().clamp(1, 999)), l.grDuration),
+                        StatTriple.item(Icons.location_on_outlined, km(meters), l.grDistance),
+                        StatTriple.item(Icons.speed_rounded, l.grKmh(kmh), l.grAvgSpeed),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    TripCards(trip: t, paid: true),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
       ],
+    );
+  }
+}
+
+class _Canceled extends ConsumerWidget {
+  const _Canceled({required this.trip});
+  final Trip trip;
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final l = context.l10n;
+    final c = context.colors;
+    final cancellation = trip.cancellation;
+    final noDriver = cancellation?.reason == 'NO_DRIVER_FOUND';
+    final fee = cancellation?.feeMinor ?? 0;
+    final message = noDriver
+        ? l.noDriverFound
+        : fee > 0
+            ? '${l.cancelledBy(cancellation?.by.name ?? '')}. ${l.cancelFeeWarning(birr(fee, locale: context.localeTag))}'
+            : l.grRideCanceledLede;
+    void done() {
+      ref.read(activeTripProvider.notifier).clearIfEnded();
+      context.go(Routes.riderHome);
+    }
+
+    // the banners float over the shell: the page starts under them
+    final bannerH = ref.watch(bannerHeightProvider);
+    return Material(
+      color: c.page,
+      child: SafeArea(
+        top: bannerH <= 0,
+        minimum: EdgeInsets.only(top: bannerH),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Align(alignment: AlignmentDirectional.centerStart, child: Padding(padding: const EdgeInsets.all(8), child: IconButton(tooltip: l.close, icon: Icon(Icons.close_rounded, size: 26, color: c.text), onPressed: done))),
+            Expanded(
+              child: Center(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(horizontal: AnbessaSpace.page),
+                  child: Column(
+                    children: [
+                      ResultBadge(icon: noDriver ? Icons.search_off_rounded : Icons.check_rounded),
+                      const SizedBox(height: 24),
+                      Semantics(header: true, child: Text(noDriver ? l.grNoDriverTitle : l.grRideCanceled, textAlign: TextAlign.center, style: AnbessaType.display.copyWith(color: c.text))),
+                      const SizedBox(height: 16),
+                      Text(message, textAlign: TextAlign.center, style: AnbessaType.body.copyWith(color: c.text2, fontWeight: FontWeight.w400)),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            BottomActionBar(child: PrimaryButton(key: const ValueKey('canceled-ok'), label: l.ok, onPressed: done)),
+          ],
+        ),
+      ),
     );
   }
 }

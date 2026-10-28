@@ -1,4 +1,4 @@
-// Paying for a trip (workflow 08 A, D): cash is paid to the driver; mobile money and card are
+// Paying for a trip (workflow 08 A, D), on a page of the kit's cards: cash is paid to the driver; mobile money and card are
 // approved with the provider (the page opens in a Custom Tab / browser), and the screen follows
 // `payment:*` events, a "Check status" button, and "Pay now" for a failed charge. Then the receipt
 // and the rating.
@@ -134,7 +134,7 @@ class _PayScreenState extends ConsumerState<PayScreen> {
     final payments = paymentsAsync.value;
     final fare = payments?.fare;
     final instructions = ref.read(tripPaymentsProvider(widget.tripId).notifier).instructions;
-    if (trip == null) return Scaffold(appBar: AppBar(title: Text(l.payTitle)), body: const Padding(padding: EdgeInsets.all(20), child: Column(children: [SkeletonCard(height: 140), SizedBox(height: 12), SkeletonCard(height: 200)])));
+    if (trip == null) return Scaffold(appBar: AppTopBar(title: l.payTitle), body: const Padding(padding: EdgeInsets.all(20), child: Column(children: [SkeletonCard(height: 140), SizedBox(height: 12), SkeletonCard(height: 200)])));
     if (fare?.isPaid == true && !_celebrated) {
       _celebrated = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -204,32 +204,40 @@ class _PayScreenState extends ConsumerState<PayScreen> {
 
     final settled = !trip.isDigital || (fare?.isPaid ?? false) || (fare?.isOwed ?? false);
     return Scaffold(
-      appBar: AppBar(title: Text(l.payTitle)),
+      backgroundColor: c.groupedPage,
+      appBar: AppTopBar(title: l.payTitle, background: c.groupedPage),
       body: Stack(
         children: [
           ListView(
-            padding: const EdgeInsets.all(20),
+            padding: const EdgeInsets.fromLTRB(AnbessaSpace.page, 8, AnbessaSpace.page, 24),
             children: [
-              if (trip.driver != null) ...[_DriverLine(tripId: trip.id), const SizedBox(height: 12)],
-              FloatingCard(padding: const EdgeInsets.all(20), child: hero),
+              if (trip.driver != null) ...[AppCard(child: _DriverLine(tripId: trip.id)), const SizedBox(height: 16)],
+              AppCard(padding: const EdgeInsets.all(20), child: hero),
               const SizedBox(height: 12),
               Problem(_error, describe: (e) => describeError(l, e)),
-              if (trip.isDigital && fare != null && fare.isOpen) TextButton(onPressed: () => ref.read(tripPaymentsProvider(widget.tripId).notifier).refresh(), child: Text(l.checkStatus)),
-              const SizedBox(height: 12),
+              if (trip.isDigital && fare != null && fare.isOpen) Center(child: TextButton(onPressed: () => ref.read(tripPaymentsProvider(widget.tripId).notifier).refresh(), child: Text(l.checkStatus))),
+              const SizedBox(height: 4),
               ReceiptCard(trip: trip),
-              const SizedBox(height: 20),
-              if (settled) PrimaryButton(label: l.rateTitle, icon: Icons.star_outline, onPressed: () => context.go(Routes.riderRate(trip.id))),
-              TextButton(
-                onPressed: () {
-                  ref.read(activeTripProvider.notifier).clearIfEnded();
-                  context.go(Routes.riderHome);
-                },
-                child: Text(l.done),
-              ),
             ],
           ),
           Align(alignment: Alignment.topCenter, child: ConfettiWidget(confettiController: _confetti, blastDirectionality: BlastDirectionality.explosive, numberOfParticles: 24, colors: [c.accent, c.success, c.info])),
         ],
+      ),
+      bottomNavigationBar: BottomActionBar(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (settled) PrimaryButton(label: l.rateTitle, icon: Icons.star_outline_rounded, onPressed: () => context.go(Routes.riderRate(trip.id))),
+            TextButton(
+              onPressed: () {
+                ref.read(activeTripProvider.notifier).clearIfEnded();
+                context.go(Routes.riderHome);
+              },
+              child: Text(l.done),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -247,7 +255,7 @@ class _DriverLine extends ConsumerWidget {
     final name = parties?.driverName ?? l.driverLabel;
     return Row(
       children: [
-        Hero(tag: driverAvatarHeroTag(tripId), child: AvatarImage(src: parties?.driverPhoto, name: name, size: 44, ring: true)),
+        Hero(tag: driverAvatarHeroTag(tripId), child: AvatarImage(src: parties?.driverPhoto, name: name, size: 52)),
         const SizedBox(width: 12),
         Expanded(child: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: AnbessaType.title.copyWith(color: c.text))),
         if (parties?.vehicle != null) PlateBadge(parties!.vehicle!.plateNumber),
@@ -290,7 +298,7 @@ class _Timeline extends StatelessWidget {
   }
 }
 
-/// The fare breakdown of a trip, for the pay screen and history.
+/// The fare breakdown of a trip, as the kit's key–value cards.
 class ReceiptCard extends StatelessWidget {
   const ReceiptCard({super.key, required this.trip});
   final Trip trip;
@@ -299,20 +307,28 @@ class ReceiptCard extends StatelessWidget {
     final l = context.l10n;
     final loc = context.localeTag;
     final c = context.colors;
-    return SectionCard(
-      title: l.receiptTitle,
-      child: Column(
-        children: [
-          KeyValue(l.fareLabel, MoneyText(trip.fare.estimateMinor, locale: loc)),
-          if ((trip.fare.waitingFeeMinor ?? 0) > 0) KeyValue(l.waitingFeeLabel, MoneyText(trip.fare.waitingFeeMinor, locale: loc)),
-          if (trip.fare.promoDiscountMinor > 0) KeyValue(promoLabel(l, trip.fare), MoneyText(-trip.fare.promoDiscountMinor, locale: loc, style: TextStyle(color: c.success))),
-          KeyValue(l.totalLabel, MoneyText(trip.fare.payableMinor, locale: loc, style: AnbessaType.title.copyWith(color: c.text))),
-          KeyValue(l.paymentMethod, Text(paymentMethodLabel(l, trip.paymentMethod))),
-          KeyValue(l.pickupLabel, Text(trip.pickup.address ?? '—')),
-          KeyValue(l.dropoffLabel, Text(trip.dropoff.address ?? '—')),
-          KeyValue(l.tripIdLabel, MonoText(shortId(trip.id))),
-        ],
-      ),
+    final f = trip.fare;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        KeyValueCard(
+          rows: [
+            KeyValueCard.row(l.grTripFare, birr(f.estimateMinor, locale: loc)),
+            if ((f.waitingFeeMinor ?? 0) > 0) KeyValueCard.row(l.waitingFeeLabel, birr(f.waitingFeeMinor, locale: loc)),
+            if (f.promoDiscountMinor > 0) KeyValueCard.row(promoLabel(l, f), '−${birr(f.promoDiscountMinor, locale: loc)}', valueColor: c.success),
+          ],
+          total: KeyValueCard.row(l.totalLabel, birr(f.payableMinor, locale: loc)),
+        ),
+        const SizedBox(height: 12),
+        KeyValueCard(
+          rows: [
+            KeyValueCard.row(l.grPayment, paymentMethodLabel(l, trip.paymentMethod)),
+            KeyValueCard.row(l.pickupLabel, trip.pickup.address ?? '—'),
+            KeyValueCard.row(l.dropoffLabel, trip.dropoff.address ?? '—'),
+            KeyValueCard.row(l.tripIdLabel, shortId(trip.id)),
+          ],
+        ),
+      ],
     );
   }
 }

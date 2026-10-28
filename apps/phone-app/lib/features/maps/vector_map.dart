@@ -76,7 +76,8 @@ class _VectorMapState extends ConsumerState<VectorMap> {
   void _syncContent() {
     _scene.setRoutes(w.allRoutes);
     _scene.setPins(pickup: w.pickup, dropoff: w.dropoff);
-    _scene.setMe(w.mePoseOrPoint);
+    _scene.setMe(w.mePoseOrPoint, avatar: w.meAsAvatar);
+    _syncPerson();
     if (!identical(_carL, w.driverCar)) {
       _carL?.removeListener(_onCar);
       _carL = w.driverCar;
@@ -92,6 +93,24 @@ class _VectorMapState extends ConsumerState<VectorMap> {
     final frames = _carsL?.value ?? [for (final (i, c) in w.cars.indexed) NearbyCarFrame(id: i, lat: c.position.latitude, lng: c.position.longitude, bearing: c.heading ?? 0)];
     _scene.setNearbyCars(frames);
     _scene.setNearbyLabel(frames.isEmpty ? null : w.nearbyLabel);
+  }
+
+  MapPerson? _person;
+  int _personGen = 0;
+
+  /// The avatar pins show [AnbessaMap.person]: their photo is decoded off the frame, then drawn.
+  void _syncPerson() {
+    final p = w.person;
+    if (p == _person) return;
+    _person = p;
+    final gen = ++_personGen;
+    final initials = p == null || p.name.trim().isEmpty ? '' : AvatarImage.initialsOf(p.name);
+    _scene.setPerson(ScenePerson(initials: initials));
+    if (p?.photo == null) return;
+    unawaited(loadAvatarImage(p!.photo).then((img) {
+      if (img == null || gen != _personGen || !mounted) return;
+      _scene.setPerson(ScenePerson(photo: img, initials: initials));
+    }));
   }
 
   void _onCar() {
@@ -264,6 +283,7 @@ class _VectorMapState extends ConsumerState<VectorMap> {
                         recenterActive: w.follow != FollowMode.none && !free,
                         onRecenter: _binding.recenter,
                         showModeSwitch: w.showModeSwitch,
+                      round: w.roundControls,
                       ),
                     ),
                   ),

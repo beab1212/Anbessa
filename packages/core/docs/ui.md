@@ -109,7 +109,7 @@ Derived: `isDark` (canvas luminance < 0.2), `brightness`, `primaryFill` (the fil
 ThemeData anbessaTheme({Brightness brightness = Brightness.light, String? fontFamily = anbessaFontFamily, List<String> fontFamilyFallback = const ['NotoSansEthiopic']})
 ```
 
-Material 3, `ColorScheme.fromSeed(accent)` overridden with the palette (primary = amber, onPrimary = ink, surface = `page`, surfaceContainerHighest = `field`…). The app passes no arguments except `brightness` (`apps/phone-app/lib/app.dart`). Urbanist is bundled by this package; Noto Sans Ethiopic by the app (the app still bundles Inter too, now unused by the theme).
+Material 3, `ColorScheme.fromSeed(accent)` overridden with the palette (primary = amber, onPrimary = ink, surface = `page`, surfaceContainerHighest = `field`…). The app passes no arguments except `brightness` (`apps/phone-app/lib/app.dart`). Urbanist is bundled by this package; Noto Sans Ethiopic by the app (Inter is no longer bundled).
 
 What it sets:
 

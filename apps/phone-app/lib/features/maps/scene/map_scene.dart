@@ -1,7 +1,7 @@
 // The map scene: the imperative owner of everything the app draws natively on the vector map.
 //
-// When a style has loaded, attach() registers the images once (cars, pins, the person's dot,
-// labels), creates fixed GeoJSON sources and the layers that draw them (routes with round caps
+// When a style has loaded, attach() registers the images once (top-down cars, the avatar and
+// destination pins, the person's dot, labels; the avatar pins again when the person changes), creates fixed GeoJSON sources and the layers that draw them (routes with round caps
 // and joins, nearby cars, pins, the person, the followed car and its label) and, in 3D, the
 // extruded buildings under the routes. After that, every set*() call only replaces the data of
 // its own source through updateGeoJsonSource: no layer is ever removed and re-added for a data
@@ -47,6 +47,7 @@ class MapScene {
   String? _nearbyLabel;
   String? _shownDriverLabel;
   String? _shownNearbyLabel;
+  ScenePerson _person = ScenePerson.nobody;
 
   /// The scene's layers and sources exist on the current style.
   bool get isAttached => _style != null;
@@ -109,14 +110,30 @@ class MapScene {
       SceneIds.imgCarDriver: carImage(c, k),
       SceneIds.imgCarStale: carImage(c, k, stale: true),
       SceneIds.imgCarNearby: nearbyCarImage(c, k),
-      SceneIds.imgPinPickup: pinImage(c, k, pickup: true),
-      SceneIds.imgPinDropoff: pinImage(c, k, pickup: false),
+      SceneIds.imgPinDropoff: destinationPinImage(c, k),
       SceneIds.imgMeDot: meDotImage(c, k),
       SceneIds.imgMeCone: meConeImage(c, k),
     };
     for (final e in images.entries) {
       await _addImage(style, e.key, e.value);
     }
+    await _addPersonImages(style, look);
+  }
+
+  /// The pickup pin and "you" on the home map: the person's avatar pin.
+  Future<void> _addPersonImages(ml.StyleController style, SceneLook look) async {
+    final img = avatarPinImage(look.colors, look.imageScale, _person);
+    await _addImage(style, SceneIds.imgPinPickup, img);
+    await _addImage(style, SceneIds.imgMeAvatar, img);
+  }
+
+  /// Who the avatar pins show; the images are drawn again when it changes.
+  void setPerson(ScenePerson person) {
+    if (identical(person, _person) || (person.photo == _person.photo && person.initials == _person.initials)) return;
+    _person = person;
+    final style = _style, look = _look;
+    if (style == null || look == null) return;
+    unawaited(_addPersonImages(style, look));
   }
 
   Future<void> _addImage(ml.StyleController style, String id, SceneImage img) async {
@@ -194,7 +211,8 @@ class MapScene {
     unawaited(_syncLabels());
   }
 
-  void setMe(MePose? me) => _put(SceneIds.me, meGeoJson(at: _gp(me?.position), heading: me?.heading));
+  /// The person: a dot (and heading cone), or their avatar pin with [avatar].
+  void setMe(MePose? me, {bool avatar = false}) => _put(SceneIds.me, meGeoJson(at: _gp(me?.position), heading: me?.heading, avatar: avatar));
 
   /// Draw the label images, then show the features that use them.
   Future<void> _syncLabels() async {

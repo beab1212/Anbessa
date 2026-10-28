@@ -61,6 +61,19 @@ class MapOverlay {
   final Alignment alignment;
 }
 
+/// The person the map's avatar pins show (the pickup, and "you" with [AnbessaMap.meAsAvatar]).
+@immutable
+class MapPerson {
+  const MapPerson({this.photo, this.name = ''});
+  /// a data URL or https URL
+  final String? photo;
+  final String name;
+  @override
+  bool operator ==(Object other) => other is MapPerson && other.photo == photo && other.name == name;
+  @override
+  int get hashCode => Object.hash(photo, name);
+}
+
 class AnbessaMap extends ConsumerWidget {
   const AnbessaMap({
     super.key,
@@ -96,6 +109,9 @@ class AnbessaMap extends ConsumerWidget {
     this.onMove,
     this.padding = const EdgeInsets.all(48),
     this.interactive = true,
+    this.person,
+    this.meAsAvatar = false,
+    this.roundControls = false,
   });
 
   /// Points to show when nothing is followed. Empty: [center] or the city. The camera fits them
@@ -154,6 +170,13 @@ class AnbessaMap extends ConsumerWidget {
   final void Function(LatLng)? onMove;
   final EdgeInsets padding;
   final bool interactive;
+  /// whose avatar the pickup pin (and "you", with [meAsAvatar]) shows; a person glyph without
+  final MapPerson? person;
+  /// draw the person as their avatar pin (the home map) instead of the small dot
+  final bool meAsAvatar;
+  /// the GoRide kit's controls: round white buttons (a layers button for the mode, a crosshair
+  /// to recenter) instead of the small squares
+  final bool roundControls;
 
   /// Every route line, the older straight [line] included.
   List<RouteLine> get allRoutes => [...routes, if (line.length >= 2) RouteLine(line, kind: RouteKind.straight)];
@@ -208,10 +231,13 @@ List<MapPin> pinsFor(AnbessaMap w, double Function(BuildContext) mapRotation, {b
     for (final o in w.overlays) MapPin(point: o.point, size: o.size, alignment: o.alignment, child: o.child),
     if (native) ...[
       if (w.nearbyCars == null)
-        for (final car in w.cars) MapPin(point: car.position, size: const Size(26, 26), child: turning((r) => NearbyCarGlyph(heading: car.heading, mapRotation: r))),
-      if (w.pickup != null) MapPin(point: w.pickup!, size: const Size(36, 44), alignment: Alignment.bottomCenter, child: const PinMarker(tone: PinTone.pickup)),
-      if (w.dropoff != null) MapPin(point: w.dropoff!, size: const Size(36, 44), alignment: Alignment.bottomCenter, child: const PinMarker(tone: PinTone.dropoff)),
-      if (me != null) MapPin(point: me.position, size: const Size(48, 48), child: turning((r) => MeDot(heading: me.heading == null ? null : me.heading! + r))),
+        for (final car in w.cars) MapPin(point: car.position, size: const Size(42, 42), child: turning((r) => NearbyCarGlyph(heading: car.heading, mapRotation: r))),
+      if (w.pickup != null) MapPin(point: w.pickup!, size: avatarPinSize(46), alignment: Alignment.bottomCenter, child: MapAvatarPin(photo: w.person?.photo, name: w.person?.name ?? '', diameter: 46)),
+      if (w.dropoff != null) MapPin(point: w.dropoff!, size: destinationPinSize(36), alignment: Alignment.bottomCenter, child: const DestinationPin(diameter: 36)),
+      if (me != null && w.meAsAvatar)
+        MapPin(point: me.position, size: avatarPinSize(46), alignment: Alignment.bottomCenter, child: MapAvatarPin(photo: w.person?.photo, name: w.person?.name ?? '', diameter: 46))
+      else if (me != null)
+        MapPin(point: me.position, size: const Size(48, 48), child: turning((r) => MeDot(heading: me.heading == null ? null : me.heading! + r))),
       if (pose != null)
         MapPin(point: LatLng(pose.lat, pose.lng), size: const Size(44, 44), child: turning((r) => CarMarker(heading: pose.heading, stale: pose.stale, mapRotation: r)))
       else if (still != null)
@@ -232,7 +258,10 @@ class MapControls extends ConsumerWidget {
     required this.recenterActive,
     required this.onRecenter,
     this.showModeSwitch = true,
+    this.round = false,
   });
+  /// round white buttons (the GoRide kit's map controls)
+  final bool round;
   /// degrees; the north needle shows when it isn't 0
   final double rotation;
   final VoidCallback onResetNorth;
@@ -245,6 +274,25 @@ class MapControls extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final l = context.l10n;
     final mode = ref.watch(effectiveMapModeProvider);
+    if (round) {
+      return MapControlColumn(
+        gap: 12,
+        children: [
+          if (showModeSwitch) RoundIconButton(icon: Icons.layers_outlined, tooltip: l.mapModeTitle, onTap: () => showMapModePicker(context)),
+          if (rotation.abs() > 0.5)
+            Tooltip(
+              message: l.resetNorth,
+              child: Material(
+                color: context.colors.surface,
+                shape: const CircleBorder(),
+                elevation: 0,
+                child: InkWell(customBorder: const CircleBorder(), onTap: onResetNorth, child: SizedBox.square(dimension: 44, child: Center(child: Transform.rotate(angle: rotation * pi / 180, child: const _NorthNeedle())))),
+              ),
+            ),
+          if (showRecenter) RoundIconButton(icon: recenterActive ? Icons.my_location_rounded : Icons.location_searching_rounded, tooltip: l.recenter, onTap: onRecenter),
+        ],
+      );
+    }
     return MapControlColumn(
       children: [
         if (showModeSwitch)
@@ -447,69 +495,30 @@ class DriverMarkerData {
   final bool onTrip;
 }
 
-/// The car: an arrow on a disc, amber on a trip, grey when stale. Adds the map's rotation so its
-/// heading stays true when the camera turns.
+/// The car: the kit's white top-down car, turned to its heading (grey when stale). Adds the map's
+/// rotation so its heading stays true when the camera turns.
 class CarMarker extends StatelessWidget {
   const CarMarker({super.key, required this.heading, this.stale = false, this.onTrip = true, this.mapRotation = 0, this.size = 40});
   final double heading;
   final bool stale;
   final bool onTrip;
   final double mapRotation;
+  /// the box the car is drawn in (the car is about half as wide)
   final double size;
   @override
-  Widget build(BuildContext context) {
-    final c = context.colors;
-    final color = stale ? c.faint : (onTrip ? c.accent : c.success);
-    return Semantics(
-      label: 'driver',
-      child: Center(
-        child: Container(
-          width: size,
-          height: size,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle, border: Border.all(color: c.isDark ? c.canvas : Colors.white, width: 3)),
-          child: Transform.rotate(angle: (heading + mapRotation) * pi / 180, child: CustomPaint(painter: _ArrowPainter(c.isDark ? c.canvas : c.text))),
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => Semantics(
+        label: 'driver',
+        child: Center(child: TopDownCar(width: size * 0.55, heading: heading + mapRotation, body: stale ? const Color(0xFFB9BCC2) : Colors.white)),
+      );
 }
 
-/// A plain arrowhead pointing up.
-class _ArrowPainter extends CustomPainter {
-  const _ArrowPainter(this.color);
-  final Color color;
-  @override
-  void paint(Canvas canvas, Size size) {
-    final w = size.width, h = size.height;
-    final path = Path()
-      ..moveTo(w * 0.5, h * 0.2)
-      ..lineTo(w * 0.76, h * 0.78)
-      ..lineTo(w * 0.5, h * 0.64)
-      ..lineTo(w * 0.24, h * 0.78)
-      ..close();
-    canvas.drawPath(path, Paint()..color = color);
-  }
-
-  @override
-  bool shouldRepaint(_ArrowPainter old) => old.color != color;
-}
-
-/// A small anonymous car around the rider.
+/// A small anonymous car around the rider: the same white top-down car, smaller.
 class NearbyCarGlyph extends StatelessWidget {
   const NearbyCarGlyph({super.key, this.heading, this.mapRotation = 0});
   final double? heading;
   final double mapRotation;
   @override
-  Widget build(BuildContext context) {
-    final c = context.colors;
-    return FadeSlideIn(
-      offset: 0,
-      child: Container(
-        decoration: BoxDecoration(color: c.surface, shape: BoxShape.circle, border: Border.all(color: c.borderStrong)),
-        child: Transform.rotate(angle: ((heading ?? 0) + mapRotation) * pi / 180, child: CustomPaint(painter: _ArrowPainter(c.text2))),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => FadeSlideIn(offset: 0, child: Center(child: TopDownCar(width: 18, heading: (heading ?? 0) + mapRotation)));
 }
 
 /// Keep the old name working for screens not yet rewritten.
@@ -526,9 +535,19 @@ class CenterPin extends StatelessWidget {
   final PinTone tone;
   final bool lifted;
   @override
-  Widget build(BuildContext context) => IgnorePointer(
-        child: Center(child: Padding(padding: const EdgeInsets.only(bottom: 41), child: PinMarker(tone: tone, lifted: lifted))),
-      );
+  Widget build(BuildContext context) {
+    final size = tone == PinTone.pickup ? avatarPinSize(46) : destinationPinSize(36);
+    final pin = tone == PinTone.pickup ? const MapAvatarPin(name: '', diameter: 46) : const DestinationPin(diameter: 36);
+    return IgnorePointer(
+      child: Center(
+        child: Padding(
+          // the tip on the centre
+          padding: EdgeInsets.only(bottom: size.height),
+          child: AnimatedSlide(duration: AnbessaMotion.of(context, AnbessaMotion.base), curve: AnbessaMotion.emphasized, offset: lifted ? const Offset(0, -0.2) : Offset.zero, child: pin),
+        ),
+      ),
+    );
+  }
 }
 
 LatLng latLngOf(double lat, double lng) => LatLng(lat, lng);

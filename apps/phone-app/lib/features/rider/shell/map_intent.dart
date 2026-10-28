@@ -13,6 +13,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:ride_app_core/ride_app_core.dart';
 import '../../../core/location/location_source.dart';
+import '../../../core/state.dart';
 import '../../config/client_config_provider.dart';
 import '../../maps/anbessa_map.dart';
 import '../booking/booking_controller.dart';
@@ -91,6 +92,8 @@ class MapIntent {
     this.radarAt,
     this.pin = false,
     this.controls = true,
+    this.meAvatar = false,
+    this.showMe = true,
   });
 
   /// points the camera fits (when [fitKey] changes)
@@ -112,12 +115,16 @@ class MapIntent {
   final FollowMode follow;
   final double followZoom;
   final List<IntentCallout> callouts;
-  /// the "finding a driver" pulse
+  /// the "finding a driver" rings around the rider's avatar (drawn there instead of the pickup pin)
   final LatLng? radarAt;
   /// drag-to-pick: the camera centre is the place, no insets
   final bool pin;
   /// the map's own controls (2D/3D, recenter)
   final bool controls;
+  /// the rider drawn as their avatar pin (home) rather than a small dot
+  final bool meAvatar;
+  /// the rider's own position at all (not where the pickup avatar already stands for them)
+  final bool showMe;
 
   @override
   bool operator ==(Object other) =>
@@ -137,7 +144,9 @@ class MapIntent {
       listEquals(other.callouts, callouts) &&
       other.radarAt == radarAt &&
       other.pin == pin &&
-      other.controls == controls;
+      other.controls == controls &&
+      other.meAvatar == meAvatar &&
+      other.showMe == showMe;
 
   @override
   int get hashCode => Object.hash(fitKey, pickup, dropoff, routes.length, revealKey, nearby, car, carMinutes, follow, pin, radarAt, callouts.length);
@@ -204,7 +213,9 @@ int minutesCeil(int seconds) => (seconds / 60).ceil().clamp(1, 999);
 final riderLocationProvider = StreamProvider.autoDispose<DevicePosition?>((ref) async* {
   final src = ref.watch(locationSourceProvider);
   try {
-    if (await src.ensurePermission(LocationProfile.once) != LocationPermissionState.granted) {
+    final perm = await src.ensurePermission(LocationProfile.once);
+    ref.read(riderLocationPermissionProvider.notifier).set(perm);
+    if (perm != LocationPermissionState.granted) {
       yield ref.read(lastPositionProvider);
       return;
     }
@@ -224,6 +235,19 @@ final riderLocationProvider = StreamProvider.autoDispose<DevicePosition?>((ref) 
   }
 });
 
+/// What the phone answered when the map shell asked for the rider's location (null until asked):
+/// the home stage offers "Enable Location" when it isn't granted.
+final riderLocationPermissionProvider = valueProvider<LocationPermissionState?>(null);
+
+/// Home is still waiting for the rider's first position (permission given or not yet asked):
+/// "Searching your location...".
+final riderLocatingProvider = Provider.autoDispose<bool>((ref) {
+  final perm = ref.watch(riderLocationPermissionProvider);
+  if (perm != null && perm != LocationPermissionState.granted) return false;
+  if (ref.watch(lastPositionProvider) != null) return false;
+  return ref.watch(riderLocationProvider).value == null;
+});
+
 /// The served city around the rider (their position's city, else the first served city): search
 /// is biased to it and its common places are offered.
 final riderCityProvider = Provider<City>((ref) {
@@ -235,16 +259,16 @@ final riderCityProvider = Provider<City>((ref) {
 // ── stage intents ───────────────────────────────────────────────────────────
 
 /// Home: the rider in the middle, the cars around them.
-final homeMapIntentProvider = Provider<MapIntent>((ref) => const MapIntent(follow: FollowMode.me, followZoom: 15, nearby: true));
+final homeMapIntentProvider = Provider<MapIntent>((ref) => const MapIntent(follow: FollowMode.me, followZoom: 15, nearby: true, meAvatar: true));
 
 /// Search: the chosen places (the sheet covers most of the map); in pin mode, the camera centre.
 final searchMapIntentProvider = Provider<MapIntent>((ref) {
   final pin = ref.watch(pinPickerProvider);
-  if (pin.active) return MapIntent(pin: true, fit: [pin.start], fitKey: ('pin', pin.session), controls: false);
+  if (pin.active) return MapIntent(pin: true, fit: [pin.start], fitKey: ('pin', pin.session), controls: false, showMe: false);
   final b = ref.watch(bookingProvider);
   final pickup = b.pickup == null ? null : LatLng(b.pickup!.lat, b.pickup!.lng);
   final dropoff = b.dropoff == null ? null : LatLng(b.dropoff!.lat, b.dropoff!.lng);
-  if (pickup == null && dropoff == null) return const MapIntent(follow: FollowMode.me, followZoom: 15, controls: false);
+  if (pickup == null && dropoff == null) return const MapIntent(follow: FollowMode.me, followZoom: 15, controls: false, meAvatar: true);
   return MapIntent(pickup: pickup, dropoff: dropoff, fit: [?pickup, ?dropoff], fitKey: ('search', pickup, dropoff), controls: false);
 });
 
@@ -268,7 +292,7 @@ final quoteMapIntentProvider = Provider<MapIntent>((ref) {
   final b = ref.watch(bookingProvider);
   final pickup = b.pickup == null ? null : LatLng(b.pickup!.lat, b.pickup!.lng);
   final dropoff = b.dropoff == null ? null : LatLng(b.dropoff!.lat, b.dropoff!.lng);
-  if (pickup == null || dropoff == null) return const MapIntent(follow: FollowMode.me, controls: false);
+  if (pickup == null || dropoff == null) return const MapIntent(follow: FollowMode.me, controls: false, meAvatar: true);
   final poly = b.route?.polyline6 ?? '';
   final live = poly.isEmpty ? const <LatLng>[] : ref.watch(decodedRouteProvider(poly));
   final previous = ref.watch(lastQuoteRouteProvider);
@@ -294,7 +318,8 @@ final quoteMapIntentProvider = Provider<MapIntent>((ref) {
     fit: live.length >= 2 ? live : [pickup, dropoff],
     fitKey: ('quote', pickup, dropoff, live.length >= 2),
     callouts: callouts,
-    controls: false,
+    // the pickup avatar is the rider here
+    showMe: false,
   );
 });
 
@@ -375,12 +400,15 @@ final tripMapIntentProvider = Provider.autoDispose.family<MapIntent, String>((re
   }
 
   final fit = switch (stage) {
+    // the rings around the rider, in the middle
+    RiderStage.finding => [pickup],
     RiderStage.driverAssigned || RiderStage.driverArrived => [pickup, ?carPt],
     RiderStage.inTrip => [?carPt, dropoff],
     _ => tripPts.length >= 2 ? tripPts : [pickup, dropoff],
   };
   return MapIntent(
-    pickup: stage == RiderStage.inTrip ? null : pickup,
+    // finding a driver: the rider's avatar sits in the rings instead of the pickup pin
+    pickup: stage == RiderStage.inTrip || stage == RiderStage.finding ? null : pickup,
     dropoff: dropoff,
     routes: routes,
     fit: fit,
@@ -389,6 +417,8 @@ final tripMapIntentProvider = Provider.autoDispose.family<MapIntent, String>((re
     carMinutes: v.driving && carPt != null && v.etaSeconds != null ? minutesCeil(v.etaSeconds!) : null,
     carRoad: carRoad,
     radarAt: stage == RiderStage.finding ? pickup : null,
+    // the rider's own dot only while they walk to the car
+    showMe: stage == RiderStage.driverAssigned || stage == RiderStage.driverArrived,
     callouts: [
       if (stage == RiderStage.inTrip && v.etaSeconds != null) IntentCallout.arriveAt(dropoff, DateTime.now().add(Duration(seconds: v.etaSeconds!))),
     ],

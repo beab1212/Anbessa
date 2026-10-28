@@ -1610,5 +1610,239 @@
   },
   "rideServiceLater": "Later",
   "rideNoAnnouncements": "No announcements right now",
-  "rideMovePin": "Move the map to place the pin"
+  "rideMovePin": "Move the map to place the pin",
+  "actOngoing": "Ongoing",
+  "actScheduled": "Scheduled",
+  "actCompleted": "Completed",
+  "actCanceled": "Cancelled",
+  "actTrackRoute": "Track route",
+  "actNoOngoing": "No trip in progress",
+  "actNoOngoingLede": "A trip you're on shows here with its route.",
+  "actNoCanceled": "No cancelled trips",
+  "actNoCanceledLede": "Trips that were cancelled show here.",
+  "actCancelledNoCharge": "Cancelled, no charge",
+  "actCancelledCompensated": "Cancelled, compensated",
+  "actMore": "More options",
+  "actRideDetails": "Ride details",
+  "actWhoops": "Whoops!",
+  "actSentTitle": "Sent!",
+  "actHelpTitle": "How can we help?",
+  "drv2OfflineLede": "Go online to get trip offers nearby.",
+  "drv2OnlineLede": "Offers appear here. Keep the app open.",
+  "drv2YourCar": "Your car",
+  "drv2TripAccepted": "Trip accepted",
+  "drv2HeadToPickup": "Head to the pickup",
+  "drv2AtPickup": "Waiting for the rider",
+  "drv2ToDestination": "Driving to the destination",
+  "drv2Fare": "Fare",
+  "drv2TripLength": "Trip",
+  "drv2AvailableBalance": "Balance: {amount}",
+  "@drv2AvailableBalance": {"placeholders": {"amount": {"type": "String"}}},
+  "drv2ChooseMethod": "Choose a top-up method",
+  "grScheduleRide": "Schedule a ride",
+  "grPassengers": "{count, plural, =1{1 passenger} other{{count} passengers}}",
+  "@grPassengers": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "grChoosePaymentMethod": "Choose Payment Method",
+  "grCashSub": "Pay your driver directly in cash",
+  "grMobileMoneySub": "Approve the payment in your mobile money app",
+  "grCardSub": "Pay with your bank card",
+  "grCorporateSub": "Billed to your company",
+  "grHaveAPromoCode": "Have a Promo Code?",
+  "grEnterCodeHere": "Enter code here",
+  "grRedeem": "Redeem",
+  "grCodeInUse": "In use on this ride",
+  "grFareDetails": "Fare details",
+  "grFindingDriver": "Finding you a nearby driver...",
+  "grFindingDriverLede": "The driver will pick you up as soon as possible after they confirm your order.",
+  "grSearchingFor": "Searching for {time}",
+  "@grSearchingFor": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "grCancelRide": "Cancel Ride",
+  "grDriverHeading": "Driver is heading to your location...",
+  "grDriverArrivingIn": "Driver will arrive in {min} min...",
+  "@grDriverArrivingIn": {
+    "placeholders": {
+      "min": {
+        "type": "int"
+      }
+    }
+  },
+  "grDriverIsHere": "Your driver is here",
+  "grDriverIsHereLede": "Meet your driver at the pickup point.",
+  "grHeadingToDestination": "Heading to destination...",
+  "grArriveDestinationIn": "Will arrive at the destination in {min} min...",
+  "@grArriveDestinationIn": {
+    "placeholders": {
+      "min": {
+        "type": "int"
+      }
+    }
+  },
+  "grRide": "Ride",
+  "grTripFare": "Trip Fare",
+  "grDiscounts": "Discounts",
+  "grTotalPaid": "Total Paid",
+  "grDriverInformation": "Driver Information",
+  "grRating": "Rating",
+  "grRatings": "Ratings",
+  "grCarModel": "Car Model",
+  "grColor": "Color",
+  "grPlateNumber": "Plate Number",
+  "grCarClass": "Class",
+  "grYouHaveArrived": "You have arrived!",
+  "grDuration": "Duration",
+  "grDistance": "Distance",
+  "grAvgSpeed": "Avg. Speed",
+  "grKmh": "{speed} km/h",
+  "@grKmh": {
+    "placeholders": {
+      "speed": {
+        "type": "int"
+      }
+    }
+  },
+  "grMinutes": "{min} mins",
+  "@grMinutes": {
+    "placeholders": {
+      "min": {
+        "type": "int"
+      }
+    }
+  },
+  "grFinish": "Finish",
+  "grHowWasDriver": "How was the driver?",
+  "grHowWasRider": "How was the rider?",
+  "grRateLede": "Help Anbessa do better by rating this trip",
+  "grGiveRate": "Give Rate",
+  "grHideDetails": "Hide details",
+  "grShowDetails": "Show details",
+  "grThanksFeedback": "Thanks for your feedback!",
+  "grSeeYouNext": "See you on your next trip!",
+  "grRideCanceled": "Ride has been canceled!",
+  "grRideCanceledLede": "Nothing was charged. You can see the canceled ride in Activity.",
+  "grNoDriverTitle": "No driver this time",
+  "grPinTitle": "Your trip PIN",
+  "grDriverDetails": "Driver details",
+  "accLoading": "Loading",
+  "accContinue": "Continue",
+  "accGetStarted": "Let's Get Started",
+  "accLetsGetStarted": "Let's Get Started!",
+  "accLetsGetStartedLede": "Let's dive in into your account",
+  "accSignUp": "Sign up",
+  "accSignIn": "Sign in",
+  "accPrivacyPolicy": "Privacy Policy",
+  "accTermsOfService": "Terms of Service",
+  "accJoinTitle": "Join Anbessa Today ✨",
+  "accJoinLede": "Let's get started! Enter your phone number to create your Anbessa account.",
+  "accWelcomeBackTitle": "Welcome Back! 👋",
+  "accWelcomeBackLede": "Enter your phone number to sign in to your Anbessa account.",
+  "accAgreeTo": "I agree to Anbessa",
+  "accTermsAndConditions": "Terms & Conditions.",
+  "accHaveAccount": "Already have an account?",
+  "accNoAccount": "Don't have an account?",
+  "accOtpTitle": "Enter OTP Code 🔐",
+  "accOtpLede": "Check your messages! We've sent a one-time code to {phone}. Enter the code below to verify your account and continue.",
+  "@accOtpLede": {
+    "placeholders": {
+      "phone": {
+        "type": "String"
+      }
+    }
+  },
+  "accResendIn": "You can resend the code in {seconds} seconds",
+  "@accResendIn": {
+    "placeholders": {
+      "seconds": {
+        "type": "int"
+      }
+    }
+  },
+  "accResendCode": "Resend code",
+  "accEnableLocation": "Enable Location",
+  "accEnableLocationLede": "To be able to use the service, we require permission to access your location.",
+  "accGrantPermission": "Grant Permission",
+  "accMaybeLater": "Maybe Later",
+  "accYesSignOut": "Yes, Sign out",
+  "accPersonalInfo": "Personal Info",
+  "accSavedAddresses": "Saved Addresses",
+  "accPaymentMethods": "Payment Methods",
+  "accAccountSecurity": "Account & Security",
+  "accAppAppearance": "App Appearance",
+  "accHelpSupport": "Help & Support",
+  "accAvailableBalance": "Available balance",
+  "accFullName": "Full Name",
+  "accPhoneReadOnly": "You sign in with this number, so it can't be changed here.",
+  "accDeviceManagement": "Device Management",
+  "accDeviceManagementLede": "Manage your account on the various devices you own.",
+  "accDeleteAccountLede": "Permanently remove your account and data. Proceed with caution.",
+  "accPreferred": "Preferred",
+  "accChoose": "Choose",
+  "accAddAddress": "Add Address",
+  "accAddAnAddress": "Add an Address",
+  "accDeleteAddress": "Delete Address",
+  "accDeleteAddressConfirm": "Sure you want to delete this address?",
+  "accYesDelete": "Yes, Delete",
+  "accDelete": "Delete",
+  "accAddressDeleted": "Address deleted!",
+  "accUndo": "Undo",
+  "accShare": "Share",
+  "accShareAddressText": "{name}: {address}\n{link}",
+  "@accShareAddressText": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "address": {
+        "type": "String"
+      },
+      "link": {
+        "type": "String"
+      }
+    }
+  },
+  "accTapToSet": "Not set. Tap to add.",
+  "accChangeOnMap": "Choose again on the map",
+  "accName": "Name",
+  "accNameHint": "e.g. Mom's house",
+  "accAddressDetails": "Address Details",
+  "accAddressDetailsHint": "e.g. Floor, unit number",
+  "accSaveAddress": "Save Address",
+  "accRating": "Rating",
+  "grEnterLocation": "Enter location",
+  "grSearchingLocation": "Searching your location...",
+  "grEnableLocationTitle": "Enable Location",
+  "grEnableLocationBody": "To be able to use the service, we require permission to access your location.",
+  "grGrantPermission": "Grant Permission",
+  "grMaybeLater": "Maybe Later",
+  "grWhereDoYouWantToGo": "Where do you want to go?",
+  "grYourCurrentLocation": "Your current location",
+  "grSelectFromMap": "Select from map",
+  "grSuggested": "Suggested",
+  "grNoRecent": "Places you ride to will show up here.",
+  "grSavePlace": "Save this place",
+  "grUnsavePlace": "Remove from saved places",
+  "grPlaceRemoved": "Removed from saved places",
+  "grSetPickupLocation": "Set pickup location",
+  "grSetDestination": "Set destination",
+  "grPayment": "Payment",
+  "grPromosVouchers": "Promos / Vouchers",
+  "grBook": "Book {name}",
+  "@grBook": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  }
 }

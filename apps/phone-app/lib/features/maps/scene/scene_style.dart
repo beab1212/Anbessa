@@ -25,12 +25,13 @@ class SceneLook {
   bool samePaint(SceneLook o) => o.colors.isDark == colors.isDark && o.colors.accent == colors.accent && o.colors.text == colors.text && o.imagery == imagery && o.imageScale == imageScale;
 }
 
-/// Colours of the route lines: an amber line with an ink casing; grey behind the car; dashed for
+/// Colours of the route lines: an amber line with a deeper amber edge (ink on dark and satellite
+/// maps); grey behind the car; dashed for
 /// the leg that isn't the current one, dotted for a straight line without road geometry.
 ({Color casing, Color fill, Color traversed, Color secondary}) routeColors(SceneLook look) {
   final c = look.colors;
   return (
-    casing: look.bright ? const Color(0xFF111214) : c.text,
+    casing: look.bright ? const Color(0xFF111214) : const Color(0xFFC98A00),
     fill: c.accent,
     traversed: look.bright ? const Color(0xFF7A7F87) : c.faint,
     secondary: look.bright ? const Color(0xFFFFFFFF) : c.text2,
@@ -39,9 +40,9 @@ class SceneLook {
 
 List<Object> _byZoom(List<num> stops) => ['interpolate', ['linear'], ['zoom'], for (final s in stops) s.toDouble()];
 
-/// Width stops (zoom, px) for the main line; the casing adds 4 px.
+/// Width stops (zoom, px) for the main line; the casing adds a thin edge.
 const _fillStops = [10, 3.0, 14, 5.0, 18, 9.0];
-const _casingStops = [10, 6.0, 14, 9.0, 18, 14.0];
+const _casingStops = [10, 4.5, 14, 7.5, 18, 12.0];
 const _secondaryStops = [10, 2.0, 14, 3.5, 18, 6.0];
 const _straightStops = [10, 2.0, 14, 3.0, 18, 4.5];
 
@@ -151,10 +152,23 @@ List<ml.StyleLayer> sceneLayers(SceneLook look) {
     ml.SymbolStyleLayer(
       id: SceneIds.meDot,
       sourceId: SceneIds.me,
+      filter: ['!=', ['get', 'avatar'], true],
       layout: {
         'icon-image': SceneIds.imgMeDot,
         'icon-size': 1 / k,
         'icon-pitch-alignment': 'map',
+        'icon-allow-overlap': true,
+        'icon-ignore-placement': true,
+      },
+    ),
+    ml.SymbolStyleLayer(
+      id: SceneIds.meAvatar,
+      sourceId: SceneIds.me,
+      filter: ['==', ['get', 'avatar'], true],
+      layout: {
+        'icon-image': SceneIds.imgMeAvatar,
+        'icon-size': 1 / k,
+        'icon-anchor': 'bottom',
         'icon-allow-overlap': true,
         'icon-ignore-placement': true,
       },

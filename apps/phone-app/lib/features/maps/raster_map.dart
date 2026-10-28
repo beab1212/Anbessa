@@ -134,8 +134,8 @@ class _RasterMapState extends ConsumerState<RasterMap> with TickerProviderStateM
                           Marker(
                             key: ValueKey('nearby:${f.id}'),
                             point: LatLng(f.lat, f.lng),
-                            width: 26,
-                            height: 26,
+                            width: 42,
+                            height: 42,
                             child: Opacity(opacity: f.opacity.clamp(0.0, 1.0), child: Builder(builder: (ctx) => NearbyCarGlyph(heading: f.bearing, mapRotation: MapCamera.maybeOf(ctx)?.rotation ?? 0))),
                           ),
                         if (cars.isNotEmpty && w.nearbyLabel != null)
@@ -157,9 +157,9 @@ class _RasterMapState extends ConsumerState<RasterMap> with TickerProviderStateM
                             markers: [
                               Marker(
                                 point: LatLng(p.lat, p.lng),
-                                width: 44,
-                                height: 44,
-                                child: Builder(builder: (ctx) => CarMarker(heading: p.heading, stale: p.stale, mapRotation: MapCamera.maybeOf(ctx)?.rotation ?? 0)),
+                                width: 52,
+                                height: 52,
+                                child: Builder(builder: (ctx) => CarMarker(size: 44, heading: p.heading, stale: p.stale, mapRotation: MapCamera.maybeOf(ctx)?.rotation ?? 0)),
                               ),
                               if (w.driverCarLabel != null)
                                 Marker(point: LatLng(p.lat, p.lng), width: 240, height: 34, alignment: const Alignment(0, -1.9), child: Center(child: MapCalloutChip(callout: MapCallout(point: LatLng(p.lat, p.lng), label: w.driverCarLabel!, tone: Tone.amber)))),
@@ -201,6 +201,7 @@ class _RasterMapState extends ConsumerState<RasterMap> with TickerProviderStateM
                       recenterActive: w.follow != FollowMode.none && !free,
                       onRecenter: _binding.recenter,
                       showModeSwitch: w.showModeSwitch,
+                      round: w.roundControls,
                     ),
                   ),
                 ),

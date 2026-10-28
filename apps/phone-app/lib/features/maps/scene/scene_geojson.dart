@@ -28,6 +28,7 @@ abstract final class SceneIds {
   static const pinLayer = 'anb-pin';
   static const meCone = 'anb-me-cone';
   static const meDot = 'anb-me-dot';
+  static const meAvatar = 'anb-me-avatar';
   static const driverCar = 'anb-driver-car';
   static const driverLabel = 'anb-driver-label';
 
@@ -39,6 +40,7 @@ abstract final class SceneIds {
   static const imgPinDropoff = 'anb-pin-dropoff';
   static const imgMeDot = 'anb-me-dot';
   static const imgMeCone = 'anb-me-cone';
+  static const imgMeAvatar = 'anb-me-avatar';
   static const imgLabelDriver = 'anb-label-driver';
   static const imgLabelNearby = 'anb-label-nearby';
 }
@@ -111,9 +113,10 @@ String nearbyGeoJson(List<NearbyCarFrame> cars, {bool leadLabel = false}) => fea
 
 double _r2(double v) => (v * 100).roundToDouble() / 100;
 
-/// The person's dot; `cone` when a heading is known.
-String meGeoJson({GeoPoint? at, double? heading}) => featureCollection([
-      if (at != null) pointFeature(at, {'bearing': _bearing(heading ?? 0), 'cone': heading != null}),
+/// The person's dot; `cone` when a heading is known; `avatar` when they are drawn as their
+/// avatar pin instead (the home map).
+String meGeoJson({GeoPoint? at, double? heading, bool avatar = false}) => featureCollection([
+      if (at != null) pointFeature(at, {'bearing': _bearing(heading ?? 0), 'cone': heading != null && !avatar, if (avatar) 'avatar': true}),
     ]);
 
 /// A colour as MapLibre reads it (`rgba(r, g, b, a)`).

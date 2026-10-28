@@ -24,7 +24,7 @@ class RouteLine {
 }
 
 /// How a route kind is drawn by the raster engine (the vector engine's layers are in
-/// scene/scene_style.dart and match it): the main route is an amber line with an ink casing
+/// scene/scene_style.dart and match it): the main route is an amber line with a deeper amber edge (ink on dark and satellite maps)
 /// that separates it from the streets under it; the part already driven is grey.
 @immutable
 class RouteStroke {
@@ -40,7 +40,7 @@ class RouteStroke {
 RouteStroke routeStroke(AnbessaColors c, RouteKind kind, {bool onImagery = false}) {
   final bright = c.isDark || onImagery;
   return switch (kind) {
-    RouteKind.primary => RouteStroke(color: c.accent, width: 5, casing: bright ? const Color(0xFF111214) : c.text, casingWidth: 9),
+    RouteKind.primary => RouteStroke(color: c.accent, width: 5, casing: bright ? const Color(0xFF111214) : const Color(0xFFC98A00), casingWidth: 7.5),
     RouteKind.traversed => RouteStroke(color: bright ? const Color(0xFF7A7F87) : c.faint.withValues(alpha: 0.9), width: 5),
     RouteKind.secondary => RouteStroke(color: bright ? Colors.white : c.text2, width: 4, dash: const [2, 1.5]),
     RouteKind.straight => RouteStroke(color: bright ? Colors.white : c.text2, width: 3, dash: const [0.5, 2]),

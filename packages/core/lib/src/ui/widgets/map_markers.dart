@@ -109,7 +109,8 @@ class MapAvatarPin extends StatelessWidget {
             Positioned(
               left: (diameter - inner) / 2,
               top: (diameter - inner) / 2,
-              child: AvatarImage(src: photo, name: name, size: inner),
+              // a light face under the avatar, so initials read on the ring in both themes
+              child: DecoratedBox(decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0xFFFFF4D6)), child: AvatarImage(src: photo, name: name, size: inner)),
             ),
           ],
         ),
