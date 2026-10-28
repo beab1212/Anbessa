@@ -14,58 +14,49 @@ import '../../core/session/session_controller.dart';
 import '../config/client_config_provider.dart';
 import 'splash_intro.dart';
 
-/// The splash while the app boots: the whole screen amber, our car driving in along a road and
-/// braking in the middle while the name "Anbessa" rises under it, then cruising on the spot
-/// until the app is ready (splash_intro.dart). No spinner, no logo square. Offline at a cold
-/// start, the offline line and an ink "Try again" pill appear under the name. The native launch
-/// screen is the same plain amber, so the hand-off doesn't flash.
+/// The splash while the app boots: "Headlights in the dark" (splash_intro.dart) — on ink, the
+/// icon's headlights flicker on, an amber disc floods the screen and shrinks into the app icon,
+/// and the name rises under it; then the glow breathes until the app is ready. No spinner. The
+/// router stays here until the icon has settled ([splashHoldProvider]) and the session is known.
+/// Offline at a cold start, the offline line and an amber "Try again" pill appear under the name.
+/// The native launch screen is the same plain ink, so the hand-off doesn't flash.
 class SplashScreen extends ConsumerWidget {
   const SplashScreen({super.key});
-  static const _ink = splashInk;
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final c = context.colors;
     final l = context.l10n;
     // the stored session couldn't be checked (no network at start): say so, keep it, retry
     final stuck = ref.watch(sessionProvider.select((s) => s.hasError && !s.hasValue && !s.isLoading));
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.dark.copyWith(statusBarColor: Colors.transparent, systemNavigationBarColor: c.accent, systemNavigationBarIconBrightness: Brightness.dark),
+      value: SystemUiOverlayStyle.light.copyWith(statusBarColor: Colors.transparent, systemNavigationBarColor: splashInk, systemNavigationBarIconBrightness: Brightness.light),
       child: Scaffold(
-        backgroundColor: c.accent,
-        body: SafeArea(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Spacer(flex: 5),
-              Semantics(liveRegion: true, label: stuck ? null : l.accLoading, child: const SplashIntro()),
-              // the offline line goes here, under the name; the art doesn't move when it appears
-              Expanded(
-                flex: 4,
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(32, 0, 32, 24),
-                  child: AnimatedSwitcher(
-                    duration: AnbessaMotion.of(context, AnbessaMotion.base),
-                    layoutBuilder: (current, previous) => Stack(alignment: Alignment.topCenter, children: [...previous, ?current]),
-                    child: stuck
-                        ? Column(
-                            key: const ValueKey('offline'),
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(l.offlineBanner, textAlign: TextAlign.center, style: AnbessaType.body.copyWith(color: _ink)),
-                              const SizedBox(height: 16),
-                              FilledButton.icon(
-                                style: FilledButton.styleFrom(backgroundColor: _ink, foregroundColor: c.accent, minimumSize: const Size(160, AnbessaSize.button), shape: const StadiumBorder(), textStyle: AnbessaType.button),
-                                onPressed: () => ref.invalidate(sessionProvider),
-                                icon: const Icon(Icons.refresh_rounded),
-                                label: Text(l.retry),
-                              ),
-                            ],
-                          )
-                        : const SizedBox(key: ValueKey('loading'), width: double.infinity),
-                  ),
-                ),
-              ),
-            ],
+        backgroundColor: splashInk,
+        body: SplashIntro(
+          loadingLabel: stuck ? null : l.accLoading,
+          onSettled: () => ref.read(splashHoldProvider.notifier).release(),
+          // the offline line goes here, under the name; the art doesn't move when it appears
+          footer: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(32, 0, 32, 24),
+            child: AnimatedSwitcher(
+              duration: AnbessaMotion.of(context, AnbessaMotion.base),
+              layoutBuilder: (current, previous) => Stack(alignment: Alignment.topCenter, children: [...previous, ?current]),
+              child: stuck
+                  ? Column(
+                      key: const ValueKey('offline'),
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(l.offlineBanner, textAlign: TextAlign.center, style: AnbessaType.body.copyWith(color: splashPaper)),
+                        const SizedBox(height: 16),
+                        FilledButton.icon(
+                          style: FilledButton.styleFrom(backgroundColor: splashAmber, foregroundColor: splashInk, minimumSize: const Size(160, AnbessaSize.button), shape: const StadiumBorder(), textStyle: AnbessaType.button),
+                          onPressed: () => ref.invalidate(sessionProvider),
+                          icon: const Icon(Icons.refresh_rounded),
+                          label: Text(l.retry),
+                        ),
+                      ],
+                    )
+                  : const SizedBox(key: ValueKey('loading'), width: double.infinity),
+            ),
           ),
         ),
       ),
@@ -73,8 +64,20 @@ class SplashScreen extends ConsumerWidget {
   }
 }
 
-/// The አ mark: a rounded amber square with an ink glyph; [inverted] puts an amber glyph on ink
-/// (the splash, on an amber page).
+/// Whether the splash still holds the router on `/splash`: true until the intro's icon has
+/// settled (SplashIntro calls [SplashHold.release]; at once with reduced motion), so a fast cold
+/// start still shows the icon, and a slow one never waits longer than the session. Only `/splash`
+/// itself is held; once released it stays released.
+class SplashHold extends Notifier<bool> {
+  @override
+  bool build() => true;
+  void release() {
+    if (state) state = false;
+  }
+}
+
+final splashHoldProvider = NotifierProvider<SplashHold, bool>(SplashHold.new);
+
 /// The app icon used as the in-app logo (welcome, top bars).
 class AnbessaLogo extends StatelessWidget {
   const AnbessaLogo({super.key, this.size = 40});

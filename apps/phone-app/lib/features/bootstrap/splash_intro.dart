@@ -1,12 +1,15 @@
-// The opening animation on the amber splash: our own side-view car drives in from the left along
-// a road line, motion streaks behind it and wheels turning with the distance it covers; it brakes
-// in the middle (the nose dips and settles in a small bounce) while the name "Anbessa" rises
-// letter by letter from under the road. While the app is still loading the car cruises on the
-// spot: the road's dashes slide by under it, the wheels turn, the body bobs a little.
+// The opening animation, "Headlights in the dark": on an ink screen the app icon's two headlights
+// flicker on, a warm glow blooms around them, an amber disc grows from the icon's centre over the
+// whole screen (revealing the ink car against it), then shrinks and morphs into the icon's
+// rounded square with a small overshoot; the windshield, nose and grille fade in, and the name
+// "Anbessa" rises under the icon. While the app is still loading after that, the headlights'
+// glow pulses gently. The art is the app icon ("Lion Grille"), painted part by part from
+// `LionGrilleArt` (the same shapes as the SVG master in the core package).
 //
-// Cheap: one AnimationController whose value is the time in seconds, one CustomPainter that
-// draws everything (car, road, streaks, name) in a RepaintBoundary, the name laid out once.
-// With reduced motion the car stands still in the middle and the name is simply there.
+// The prototype's timeline runs 0–100%; here it plays once over [SplashTimeline.intro] seconds.
+// Cheap: one AnimationController (its value is seconds, linear), one CustomPainter for the disc
+// and the glyph in a RepaintBoundary, the name a Text under Fade/SlideTransitions driven by the
+// same controller. With reduced motion it is the final frame (icon and name), nothing moving.
 
 import 'dart:math' as math;
 
@@ -16,40 +19,165 @@ import 'package:ride_app_core/ride_app_core.dart';
 /// The brand name, never translated.
 const anbessaWordmark = 'Anbessa';
 
-/// The splash's ink (on amber).
-const splashInk = Color(0xFF17191D);
+/// The splash's background (the icon's ink), and the name's colour on it.
+const splashInk = LionGrilleArt.ink;
+const splashPaper = LionGrilleArt.paper;
+const splashAmber = LionGrilleArt.amber;
 
-/// The timeline, in seconds.
+/// The timeline and the layout. Times as fractions of the intro (the prototype's percentages).
 abstract final class SplashTimeline {
-  /// the car arrives in the middle
-  static const driveEnd = 1.2;
-  /// the share of the drive at full speed; the rest is braking
-  static const cruise = 0.45;
-  /// the first letter starts to rise; each next one [letterGap] later, each over [letterRise]
-  static const lettersStart = 0.95;
-  static const letterGap = 0.06;
-  static const letterRise = 0.5;
-  /// the cruise on the spot starts (and takes [idleRamp] to reach its speed)
-  static const idleStart = 2.3;
-  static const idleRamp = 0.9;
-  /// the intro is over: only the idle loop moves after this
-  static double get introEnd => lettersStart + letterGap * (anbessaWordmark.length - 1) + letterRise;
+  /// seconds the whole intro (0–100%) takes
+  static const intro = 3.2;
+  /// the icon has settled into its square: the router may move on from here
+  static const settled = 0.78;
+  static const settleTime = settled * intro;
+  /// the idle glow's period, seconds
+  static const idlePeriod = 1.6;
+
+  /// the icon's side and corner radius, logical px
+  static const iconSize = 200.0;
+  static const iconCorner = 46.0;
+  /// the icon's centre, as a fraction of the screen's height
+  static const iconCentre = 0.42;
+  /// the name's gap under the icon, its size and line height
+  static const wordGap = 32.0;
+  static const wordSize = 40.0;
+  static const wordBox = 48.0;
+  /// how far the name rises as it fades in, logical px
+  static const wordRise = 18.0;
+
+  /// seconds at a fraction of the intro
+  static double seconds(double fraction) => fraction * intro;
 }
 
-/// The animated splash art (car, road, name). [onlyStill] draws the end state without motion
-/// (reduced motion), and never starts the controller.
+/// What the splash shows at a moment (pure, for the painter, the name and the tests).
+@immutable
+class SplashFrame {
+  const SplashFrame({
+    required this.lights,
+    required this.glow,
+    required this.glowScale,
+    required this.shape,
+    required this.corner,
+    required this.details,
+    required this.word,
+    required this.wordRise,
+  });
+
+  /// the headlights' opacity, 0–1
+  final double lights;
+  /// the warm glow around the headlights: opacity and scale (of its 150 radius)
+  final double glow;
+  final double glowScale;
+  /// the amber shape's side and corner radius, logical px: a disc ([corner] = half [shape])
+  /// while it grows, then the icon's rounded square. [double.infinity] covers the screen.
+  final double shape;
+  final double corner;
+  /// the windshield, nose and grille's opacity, 0–1
+  final double details;
+  /// the name's opacity, 0–1, and how far below its place it is, logical px
+  final double word;
+  final double wordRise;
+
+  static const _ease = Cubic(.65, 0, .2, 1);
+  static const _wordCurve = Cubic(.2, 0, 0, 1);
+
+  /// The final frame (reduced motion, and the end of the intro).
+  static final end = at(SplashTimeline.intro);
+
+  /// The frame at [t] seconds. [cover] is the amber disc's radius that covers the whole screen
+  /// (from the icon's centre to the farthest corner); infinite when unknown.
+  static SplashFrame at(double t, {double cover = double.infinity}) {
+    final p = t / SplashTimeline.intro;
+    const size = SplashTimeline.iconSize, corner = SplashTimeline.iconCorner;
+    // the amber: a disc growing from nothing over the whole screen, held, then shrinking into
+    // the icon's square with a small overshoot
+    double shape, radius;
+    if (p < 0.32) {
+      shape = radius = 0;
+    } else if (p < 0.50) {
+      radius = cover * _ease.transform((p - 0.32) / 0.18);
+      shape = radius * 2;
+    } else if (p < 0.58) {
+      radius = cover;
+      shape = cover * 2;
+    } else if (p < 0.70) {
+      final u = _ease.transform((p - 0.58) / 0.12);
+      shape = _lerp(cover * 2, size, u);
+      radius = _lerp(cover, corner, u);
+    } else if (p < 0.74) {
+      final u = Curves.easeOut.transform((p - 0.70) / 0.04);
+      shape = _lerp(size, 212, u);
+      radius = _lerp(corner, 48, u);
+    } else if (p < 0.78) {
+      final u = Curves.easeInOut.transform((p - 0.74) / 0.04);
+      shape = _lerp(212, size, u);
+      radius = _lerp(48, corner, u);
+    } else {
+      shape = size;
+      radius = corner;
+    }
+    final w = _wordCurve.transform(((p - 0.76) / 0.10).clamp(0.0, 1.0));
+    // after the intro, while the app still loads: the glow breathes (0 → 0.25 → 0)
+    final idle = t <= SplashTimeline.intro ? 0.0 : 0.25 * math.pow(math.sin(math.pi * (t - SplashTimeline.intro) / SplashTimeline.idlePeriod), 2).toDouble();
+    return SplashFrame(
+      lights: _keys(p, const [(0.10, 0), (0.12, 1), (0.14, 0.15), (0.17, 1), (0.19, 0.4), (0.22, 1)]),
+      glow: p <= 0.52 ? _keys(p, const [(0.20, 0), (0.30, 0.55), (0.44, 0.35), (0.52, 0)]) : idle,
+      glowScale: p <= 0.52 ? _keys(p, const [(0.20, 0.6), (0.30, 1.25), (0.44, 1.1), (0.52, 1.0)]) : 1.0,
+      shape: shape,
+      corner: radius,
+      details: Curves.easeOut.transform(((p - 0.48) / 0.08).clamp(0.0, 1.0)),
+      word: w,
+      wordRise: SplashTimeline.wordRise * (1 - w),
+    );
+  }
+
+  static double _lerp(double a, double b, double u) => a.isInfinite ? (u >= 1 ? b : a) : a + (b - a) * u;
+
+  /// Linear between keyframes (fraction, value); held before the first and after the last.
+  static double _keys(double p, List<(double, double)> keys) {
+    if (p <= keys.first.$1) return keys.first.$2;
+    for (var i = 1; i < keys.length; i++) {
+      final (x1, y1) = keys[i];
+      if (p <= x1) {
+        final (x0, y0) = keys[i - 1];
+        return y0 + (y1 - y0) * (p - x0) / (x1 - x0);
+      }
+    }
+    return keys.last.$2;
+  }
+}
+
+/// The animated splash: the art fills the screen (ink), the name sits [SplashTimeline.wordGap]
+/// under the icon, and [footer] (the offline line) under the name, so the art never moves when
+/// it appears. [onSettled] is called once, when the icon has settled into its square (at once
+/// with reduced motion). [loadingLabel] is announced in a live region.
 class SplashIntro extends StatefulWidget {
-  const SplashIntro({super.key, this.height = 236, this.semanticsLabel = anbessaWordmark});
-  final double height;
-  final String semanticsLabel;
+  const SplashIntro({super.key, this.footer, this.onSettled, this.loadingLabel});
+  final Widget? footer;
+  final VoidCallback? onSettled;
+  final String? loadingLabel;
   @override
   State<SplashIntro> createState() => _SplashIntroState();
 }
 
 class _SplashIntroState extends State<SplashIntro> with SingleTickerProviderStateMixin {
   // value = seconds since the splash appeared (linear), for an hour at most
-  late final AnimationController _clock = AnimationController(vsync: this, upperBound: 3600, duration: const Duration(seconds: 3600));
+  late final AnimationController _clock = AnimationController(vsync: this, upperBound: 3600, duration: const Duration(seconds: 3600))..addListener(_tick);
+  late final Animation<double> _wordOpacity = _clock.drive(_Track((t) => SplashFrame.at(t).word));
+  late final Animation<Offset> _wordOffset = _clock.drive(_OffsetTrack((t) => Offset(0, SplashFrame.at(t).wordRise / SplashTimeline.wordBox)));
   bool? _still;
+  bool _settled = false;
+
+  void _tick() {
+    // only while playing (not when the reduced-motion branch sets the value, during a build)
+    if (!_settled && _clock.isAnimating && _clock.value >= SplashTimeline.settleTime) _settle();
+  }
+
+  void _settle() {
+    _settled = true;
+    widget.onSettled?.call();
+  }
 
   @override
   void didChangeDependencies() {
@@ -58,7 +186,10 @@ class _SplashIntroState extends State<SplashIntro> with SingleTickerProviderStat
     if (still == _still) return;
     _still = still;
     if (still) {
+      // the final frame, nothing moving; the router may go on right away
       _clock.stop();
+      _clock.value = SplashTimeline.intro;
+      if (!_settled) WidgetsBinding.instance.addPostFrameCallback((_) => mounted && !_settled ? _settle() : null);
     } else if (!_clock.isAnimating) {
       _clock.forward();
     }
@@ -72,311 +203,126 @@ class _SplashIntroState extends State<SplashIntro> with SingleTickerProviderStat
 
   @override
   Widget build(BuildContext context) {
-    final still = _still ?? false;
-    return Semantics(
-      container: true,
-      label: widget.semanticsLabel,
-      image: true,
-      child: RepaintBoundary(
-        child: SizedBox(
-          height: widget.height,
-          width: double.infinity,
-          child: CustomPaint(painter: SplashPainter(clock: _clock, still: still, textDirection: Directionality.of(context))),
-        ),
-      ),
-    );
+    return LayoutBuilder(builder: (context, box) {
+      final top = box.maxHeight * SplashTimeline.iconCentre + SplashTimeline.iconSize / 2 + SplashTimeline.wordGap;
+      return Stack(
+        children: [
+          Positioned.fill(
+            child: Semantics(
+              liveRegion: true,
+              label: widget.loadingLabel,
+              child: Semantics(
+                container: true,
+                image: true,
+                label: anbessaWordmark,
+                child: ExcludeSemantics(
+                  child: Stack(
+                    children: [
+                      Positioned.fill(
+                        child: RepaintBoundary(child: CustomPaint(painter: SplashPainter(clock: _clock, still: _still ?? false))),
+                      ),
+                      Positioned(
+                        top: top,
+                        left: 16,
+                        right: 16,
+                        height: SplashTimeline.wordBox,
+                        child: FadeTransition(
+                          opacity: _wordOpacity,
+                          child: SlideTransition(
+                            position: _wordOffset,
+                            child: const Text(
+                              anbessaWordmark,
+                              key: ValueKey('splash-wordmark'),
+                              textAlign: TextAlign.center,
+                              maxLines: 1,
+                              textScaler: TextScaler.noScaling,
+                              style: TextStyle(
+                                fontFamily: anbessaFontFamily,
+                                fontWeight: FontWeight.w800,
+                                fontSize: SplashTimeline.wordSize,
+                                height: SplashTimeline.wordBox / SplashTimeline.wordSize,
+                                letterSpacing: -0.5,
+                                color: splashPaper,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          if (widget.footer != null) Positioned(top: top + SplashTimeline.wordBox + 24, left: 0, right: 0, bottom: 0, child: widget.footer!),
+        ],
+      );
+    });
   }
 }
 
-/// What the splash shows at a moment (pure, for the painter and the tests).
-@immutable
-class SplashFrame {
-  const SplashFrame({required this.carX, required this.speed, required this.wheel, required this.pitch, required this.bob, required this.roadShift, required this.streaks, required this.letters});
-
-  /// the car's centre, as a fraction of the way from off-screen left (-1) to the middle (0)
-  final double carX;
-  /// how fast the car (or the road under it) moves, 0–1
-  final double speed;
-  /// wheel turn, radians
-  final double wheel;
-  /// body pitch, degrees (positive: the nose dips)
-  final double pitch;
-  /// body lift, logical pixels (up is positive)
-  final double bob;
-  /// how far the road's dashes have slid left, logical pixels
-  final double roadShift;
-  /// motion streaks' strength, 0–1
-  final double streaks;
-  /// each letter's rise, 0 (hidden under the road) – 1 (in place); may overshoot a little
-  final List<double> letters;
-
-  /// The end state, nothing moving (reduced motion).
-  static final still = SplashFrame(carX: 0, speed: 0, wheel: 0, pitch: 0, bob: 0, roadShift: 0, streaks: 0, letters: List.filled(anbessaWordmark.length, 1.0));
-
-  /// The frame at [t] seconds. [travel] is how far (logical px) the car drives in.
-  static SplashFrame at(double t, {double travel = 300, double wheelRadius = 14}) {
-    const end = SplashTimeline.driveEnd;
-    // driving in: at full speed, then braking evenly into the stop
-    final u = (t / end).clamp(0.0, 1.0);
-    const a = SplashTimeline.cruise, v0 = 2 / (1 + a);
-    final eased = u <= a ? v0 * u : v0 * a + v0 * (u - a) - v0 * (u - a) * (u - a) / (2 * (1 - a));
-    final carX = eased - 1;
-    final driveSpeed = t >= end ? 0.0 : (u <= a ? 1.0 : 1 - (u - a) / (1 - a));
-    // the brake: the nose dips and settles (a damped wobble), starting just before the stop
-    final tb = t - (end - 0.12);
-    final pitch = tb <= 0 ? 0.0 : 3.2 * math.exp(-5.5 * tb) * math.sin(11 * tb);
-    // the cruise on the spot once the intro has settled
-    final ti = t - SplashTimeline.idleStart;
-    final ramp = ti <= 0 ? 0.0 : Curves.easeInOut.transform((ti / SplashTimeline.idleRamp).clamp(0.0, 1.0));
-    const idleSpeedPx = 70.0; // px/s of road sliding by
-    // distance the road has slid under the car: ∫ ramp dt, closed form for the smooth ramp
-    final roadShift = ti <= 0 ? 0.0 : idleSpeedPx * (ti <= SplashTimeline.idleRamp ? _rampIntegral(ti) : _rampIntegral(SplashTimeline.idleRamp) + (ti - SplashTimeline.idleRamp));
-    final driven = travel * eased;
-    final wheel = (driven + roadShift) / wheelRadius;
-    final bob = ramp * 0.9 * math.sin(t * 2 * math.pi * 1.6);
-    final letters = [
-      for (var i = 0; i < anbessaWordmark.length; i++) _rise((t - SplashTimeline.lettersStart - SplashTimeline.letterGap * i) / SplashTimeline.letterRise),
-    ];
-    final idleSpeed = ramp * 0.28;
-    return SplashFrame(
-      carX: carX,
-      speed: math.max(driveSpeed, idleSpeed),
-      wheel: wheel,
-      pitch: pitch,
-      bob: bob,
-      roadShift: roadShift,
-      streaks: math.max(driveSpeed, idleSpeed),
-      letters: letters,
-    );
-  }
-
-  // ∫0..x easeInOut(s / ramp) ds, numerically (cheap: 24 steps)
-  static double _rampIntegral(double x) {
-    const n = 24;
-    final h = x / n;
-    var sum = 0.0;
-    for (var i = 0; i < n; i++) {
-      sum += Curves.easeInOut.transform((((i + 0.5) * h) / SplashTimeline.idleRamp).clamp(0.0, 1.0)) * h;
-    }
-    return sum;
-  }
-
-  static double _rise(double u) {
-    if (u <= 0) return 0;
-    if (u >= 1) return 1;
-    return AnbessaMotion.emphasizedDecelerate.transform(u);
-  }
+class _Track extends Animatable<double> {
+  _Track(this.f);
+  final double Function(double t) f;
+  @override
+  double transform(double t) => f(t);
 }
 
-/// Draws a [SplashFrame]: the road, the streaks, the car, the name.
+class _OffsetTrack extends Animatable<Offset> {
+  _OffsetTrack(this.f);
+  final Offset Function(double t) f;
+  @override
+  Offset transform(double t) => f(t);
+}
+
+/// Paints the amber disc / square and the icon's glyph for the clock's time (seconds).
 class SplashPainter extends CustomPainter {
-  SplashPainter({this.clock, this.still = false, this.time, this.textDirection = TextDirection.ltr}) : super(repaint: clock);
-
-  /// seconds (an AnimationController's value)
-  final Animation<double>? clock;
+  SplashPainter({required this.clock, required this.still}) : super(repaint: clock);
+  final Animation<double> clock;
+  /// reduced motion: the final frame
   final bool still;
-  /// a fixed time instead of [clock] (tests)
-  final double? time;
-  final TextDirection textDirection;
 
-  static const _carWidth = 176.0;
-  static const _fontSize = 46.0;
-  static const _style = TextStyle(fontFamily: anbessaFontFamily, fontSize: _fontSize, fontWeight: FontWeight.w800, color: splashInk, height: 1.0, letterSpacing: -0.5);
-  // the whole name laid out once (for its width and each letter's place, kerning included), and
-  // each letter on its own (to move and fade them one by one)
-  TextPainter? _word;
-  List<(TextPainter, double)>? _letters;
-
-  void _layoutWord() {
-    if (_word != null) return;
-    final word = TextPainter(text: const TextSpan(text: anbessaWordmark, style: _style), textDirection: TextDirection.ltr)..layout();
-    _word = word;
-    _letters = [
-      for (var i = 0; i < anbessaWordmark.length; i++)
-        (
-          TextPainter(text: TextSpan(text: anbessaWordmark[i], style: _style), textDirection: TextDirection.ltr)..layout(),
-          word.getOffsetForCaret(TextPosition(offset: i), Rect.zero).dx,
-        ),
-    ];
-  }
+  static const _glowRadius = 150.0;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final t = time ?? clock?.value ?? 0;
-    final f = still ? SplashFrame.still : SplashFrame.at(t, travel: size.width / 2 + _carWidth * 0.7, wheelRadius: _carWidth * 0.085);
-    final cx = size.width / 2;
-    final roadY = size.height * 0.48;
-    _paintRoad(canvas, size, roadY, f);
-    // the car: centred, its wheels on the road
-    final scale = _carWidth / 100;
-    final carCx = cx + f.carX * (size.width / 2 + _carWidth * 0.7);
-    final carLeft = carCx - _carWidth / 2;
-    final carTop = roadY - 40 * scale - 1.5;
-    _paintStreaks(canvas, carLeft, carTop, scale, f);
+    final centre = Offset(size.width / 2, size.height * SplashTimeline.iconCentre);
+    // from the icon's centre to the farthest corner, and a little more
+    final cover = math.sqrt(math.pow(math.max(centre.dx, size.width - centre.dx), 2) + math.pow(math.max(centre.dy, size.height - centre.dy), 2)) + 2;
+    final f = still ? SplashFrame.end : SplashFrame.at(clock.value, cover: cover);
+
+    if (f.shape > 0) {
+      final rect = Rect.fromCenter(center: centre, width: f.shape, height: f.shape);
+      canvas.drawRRect(RRect.fromRectAndRadius(rect, Radius.circular(f.corner)), Paint()..color = splashAmber);
+    }
+
+    const scale = SplashTimeline.iconSize / LionGrilleArt.size;
     canvas.save();
-    canvas.translate(carLeft, carTop);
+    canvas.translate(centre.dx - SplashTimeline.iconSize / 2, centre.dy - SplashTimeline.iconSize / 2);
     canvas.scale(scale);
-    paintSideCar(canvas, wheel: f.wheel, pitch: f.pitch, lift: f.bob / scale);
+    LionGrilleArt.paintGlyph(
+      canvas,
+      lights: f.lights,
+      windshieldOpacity: f.details,
+      noseOpacity: f.details,
+      grilleOpacity: f.details,
+      underLights: f.glow <= 0
+          ? null
+          : (c) {
+              final r = _glowRadius * f.glowScale;
+              for (final h in LionGrilleArt.headlights) {
+                final glow = Paint()
+                  ..shader = RadialGradient(
+                    colors: [LionGrilleArt.cream.withValues(alpha: f.glow), LionGrilleArt.cream.withValues(alpha: f.glow * 0.45), LionGrilleArt.cream.withValues(alpha: 0)],
+                    stops: const [0.3, 0.6, 1],
+                  ).createShader(Rect.fromCircle(center: h, radius: r));
+                c.drawCircle(h, r, glow);
+              }
+            },
+    );
     canvas.restore();
-    _paintWordmark(canvas, size, roadY, f);
-  }
-
-  void _paintRoad(Canvas canvas, Size size, double y, SplashFrame f) {
-    final fade = Paint()
-      ..shader = LinearGradient(
-        colors: [splashInk.withValues(alpha: 0), splashInk.withValues(alpha: 0.9), splashInk.withValues(alpha: 0.9), splashInk.withValues(alpha: 0)],
-        stops: const [0, 0.22, 0.78, 1],
-      ).createShader(Rect.fromLTWH(0, y - 2, size.width, 4))
-      ..strokeWidth = 3
-      ..strokeCap = StrokeCap.round;
-    // the road: a line with gaps, sliding left while the car cruises
-    const dash = 34.0, gap = 12.0, period = dash + gap;
-    final shift = f.roadShift % period;
-    for (var x = -period - shift; x < size.width + period; x += period) {
-      canvas.drawLine(Offset(x, y), Offset(x + dash, y), fade);
-    }
-  }
-
-  void _paintStreaks(Canvas canvas, double carLeft, double carTop, double scale, SplashFrame f) {
-    if (f.streaks <= 0.02) return;
-    final p = Paint()
-      ..color = splashInk.withValues(alpha: 0.55 * math.min(1, f.streaks * 1.4))
-      ..strokeWidth = 3
-      ..strokeCap = StrokeCap.round;
-    // three lines trailing the car, longer the faster it goes
-    const rows = [(y: 13.0, len: 1.0, back: 4.0), (y: 21.0, len: 0.7, back: 12.0), (y: 29.0, len: 0.85, back: 2.0)];
-    for (final r in rows) {
-      final len = (18 + 70 * f.streaks) * r.len;
-      final x1 = carLeft - r.back * scale * 0.5;
-      final y = carTop + r.y * scale;
-      canvas.drawLine(Offset(x1 - len, y), Offset(x1 - 6, y), p);
-    }
-  }
-
-  void _paintWordmark(Canvas canvas, Size size, double roadY, SplashFrame f) {
-    _layoutWord();
-    final word = _word!;
-    final left = (size.width - word.width) / 2;
-    final top = roadY + 30;
-    for (final (i, (tp, x)) in _letters!.indexed) {
-      final rise = f.letters[i];
-      if (rise <= 0) continue;
-      final at = Offset(left + x, top + (1 - rise) * 22);
-      if (rise >= 1) {
-        tp.paint(canvas, at);
-      } else {
-        canvas.saveLayer(Rect.fromLTWH(at.dx - 4, at.dy - 4, tp.width + 8, tp.height + 8), Paint()..color = Color.fromRGBO(0, 0, 0, rise.clamp(0.0, 1.0)));
-        tp.paint(canvas, at);
-        canvas.restore();
-      }
-    }
   }
 
   @override
-  bool shouldRepaint(SplashPainter old) => old.still != still || old.time != time || old.clock != clock;
-}
-
-/// Our side-view car, facing right, in a 100 × 40 box (y down; the wheels' bottoms on y = 40):
-/// an ink body with pale amber windows, a headlight and a tail light, wheels with amber rims
-/// whose spokes show the turn ([wheel], radians). [pitch] tilts the body (degrees, nose down)
-/// about the rear wheel; [lift] raises it on its springs.
-void paintSideCar(Canvas canvas, {double wheel = 0, double pitch = 0, double lift = 0}) {
-  const ink = splashInk;
-  const glass = Color(0xFFFFE3A0);
-  const rearW = Offset(25, 31.5), frontW = Offset(77, 31.5);
-  const tireR = 8.5;
-  // the shadow on the road
-  canvas.drawOval(
-    Rect.fromCenter(center: const Offset(51, 40.2), width: 90, height: 3.6),
-    Paint()
-      ..color = const Color(0x40000000)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 1.6),
-  );
-  // the body (on its springs): tilted about the rear wheel
-  canvas.save();
-  canvas.translate(0, -lift);
-  canvas.translate(rearW.dx, rearW.dy);
-  canvas.rotate(pitch * math.pi / 180);
-  canvas.translate(-rearW.dx, -rearW.dy);
-  final body = Path()
-    ..moveTo(5, 31)
-    ..lineTo(13.2, 31)
-    ..arcToPoint(const Offset(36.8, 31), radius: const Radius.circular(11.8), clockwise: true)
-    ..lineTo(65.2, 31)
-    ..arcToPoint(const Offset(88.8, 31), radius: const Radius.circular(11.8), clockwise: true)
-    ..lineTo(95, 31)
-    ..quadraticBezierTo(98.6, 30.6, 98.4, 26.5)
-    ..lineTo(98, 22.5)
-    ..quadraticBezierTo(97.4, 18.6, 92.5, 17.6)
-    ..lineTo(76, 15.2)
-    ..quadraticBezierTo(73.2, 14.8, 70.6, 12.4)
-    ..lineTo(63.8, 6.6)
-    ..quadraticBezierTo(60.6, 4.2, 55.5, 4.1)
-    ..lineTo(38.5, 4.1)
-    ..quadraticBezierTo(33.6, 4.2, 30.6, 6.8)
-    ..lineTo(22.5, 14.2)
-    ..lineTo(9, 16.2)
-    ..quadraticBezierTo(3.4, 17.2, 2.6, 21.5)
-    ..lineTo(2.2, 26.5)
-    ..quadraticBezierTo(2.2, 30.8, 5, 31)
-    ..close();
-  canvas.drawPath(body, Paint()..color = ink);
-  // windows: the rear one and the front one, split by the pillar
-  final rearGlass = Path()
-    ..moveTo(26.8, 14.3)
-    ..lineTo(33.2, 8.3)
-    ..quadraticBezierTo(35.4, 6.6, 38.6, 6.6)
-    ..lineTo(47.4, 6.6)
-    ..lineTo(47.4, 14.3)
-    ..close();
-  final frontGlass = Path()
-    ..moveTo(50.4, 6.6)
-    ..lineTo(55.2, 6.6)
-    ..quadraticBezierTo(59.4, 6.7, 61.8, 8.6)
-    ..lineTo(68.6, 14.3)
-    ..lineTo(50.4, 14.3)
-    ..close();
-  final g = Paint()..color = glass;
-  canvas.drawPath(rearGlass, g);
-  canvas.drawPath(frontGlass, g);
-  // a glint across the windscreen
-  canvas.drawLine(const Offset(58.2, 8.4), const Offset(62.6, 12.6), Paint()
-    ..color = const Color(0xCCFFFFFF)
-    ..strokeWidth = 1.1
-    ..strokeCap = StrokeCap.round);
-  // the door line and handles, in a lighter ink
-  final line = Paint()
-    ..color = const Color(0xFF3A3E46)
-    ..strokeWidth = 0.7
-    ..style = PaintingStyle.stroke;
-  canvas.drawLine(const Offset(48.9, 15.6), const Offset(48.9, 28.6), line);
-  final handle = Paint()..color = const Color(0xFF4A4F58);
-  canvas.drawRRect(RRect.fromRectAndRadius(const Rect.fromLTWH(40.5, 18.6, 4.6, 1.3), const Radius.circular(0.65)), handle);
-  canvas.drawRRect(RRect.fromRectAndRadius(const Rect.fromLTWH(60.2, 18.8, 4.6, 1.3), const Radius.circular(0.65)), handle);
-  // headlight (with a soft glow) and tail light
-  canvas.drawCircle(const Offset(96.6, 21.2), 3.4, Paint()
-    ..color = const Color(0x55FFF4C8)
-    ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 1.8));
-  canvas.drawRRect(RRect.fromRectAndRadius(const Rect.fromLTWH(93.6, 19.6, 4.2, 2.8), const Radius.circular(1.2)), Paint()..color = const Color(0xFFFFF4C8));
-  canvas.drawRRect(RRect.fromRectAndRadius(const Rect.fromLTWH(2.4, 19.4, 2.6, 3.2), const Radius.circular(1)), Paint()..color = const Color(0xFFE5483A));
-  canvas.restore();
-  // the wheels (they don't tilt with the body)
-  for (final w in [rearW, frontW]) {
-    _paintWheel(canvas, w, tireR, wheel);
-  }
-}
-
-void _paintWheel(Canvas canvas, Offset c, double r, double turn) {
-  canvas.drawCircle(c, r, Paint()..color = splashInk);
-  // the rim: amber, with five spokes
-  canvas.drawCircle(c, r * 0.6, Paint()..color = const Color(0xFFFFC94A));
-  final spoke = Paint()
-    ..color = const Color(0xFF8A5E00)
-    ..strokeWidth = 1.2
-    ..strokeCap = StrokeCap.round;
-  for (var i = 0; i < 5; i++) {
-    final a = turn + i * 2 * math.pi / 5;
-    canvas.drawLine(c + Offset(math.cos(a), math.sin(a)) * r * 0.16, c + Offset(math.cos(a), math.sin(a)) * r * 0.54, spoke);
-  }
-  canvas.drawCircle(c, r * 0.17, Paint()..color = splashInk);
+  bool shouldRepaint(SplashPainter old) => old.still != still || old.clock != clock;
 }

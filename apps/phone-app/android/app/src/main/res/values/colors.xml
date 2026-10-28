@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Anbessa amber: the launch screen, handing off to the Flutter splash animation on the same colour -->
-    <color name="splash_amber">#FFFFB300</color>
+    <!-- Anbessa ink: the launch screen, handing off to the Flutter splash animation on the same colour -->
+    <color name="splash_ink">#FF17191D</color>
     <!-- adaptive launcher icon background (mipmap-anydpi-v26/ic_launcher.xml) -->
     <color name="ic_launcher_background">#FFFFB300</color>
 </resources>

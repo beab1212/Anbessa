@@ -4,6 +4,7 @@ import 'package:phone_app/core/network/providers.dart';
 import 'package:phone_app/core/router/app_router.dart';
 import 'package:phone_app/core/router/routes.dart';
 import 'package:phone_app/core/session/session_controller.dart';
+import 'package:phone_app/features/bootstrap/gates.dart';
 import 'package:phone_app/features/config/client_config_provider.dart';
 import 'package:phone_app/features/driver/shift/shift_controller.dart';
 import 'package:phone_app/features/intro/intro_screen.dart';
@@ -26,6 +27,7 @@ Future<String?> redirect(
   bool updateRequired = false,
   bool introSeen = true,
   bool offlineAtStart = false,
+  bool splashHeld = false,
 }) async {
   final c = ProviderContainer(retry: (_, _) => null, overrides: [
     introSeenProvider.overrideWith(() => FixedIntroSeen(introSeen)),
@@ -36,6 +38,7 @@ Future<String?> redirect(
     updateRequiredProvider.overrideWithValue(updateRequired),
   ]);
   addTearDown(c.dispose);
+  if (!splashHeld) c.read(splashHoldProvider.notifier).release();
   await c.read(sessionProvider.future).catchError((_) => null);
   await c.read(activeTripProvider.future);
   if (driverHome != null) await c.read(driverHomeProvider.future);
@@ -72,6 +75,15 @@ void main() {
     expect(await redirect(Routes.intro, introSeen: false), isNull);
     expect(await redirect(Routes.intro), Routes.welcome);
     expect(await redirect(Routes.intro, signedIn: session()), Routes.splash);
+  });
+
+  test('the splash holds until its icon has settled, then moves on; other paths are never held', () async {
+    expect(await redirect(Routes.splash, signedIn: session(), mode: AppMode.rider, splashHeld: true), isNull);
+    expect(await redirect(Routes.splash, splashHeld: true), isNull);
+    expect(await redirect(Routes.splash, signedIn: session(), mode: AppMode.rider), Routes.riderHome);
+    expect(await redirect(Routes.splash), Routes.welcome);
+    expect(await redirect(Routes.welcome, splashHeld: true), isNull);
+    expect(await redirect(Routes.riderHome, signedIn: session(), mode: AppMode.rider, splashHeld: true), isNull);
   });
 
   test('offline at start with a stored session: the splash (with retry), never welcome', () async {

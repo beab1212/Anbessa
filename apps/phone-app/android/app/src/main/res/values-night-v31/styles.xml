@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Android 12+: the system splash is plain Anbessa amber with no icon; the Flutter splash
+    <!-- Android 12+: the system splash is plain Anbessa ink with no icon; the Flutter splash
          animation takes over on the same colour. -->
     <style name="LaunchTheme" parent="@android:style/Theme.Black.NoTitleBar">
         <item name="android:windowBackground">@drawable/launch_background</item>
-        <item name="android:windowSplashScreenBackground">@color/splash_amber</item>
+        <item name="android:windowSplashScreenBackground">@color/splash_ink</item>
         <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_icon_none</item>
-        <item name="android:windowSplashScreenIconBackgroundColor">@color/splash_amber</item>
-        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@color/splash_ink</item>
+        <item name="android:windowLightStatusBar">false</item>
     </style>
     <style name="NormalTheme" parent="@android:style/Theme.Black.NoTitleBar">
         <item name="android:windowBackground">?android:colorBackground</item>

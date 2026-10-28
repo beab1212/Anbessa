@@ -46,6 +46,7 @@ class RouterNotifier extends ChangeNotifier {
     ref.listen(activeTripProvider, (_, _) => notifyListeners());
     ref.listen(updateRequiredProvider, (_, _) => notifyListeners());
     ref.listen(introSeenProvider, (_, _) => notifyListeners());
+    ref.listen(splashHoldProvider, (_, _) => notifyListeners());
     ref.listen<AppMode?>(effectiveModeProvider, (_, mode) => _followDriverHome(mode), fireImmediately: true);
   }
   final Ref ref;
@@ -186,6 +187,8 @@ String? _redirect(Ref ref, GoRouterState state) {
   if (sessionAsync.isLoading && !sessionAsync.hasValue) return path == Routes.splash ? null : Routes.splash;
   // the stored session couldn't be checked (offline at start): not signed out; the splash offers a retry
   if (sessionAsync.hasError && !sessionAsync.hasValue) return path == Routes.splash ? null : Routes.splash;
+  // the intro plays until its icon has settled (the splash releases the hold), then on
+  if (path == Routes.splash && ref.read(splashHoldProvider)) return null;
   // 2. forced update
   if (ref.read(updateRequiredProvider)) return path == Routes.updateRequired ? null : Routes.updateRequired;
   if (path == Routes.updateRequired) return Routes.splash;

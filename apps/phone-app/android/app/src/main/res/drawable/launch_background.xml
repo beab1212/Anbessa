@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The launch screen: plain Anbessa amber, no icon. The Flutter splash (a car driving in and the
-     name) starts on the same amber, so the hand-off is seamless. -->
+<!-- The launch screen: plain Anbessa ink, no icon. The Flutter splash ("Headlights in the dark":
+     the icon's headlights flicker on in the dark) starts on the same ink, so the hand-off is seamless. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:drawable="@color/splash_amber" />
+    <item android:drawable="@color/splash_ink" />
 </layer-list>
