@@ -55,15 +55,17 @@ export function createLocations(deps: { redis: Redis; mapping: Mapping; logger: 
     /**
      * Rider home: the cars around you. Anonymous (no ids, no plates), positions on a ~30 m grid,
      * at most 15 within 2 km, with the ETA of the nearest one. Every vehicle type of the city
-     * unless one is asked for. Outside the served cities: nothing.
+     * unless one is asked for. Outside the served cities: nothing. The caller's own car is never
+     * one of them ([viewerId]: a driver who switched the app to rider mode while still online
+     * would otherwise see their own car drawn where they stand, as if it were their position).
      */
-    async nearbyPublic(q: LatLng & { vehicleType?: string }) {
+    async nearbyPublic(q: LatLng & { vehicleType?: string }, viewerId?: string) {
       const cityId = cityAt(q);
       if (!cityId) return { cars: [], etaSeconds: null, driversNearby: 0, approximate: false };
       const types = q.vehicleType ? [q.vehicleType] : await redis.smembers(keys.vehicleTypes(cityId));
       const seen = new Map<string, NearbyDriver>();
       for (const vehicleType of types) {
-        for (const d of await nearbyAvailable(redis, { ...q, cityId, vehicleType, radiusMeters: 2000, limit: 15 }, now())) seen.set(d.driverId, d);
+        for (const d of await nearbyAvailable(redis, { ...q, cityId, vehicleType, radiusMeters: 2000, limit: 16 }, now())) if (d.driverId !== viewerId) seen.set(d.driverId, d);
       }
       const drivers = [...seen.values()].sort((a, b) => a.distanceMeters - b.distanceMeters).slice(0, 15);
       const grid = (v: number) => Math.round(v / 0.0003) * 0.0003;

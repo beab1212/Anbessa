@@ -140,7 +140,7 @@ Response `200`:
   "etaSeconds": 180, "driversNearby": 4, "approximate": false }
 ```
 
-At most 15 cars within 2 km, positions on a ~33 m grid, no ids. Outside the served cities: empty `cars`, `etaSeconds: null`. Rate limit: **30/min per user id** (the limiter runs in `preHandler`, after the token is verified in `onRequest`; key falls back to IP), on top of the global 300/min per IP.
+At most 15 cars within 2 km, positions on a ~33 m grid, no ids. The caller's own car is never included (a driver who is still online and opens the app as a rider would otherwise see their own car where they stand). Outside the served cities: empty `cars`, `etaSeconds: null`. Rate limit: **30/min per user id** (the limiter runs in `preHandler`, after the token is verified in `onRequest`; key falls back to IP), on top of the global 300/min per IP.
 
 ### `GET /api/locations/trips/:tripId/driver`
 

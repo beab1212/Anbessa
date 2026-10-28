@@ -92,7 +92,7 @@ export async function registerRoutes(
     await pub.register(rateLimit, { max: 30, timeWindow: "1 minute", hook: "preHandler", keyGenerator: (req: FastifyRequest) => (req as FastifyRequest & { userId?: string }).userId ?? req.ip });
     pub.get("/api/locations/nearby", async (req) => {
       const q = z.object({ ...at, vehicleType: z.string().min(1).max(30).optional() }).parse(req.query);
-      return locations.nearbyPublic(q);
+      return locations.nearbyPublic(q, (req as FastifyRequest & { userId?: string }).userId);
     });
   });
 }

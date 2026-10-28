@@ -360,6 +360,16 @@ describe("cars around the rider", () => {
     expect(vans.json<{ cars: unknown[] }>().cars).toHaveLength(1);
   });
 
+  it("never shows the caller's own car (a driver still online who switched to rider mode)", async () => {
+    const me = await onlineDriver(near(10));
+    await onlineDriver(near(300));
+    const res = await app.inject({ method: "GET", url: "/api/locations/nearby", query: { lat: String(BOLE.lat), lng: String(BOLE.lng) }, headers: { authorization: `Bearer ${await sign(me, "ride-app", [{ r: "RIDER" }, { r: "DRIVER" }])}` } });
+    expect(res.statusCode).toBe(200);
+    const body = res.json<{ cars: unknown[]; driversNearby: number }>();
+    expect(body.driversNearby).toBe(1);
+    expect(body.cars).toHaveLength(1);
+  });
+
   it("outside the served cities there are no cars; it needs an app token", async () => {
     const res = await asRider({ lat: "51.5", lng: "-0.12" });
     expect(res.json()).toEqual({ cars: [], etaSeconds: null, driversNearby: 0, approximate: false });
