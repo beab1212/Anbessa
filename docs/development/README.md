@@ -274,12 +274,54 @@ make dev-mobile ENV=dev-emulator  # Android emulator: the backend is 10.0.2.2
 
 ## 6. Mapping stack (optional, heavy)
 
+### Real road routes (OSRM), step by step
+
+Without OSRM, routes are straight lines. To get real roads, turn lists and road distances:
+
+1. **Get the map file** (Ethiopia, about 140 MB). Either let the script download it:
+
+   ```bash
+   make map-data
+   ```
+
+   or, on a slow connection, download it yourself from
+   https://download.geofabrik.de/africa/ethiopia-latest.osm.pbf (any browser or faster network) and put it at
+   `infra/mapping-stack/data/osrm/region.osm.pbf` (exactly that name), then run `make map-data`. The script skips
+   the download when that file exists. If a script download is cut off, run `make map-data` again: it resumes the
+   `region.osm.pbf.part` file instead of starting over.
+
+2. **Build the routing graph.** `make map-data` does this right after the download (osrm-extract, osrm-partition,
+   osrm-customize in Docker). About 5–10 minutes and about 4 GB of free RAM. It ends with
+   `✔ routing data ready`. The `[warn] ... unreachable boundary nodes` lines are normal.
+
+3. **Start OSRM** (only OSRM; `make dev-infra` also starts Nominatim, which imports the whole extract on first start
+   and takes much longer):
+
+   ```bash
+   docker compose -f infra/mapping-stack/docker-compose.mapping.yml up -d osrm
+   ```
+
+4. **Check it** (Addis, Mexico Square to Bole, should answer `"code":"Ok"` with about 7000 m):
+
+   ```bash
+   curl "http://localhost:5000/route/v1/driving/38.7578,8.9806;38.7998,8.9902?overview=false"
+   ```
+
+5. **Start (or restart) the services** with `make dev-services`. mapping-service already points at it
+   (`OSRM_URL=http://localhost:5000` in `services/mapping-service/.env`). `GET /api/maps/route` and fare estimates now
+   answer `"approximate": false`, and the phone shows the route along the streets.
+
+Steps 1–2 are once per extract. After a reboot only step 3 is needed (the container has no restart policy).
+For a newer extract, delete `region.osm.pbf` and run `make map-data` again. Details:
+[infra/docs/mapping-stack.md](../../infra/docs/mapping-stack.md).
+
+### Address search (Nominatim) and tiles
+
 ```bash
-make map-data     # once: download the Ethiopia extract (~140 MB) and build the OSRM graph (~10 min, ~4 GB RAM)
-make dev-infra    # tileserver-gl, Nominatim, OSRM — see infra/mapping-stack/README.md
+make dev-infra    # tileserver-gl, Nominatim and OSRM in the foreground
 ```
 
-Nominatim imports the extract on its first start (slow). Most developers point `OSRM_URL` / `NOMINATIM_URL` in `services/mapping-service/.env` at a shared staging instance instead.
+Nominatim imports the extract on its first start (slow, hours on a laptop). Most developers point `OSRM_URL` / `NOMINATIM_URL` in `services/mapping-service/.env` at a shared staging instance instead.
 
 **You don't need the engines to work on the backend.** Without them, mapping-service answers routes and ETAs with straight-line estimates flagged `"approximate": true`, and address search returns `503`.
 
@@ -351,7 +393,10 @@ Formatting: `.editorconfig` everywhere; Prettier (`pnpm format`) for TS/JSON/MD;
 | Phone app: the driver has no profile or car in development | Run `pnpm --filter @ride-app/fleet-service seed:dev` (after auth-service's `seed:dev`) |
 | Phone app: grey map | The tile server isn't reachable. Leave `TILE_URL` empty to use OpenStreetMap's tiles in development |
 | Phone app: the driver signs in with rider mode only | auth-service's `seed:dev` writes the phone accounts' roles as listed (rider), and fleet-service only grants DRIVER when it activates a profile. Run auth's seed first, then fleet's, on a fresh database. If auth's seed ran again later, re-grant the role the way fleet-service does: `POST localhost:3001/internal/drivers/<userId>/role {"active":true}` with the service token from `services/auth-service/.env` |
-| Phone app: straight route lines, no turn list | mapping-service has no OSRM data and answers `approximate: true` with a straight line and no steps. Run `make map-data` for real roads |
+| Phone app: straight route lines, no turn list | mapping-service can't reach OSRM and answers `approximate: true` with a straight line and no steps. Follow [Real road routes](#real-road-routes-osrm-step-by-step): build the graph once with `make map-data`, then start the `osrm` container (again after every reboot) |
+| `make map-data` stopped with `curl: (56) Recv failure` | The connection dropped mid-download. Run it again: it resumes the partial file. Or download the extract yourself and place it as `infra/mapping-stack/data/osrm/region.osm.pbf` |
+| OSRM container exits at start, `region.osrm... not found` | The graph wasn't built (only the `.pbf` is there). Run `make map-data`; with the `.pbf` in place it only builds |
+| `osrm-extract` killed / exit 137 | Not enough free RAM (needs about 4 GB). Close other heavy programs or containers and run `make map-data` again |
 | `Bind for 0.0.0.0:6379 failed: port is already allocated` | Another Redis (often another project's container) owns the port. Stop it, or change the host port in `infra/docker/docker-compose.yml`. |
 | Postgres container exits right after an upgrade | The old Postgres 16 volume won't start on 18. Run `make infra-reset` (wipes local data). |
 | `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY` | pnpm wants to rebuild `node_modules` in a non-interactive shell. Run `CI=true pnpm install`. |

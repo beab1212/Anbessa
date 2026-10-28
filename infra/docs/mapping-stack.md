@@ -22,7 +22,12 @@ Start everything with `make dev-infra` (foreground), or one container with
 
 1. Downloads `PBF_URL` (default Geofabrik Ethiopia, about 140 MB) to
    `infra/mapping-stack/data/osrm/region.osm.pbf`, unless the file exists. Override with
-   `PBF_URL=... make map-data`.
+   `PBF_URL=... make map-data`. The download goes to `region.osm.pbf.part` and is renamed when
+   complete. curl runs with `-C - --retry 20 --retry-delay 10 --retry-all-errors`, so dropped
+   connections are retried and a re-run resumes the `.part` file. A `.part` left from an older
+   extract would produce a corrupt file: delete it if `osrm-extract` fails to read the input.
+   On a slow link, download the file by other means and place it as `region.osm.pbf`; the script
+   then only builds.
 2. Runs, in `osrm/osrm-backend:v5.25.0` with the directory mounted at `/data`:
    - `osrm-extract -p /opt/car.lua /data/region.osm.pbf` (car profile, the only profile used)
    - `osrm-partition /data/region.osrm`
@@ -31,6 +36,23 @@ Start everything with `make dev-infra` (foreground), or one container with
 That is the MLD pipeline, matching `--algorithm mld` in the compose file. The script says it needs
 about 4 GB of free RAM for the extract step. Re-run it after deleting `region.osm.pbf` to get a newer
 extract (the download is skipped while the file exists).
+
+For the Ethiopia extract of 2026-10-27 the build took about 5 minutes on a 16 GB laptop and wrote
+about 1.1 GB of `region.osrm*` files. `[warn] Level N unreachable boundary nodes per cell` lines from
+`osrm-customize` are normal.
+
+### Starting and checking OSRM
+
+```bash
+docker compose -f infra/mapping-stack/docker-compose.mapping.yml up -d osrm   # OSRM only, in the background
+curl "http://localhost:5000/route/v1/driving/38.7578,8.9806;38.7998,8.9902?overview=false"
+# {"code":"Ok","routes":[{... "distance":6996.6,"duration":591.6 ...}]}  (about 7 km by road; 4.7 km straight)
+```
+
+The compose file sets no restart policy, so start the container again after a reboot (the graph files
+stay). Then check mapping-service: `POST /internal/route` (or `GET /api/maps/route`) should return
+`"approximate": false` and a road `geometry`. If mapping-service started while OSRM was down, it
+recovers by itself once the circuit breaker closes; fallback answers were never cached.
 
 There is also an `infra/mapping-stack/data/osrm-addis/region.osm` file on disk (ignored by git).
 Nothing in repo references `osrm-addis`.
