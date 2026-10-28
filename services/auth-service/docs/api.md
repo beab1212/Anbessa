@@ -40,9 +40,10 @@ Better Auth routes answer with **Better Auth's own error bodies**, except the 40
 |---|---|---|
 | Kong (`infra/kong/kong.yml`) | 60 requests/minute, `policy: local`; payload ≤ 64 KB | everything routed to auth-service |
 | Fastify `@fastify/rate-limit` (`src/app.ts`) | 300/minute per client IP, in-process memory store | every route except the Better Auth mounts (so `/api/identity`, `/internal`, `/api/dev`, `/health*`) |
-| Better Auth (`src/auth/instances.ts`) | default 60 per 60 s per endpoint; `/phone-number/send-otp` 3/60 s; `/phone-number/verify` 5/60 s; `/sign-in/email` 5/60 s; `/two-factor/verify-totp` 5/60 s; `/token` 30/60 s | Better Auth routes. Stored in Redis secondary storage when `REDIS_URL` is set, else memory. Off with `AUTH_RATE_LIMIT=off` (refused in production). How Better Auth keys the counters (IP + path) is Better Auth behaviour, not code in this repo |
+| Better Auth (`src/auth/instances.ts`) | default 60 per 60 s per endpoint; `/phone-number/send-otp` 3/60 s; `/phone-number/verify` 5/60 s; `/sign-in/email` 5/60 s; `/two-factor/verify-totp` 5/60 s; `/token` 30/60 s | Better Auth routes. Stored in Redis secondary storage when `REDIS_URL` is set, else memory. Off with `AUTH_RATE_LIMIT=off` (refused in production). Better Auth keys the counters by client IP + path |
+| Per phone number (`src/auth/otp-limits.ts`, checked in `src/http/better-auth.routes.ts`) | `/phone-number/send-otp`: one code per 30 s and 5 per hour per number; `/phone-number/verify`: 10 wrong codes per hour per number, then the number is locked (verify and send) until the hour ends, even with a fresh code. A success clears the count | App surface. Keyed on the exact `phoneNumber` string (Better Auth's OTP identifier; only `^\+251[79]\d{8}$` is ever counted). Redis (`otp:` prefix) when `REDIS_URL` is set, else memory. Refused with **429**, `retry-after` (seconds) and `{ error, message, retryAfterSeconds }`, `error` one of `otp_resend_too_soon`, `otp_send_limit`, `otp_verify_locked`. Off with `AUTH_RATE_LIMIT=off` |
 
-`trustProxy: true`, and Better Auth reads the client IP from `x-forwarded-for`.
+The client IP is the rightmost `x-forwarded-for` entry that isn't a `TRUSTED_PROXIES` range (Fastify `trustProxy` and Better Auth `trustedProxies` both use that list; see [configuration.md](configuration.md)).
 
 ---
 
@@ -63,7 +64,7 @@ Better Auth instance `createAppAuth` (`src/auth/instances.ts`). Clients: phone a
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/ok` | Better Auth liveness |
-| POST | `/phone-number/send-otp` | Body `{ phoneNumber }`. Must match `^\+251[79]\d{8}$`. Generates a 6-digit code (5 min, 3 attempts) and hands it to the OTP sender without awaiting it. Rate limit 3/60 s |
+| POST | `/phone-number/send-otp` | Body `{ phoneNumber }`. Must match `^\+251[79]\d{8}$`. Generates a 6-digit code (5 min, 3 attempts) and hands it to the OTP sender without awaiting it. Rate limit 3/60 s per IP, plus the per-number limits above (**429**) |
 | POST | `/phone-number/verify` | Body `{ phoneNumber, code }`. Signs in or signs up (new users get name = phone, email = `<digits>@phone.anbessa.invalid`). `updatePhoneNumber` in the body → **400** `bad_request`. On success: a call-center guest is claimed (`account_status` → `ACTIVE`, `user.claimed` event); the placeholder email is marked verified; notification-service is told the code was verified (best effort). The session token comes back in the `set-auth-token` response header (bearer plugin; the integration tests read it there). Rate limit 5/60 s |
 | GET | `/token` | Mints an app JWT (ES256, 15 min, `aud=ride-app`) → `{ token }`. **403** if the session belongs to the admin surface or the user is banned; **401** if the user no longer exists. Rate limit 30/60 s |
 | GET | `/jwks` | Public JWKS (both surfaces share it). Every verifier uses this URL |
@@ -73,12 +74,12 @@ Better Auth instance `createAppAuth` (`src/auth/instances.ts`). Clients: phone a
 | POST | `/revoke-session` | |
 | POST | `/revoke-other-sessions` | |
 | POST | `/update-user` | Only `input: true` fields (`name`, `image`). `accountStatus`, `permissionVersion`, `mustChangePassword`, `role` are not writable. `image` must be `data:image/jpeg;base64,…` of at most 48 KB + 32 characters, else 400 |
-| POST | `/organization/create` | Self-service FLEET or CORPORATE organisation. Extra fields: `kind` (`FLEET`/`CORPORATE`, anything else **403**), `cityId` (must exist), `legalName` (required), `tin` (exactly 10 digits, unique per kind). `status` is forced to `PENDING`. Banned or non-`ACTIVE` users: **403**. The creator becomes `fleet_owner`, or `corporate_admin` for CORPORATE. Events: `org.created`, `role.granted`, `audit.recorded` |
+| POST | `/organization/create` | Self-service FLEET or CORPORATE organisation. Extra fields: `kind` (`FLEET`/`CORPORATE`, anything else **403**), `cityId` (must exist), `legalName` (required), `tin` (exactly 10 digits, unique per kind). `name`: 2–60 characters of letters (any script), digits, spaces and `. , & ' ( ) -`, with a letter, no web address and no phone-number-like run of 7+ digits (**400**); whitespace is tidied. `status` is forced to `PENDING`. While pending, the founder's role is in the token as `{ r, pendingOrg }` and grants only the onboarding permissions (shared-authz `PENDING_ORG_PERMISSIONS`: profile, members, documents, vehicles, a support ticket), never booking, billing, money or live location. Banned or non-`ACTIVE` users: **403**. The creator becomes `fleet_owner`, or `corporate_admin` for CORPORATE. Events: `org.created`, `role.granted`, `audit.recorded` |
 | GET, POST | `/organization/check-slug` | |
 | GET | `/organization/list` | |
 | GET | `/organization/get-full-organization` | |
 | POST | `/organization/set-active` | |
-| POST | `/organization/update` | `kind`, `cityId`, `tin`, `status`, `legalName` can't be changed (**403**) |
+| POST | `/organization/update` | `kind`, `cityId`, `tin`, `status`, `legalName` can't be changed (**403**). `name` follows the creation rules while the org is `PENDING`; once verified it can't be changed (**403**; sending the current name unchanged is fine). It appears in invitation SMS, and there is no staff rename |
 | GET | `/organization/get-active-member` | |
 | GET | `/organization/list-members` | |
 | POST | `/organization/invite-member` | Organisation must be `VERIFIED` (**403** otherwise). Role must be allowed for the org kind (**400**). Invite by phone: `email = <digits>@phone.anbessa.invalid`. Event `org.member_invited` (notification-service sends the SMS). Invitations expire after 7 days |
@@ -208,7 +209,7 @@ Actions: `role:grant` (request `role:request`, approve `role:approve`), `staff:r
 | Method + path | Caller | Request | Response |
 |---|---|---|---|
 | `GET /approvals` | sees the actions they may request or approve somewhere; 403 if none. Per action: global holders see every request; city-scoped holders see only requests whose `cityId` is one of their cities (requests without a city are platform-wide and need a global grant) | query `status?` (as above), `action?` (≤ 40 chars), `limit` 1–200, default 100 | `{ approvals: ApprovalRow[] }` newest first |
-| `POST /approvals/:id/approve` | the action's approve permission **in the request's city** (`cityId`; none = a global grant); not the maker | body `{ reason?: ≤ 500 }` | the executor's result: `role:grant` as above; `staff:reset_mfa` → `{ userId, temporaryPassword }`; `authz:change` → `{ roleCode, version }` |
+| `POST /approvals/:id/approve` | the action's approve permission **in the request's city** (`cityId`; none = a global grant); not the maker (and for `staff:reset_mfa` not the account being reset) | body `{ reason?: ≤ 500 }` | `cache-control: no-store`. The executor's result: `role:grant` as above; `staff:reset_mfa` → `{ userId, temporaryPassword }` (to the approver only, once); `authz:change` → `{ roleCode, version }` |
 | `POST /approvals/:id/reject` | approve permission in the request's city; not the maker | body `{ reason }` | `{ id, status: "REJECTED" }` |
 | `POST /approvals/:id/cancel` | only the maker | — | `{ id, status: "CANCELLED" }` |
 
@@ -265,8 +266,7 @@ Response `{ users: [{ id, name, staff, email (staff only, else null), phone (mas
 **`POST /users/:id/sessions/revoke`** — `session:revoke` (SUPER_ADMIN). Body `{ reason }`. Bumps `pv`, deletes every session, sets `pv:{userId}`. → `{ userId, revoked: true }`. Audit `session:revoke`.
 
 **`POST /users/:id/reset-mfa`** — `staff:manage`. Body `{ reason }`. `cache-control: no-store`. Not yourself (403); target must have a credential account (400).
-- Target is a super admin: creates a `staff:reset_mfa` approval → `{ userId, pendingApproval: <approvalId> }`.
-- Otherwise at once: new temporary password, 2FA removed, `mustChangePassword = true`, `pv` bump, sessions deleted → `{ userId, temporaryPassword }`. Audit `staff:reset_mfa`.
+Every staff account (not only super admins) goes through maker–checker: this creates a `staff:reset_mfa` approval → `{ userId, pendingApproval: <approvalId> }`; 409 if one is already pending for the account. Nothing changes and no password is returned to the maker. A different super admin approves it (`POST /approvals/:id/approve`); that runs the reset (new temporary password, 2FA removed, `mustChangePassword = true`, `pv` bump, sessions deleted, audit `staff:reset_mfa`) and returns `{ userId, temporaryPassword }` to the approver alone, who hands it over in person. There is no out-of-band channel for staff passwords yet.
 
 **`GET /stats?cityId=`** — without `cityId`: a global `report:read`; with `cityId`: `report:read @ C(cityId)`. With a city, `staff`, `staffWithoutMfa`, `activeSessions.admin` and `organizations` count only that city (staff = members of that city's `STAFF_CITY` org); the account counts (`users`, `riders`, `drivers`, `guests`, `suspended`, sign-ups, `activeSessions.app`) stay platform-wide because users aren't bound to a city. Response `{ cityId (or null), users, staff, riders, drivers, guests, suspended, signups24h, signups7d, activeSessions: { app, admin }, staffWithoutMfa, organizations: [{ kind, status, count }] }`.
 
@@ -277,12 +277,12 @@ Response `{ users: [{ id, name, staff, email (staff only, else null), phone (mas
 | Field | Type | Rule |
 |---|---|---|
 | `reason` | reason | stored as `ban_reason` |
-| `cityId` | cityId | city where the case is handled (permission check, caller-asserted) |
+| `cityId` | cityId, optional | accepted for older clients and **ignored** |
 | `until` | date (coerced), optional | stored as `ban_expires` |
 
-Authorization: staff target → `staff:manage`; anyone else → `user:suspend @ C(cityId)` (SAFETY_OFFICER). Not yourself (403). A super admin can't be suspended when two or fewer non-banned super admins remain (409). 404 if the user doesn't exist. Sets `banned = true` (account_status is unchanged), bumps `pv`, events `user.suspended { userId, until, byUserId }` + audit. After commit: all sessions deleted, `deny:{userId}`, `pv:{userId}`. → `{ userId, suspended: true }`.
+Authorization: staff target → `staff:manage`; anyone else → `user:suspend` in one of the **target's** cities, taken from our own data: the cities of the user's FLEET / CORPORATE organisations (SAFETY_OFFICER there). A user with no such city (most riders; a driver's city lives in fleet-service) needs a global `user:suspend`. Not yourself (403). A super admin can't be suspended when two or fewer non-banned super admins remain (409). 404 if the user doesn't exist. Sets `banned = true` (account_status is unchanged), bumps `pv`, events `user.suspended { userId, until, byUserId }` + audit. After commit: all sessions deleted, `deny:{userId}`, `pv:{userId}`. → `{ userId, suspended: true }`.
 
-**`POST /users/:id/reinstate`** — body `{ reason, cityId }`; staff target → `staff:manage`, else `user:reinstate @ C(cityId)`. 409 if not suspended. Clears ban fields, bumps `pv`, events `user.reinstated` + audit; after commit removes `deny:{userId}`, sets `pv`. → `{ userId, suspended: false }`.
+**`POST /users/:id/reinstate`** — body `{ reason, cityId? }` (`cityId` ignored); staff target → `staff:manage`, else `user:reinstate` in one of the target's cities as for suspend (no city → a global grant). 409 if not suspended. Clears ban fields, bumps `pv`, events `user.reinstated` + audit; after commit removes `deny:{userId}`, sets `pv`. → `{ userId, suspended: false }`.
 
 ### Partner organisations
 
@@ -302,11 +302,11 @@ Authorization: staff target → `staff:manage`; anyone else → `user:suspend @ 
 
 ## Internal API `/internal/*`
 
-Service-to-service only; never routed by Kong. Every route needs `Authorization: Bearer <INTERNAL_SERVICE_TOKEN>` (401 `unauthorized` `invalid service credentials` on mismatch; 403 `internal API disabled` when the token isn't configured). Optional `x-service-name` header. The Fastify 300/min per-IP limit applies.
+Service-to-service only; never routed by Kong. Every route needs `Authorization: Bearer <INTERNAL_SERVICE_TOKEN>` (401 `unauthorized` `invalid service credentials` on mismatch; 403 `internal API disabled` when the token isn't configured). Optional `x-service-name` header: the caller's own claim (the shared token doesn't tell services apart), used only as a label (`[a-z0-9-]{1,40}`, else `unknown-service`). The Fastify 300/min per-IP limit applies.
 
 | Method + path | Caller (in code) | Request | Response | Notes |
 |---|---|---|---|---|
-| `POST /internal/drivers/:userId/role` | fleet-service (`src/lib/clients.ts`) | params `userId: uuid`; body `{ active: boolean }` | `{ userId, driver: active }` | Adds/removes `driver` on `app_user.role`. Idempotent: no change → no `pv` bump, no event. Otherwise `pv` bump, `role.granted`/`role.revoked { role: "DRIVER", byUserId: null }`, audit `driver:activate`/`driver:suspend` (reason `by <x-service-name>`). 404 unknown user |
+| `POST /internal/drivers/:userId/role` | fleet-service (`src/lib/clients.ts`) | params `userId: uuid`; body `{ active: boolean }` | `{ userId, driver: active }` | Adds/removes `driver` on `app_user.role`. Idempotent: no change → no `pv` bump, no event. Otherwise `pv` bump, `role.granted`/`role.revoked { role: "DRIVER", byUserId: null }`, audit `driver:activate`/`driver:suspend` (reason `internal call, claimed caller: <x-service-name>`). 404 unknown user |
 | `GET /internal/authz/snapshot` | every service's `createAuthzSync` (`libs/shared-authz/src/sync.ts`) | — | the snapshot (as `GET /api/identity/authz`) | Polled every 30 s by each service |
 | `PUT /internal/cities/:id` | platform-service (`src/lib/identity.ts`) | params `id` matching `^[a-z0-9-]{1,40}$`; body `{ name: 2–80, timezone: 3–60 }` | the `city` row `{ id, name, timezone }` | Upsert; creates the city's `STAFF_CITY` org (`Anbessa Staff — <name>`, slug `staff-<id>`, `VERIFIED`) if missing. The org name is not updated on rename |
 | `GET /internal/ops/outbox` | platform-service system page (`src/system/health.ts`) | — | `{ pending: number, oldestAt: ISO string \| null }` | Unpublished outbox rows |

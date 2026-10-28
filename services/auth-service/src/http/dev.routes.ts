@@ -24,13 +24,16 @@ export function registerDevRoutes(app: FastifyInstance, deps: { db: Db; inbox: O
     };
   });
 
-  // ?email= a dev staff account's current TOTP · ?phone= the last OTP sent to that number
+  // ?email= a dev staff account's current TOTP · ?phone= the last OTP sent to a dev account's number
   app.get("/api/dev/code", async (req, reply) => {
     const q = z.object({ email: z.string().optional(), phone: z.string().optional() }).parse(req.query);
     if (q.email) {
       if (!DEV_ACCOUNTS.some((a) => a.surface === "staff" && a.email === q.email)) return reply.status(404).send({ error: "not_a_dev_account" });
       return { code: devTotp() };
     }
+    // only the ready-made accounts: any other number's code stays in the console log, so this
+    // endpoint can't sign in as a real person who happens to use a dev server
+    if (q.phone && !DEV_ACCOUNTS.some((a) => a.surface !== "staff" && a.phone === q.phone)) return reply.status(404).send({ error: "not_a_dev_account" });
     const code = q.phone ? deps.inbox.latest(q.phone) : undefined;
     if (!code) return reply.status(404).send({ error: "no_code_yet" });
     return { code };

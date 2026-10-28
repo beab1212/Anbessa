@@ -245,7 +245,17 @@ describe("suspension", () => {
     const { user } = await rider.signIn();
     const token = await rider.accessToken();
 
-    const res = await officer.identity("POST", `/api/identity/users/${user.id}/suspend`, { reason: "reported for harassment", cityId: "addis-ababa" });
+    // the city comes from the user's own data (their organisations), never from the request
+    const noCity = await officer.identity("POST", `/api/identity/users/${user.id}/suspend`, { reason: "reported for harassment", cityId: "addis-ababa" });
+    expect(noCity.statusCode).toBe(403);
+    const fleet = await h.c.db.organization.create({
+      data: { id: crypto.randomUUID(), name: "Suspension Fleet", slug: `susp-${Date.now()}`, createdAt: new Date(), kind: "FLEET", cityId: "addis-ababa", status: "VERIFIED" },
+    });
+    await h.c.db.member.create({ data: { id: crypto.randomUUID(), organizationId: fleet.id, userId: user.id, role: "fleet_driver", createdAt: new Date() } });
+    const elsewhere = await staffWithRole("SAFETY_OFFICER", "hawassa");
+    expect((await elsewhere.identity("POST", `/api/identity/users/${user.id}/suspend`, { reason: "reported for harassment", cityId: "hawassa" })).statusCode).toBe(403);
+
+    const res = await officer.identity("POST", `/api/identity/users/${user.id}/suspend`, { reason: "reported for harassment" });
     expect(res.statusCode, res.body).toBe(200);
 
     const me = await h.app.inject({ method: "GET", url: "/api/identity/me", headers: { authorization: `Bearer ${token}` } });
@@ -253,10 +263,10 @@ describe("suspension", () => {
     expect((await rider.call("GET", "/api/auth/token")).statusCode).not.toBe(200);
     expect((await rider.signIn().then(() => rider.call("GET", "/api/auth/token")).catch(() => ({ statusCode: 403 }))).statusCode).not.toBe(200);
 
-    const back = await officer.identity("POST", `/api/identity/users/${user.id}/reinstate`, { reason: "investigation closed, no fault", cityId: "addis-ababa" });
+    const back = await officer.identity("POST", `/api/identity/users/${user.id}/reinstate`, { reason: "investigation closed, no fault" });
     expect(back.statusCode, back.body).toBe(200);
     await rider.signIn();
-    expect(claimsOf(await rider.accessToken()).roles).toEqual([{ r: "RIDER" }]);
+    expect(claimsOf(await rider.accessToken()).roles).toEqual([{ r: "RIDER" }, { r: "FLEET_DRIVER", org: fleet.id }]);
   });
 
   it("only super admins suspend staff; nobody suspends themselves", async () => {
@@ -280,7 +290,8 @@ describe("partner organisations", () => {
     expect(create.statusCode, create.body).toBe(200);
     const org = create.json<{ id: string }>();
     expect((await h.c.db.organization.findUniqueOrThrow({ where: { id: org.id } })).status).toBe("PENDING");
-    expect(claimsOf(await owner.accessToken()).roles).toContainEqual({ r: "FLEET_OWNER", org: org.id });
+    // pending: the founder's role travels as pendingOrg and grants only onboarding
+    expect(claimsOf(await owner.accessToken()).roles).toContainEqual({ r: "FLEET_OWNER", pendingOrg: org.id });
 
     const driverPhone = phone();
     const early = await owner.call("POST", "/api/auth/organization/invite-member", { organizationId: org.id, email: phoneToEmail(driverPhone), role: "fleet_driver" });
@@ -291,6 +302,7 @@ describe("partner organisations", () => {
     expect(queue.json<{ id: string }[]>().map((o) => o.id)).toContain(org.id);
     const verified = await officer.identity("POST", `/api/identity/organizations/${org.id}/verify`, {});
     expect(verified.statusCode, verified.body).toBe(200);
+    expect(claimsOf(await owner.accessToken()).roles).toContainEqual({ r: "FLEET_OWNER", org: org.id });
 
     const smuggle = await owner.call("POST", "/api/auth/organization/invite-member", { organizationId: org.id, email: phoneToEmail(phone()), role: "super_admin" });
     expect(smuggle.statusCode).toBeGreaterThanOrEqual(400);
@@ -317,7 +329,7 @@ describe("partner organisations", () => {
     });
     expect(create.statusCode, create.body).toBe(200);
     const org = create.json<{ id: string }>();
-    expect(claimsOf(await admin.accessToken()).roles).toContainEqual({ r: "CORPORATE_ADMIN", org: org.id });
+    expect(claimsOf(await admin.accessToken()).roles).toContainEqual({ r: "CORPORATE_ADMIN", pendingOrg: org.id });
 
     const other = new AppUser(h, phone());
     await other.signIn();
@@ -338,6 +350,23 @@ describe("partner organisations", () => {
     const org = create.json<{ id: string }>();
     const res = await owner.call("POST", "/api/auth/organization/update", { organizationId: org.id, data: { kind: "STAFF_CITY" } });
     expect(res.statusCode).toBeGreaterThanOrEqual(400);
+
+    // the display name: fixable while pending, frozen once verified (it goes into invitation SMS)
+    expect((await owner.call("POST", "/api/auth/organization/update", { organizationId: org.id, data: { name: "Abay Fleet PLC" } })).statusCode).toBe(200);
+    const officer = await staffWithRole("ONBOARDING_OFFICER", "addis-ababa");
+    expect((await officer.identity("POST", `/api/identity/organizations/${org.id}/verify`, {})).statusCode).toBe(200);
+    const rename = await owner.call("POST", "/api/auth/organization/update", { organizationId: org.id, data: { name: "Anbessa Refunds call 0911223344" } });
+    expect(rename.statusCode).toBe(403);
+    expect((await owner.call("POST", "/api/auth/organization/update", { organizationId: org.id, data: { name: "Abay Fleet PLC", logo: null } })).statusCode).toBe(200);
+  });
+
+  it("organisation names are checked at creation (no links, no phone numbers)", async () => {
+    const owner = new AppUser(h, phone());
+    await owner.signIn();
+    const res = await owner.call("POST", "/api/auth/organization/create", {
+      name: "Refunds: visit pay-anbessa.com", slug: `phish-${Date.now()}`, kind: "CORPORATE", cityId: "addis-ababa", legalName: "Phish PLC", tin: "0077665544",
+    });
+    expect(res.statusCode).toBe(400);
   });
 
   it("nobody can create a staff organisation through Better Auth", async () => {

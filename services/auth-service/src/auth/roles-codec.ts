@@ -40,8 +40,13 @@ export function toAssignments(userRole: string | null | undefined, memberships: 
       if (storage.type !== "member" || !(storage.orgKinds as readonly OrgKind[]).includes(kind)) continue;
       if (kind === "STAFF_CITY") out.push({ role, scope: "CITY", cityId: m.organization.cityId });
       else if (kind === "FLEET" || kind === "CORPORATE") {
-        // partner organisations must be verified before their roles mean anything
-        if (m.organization.status !== "VERIFIED" && role !== "FLEET_OWNER" && role !== "CORPORATE_ADMIN") continue;
+        // Partner organisations must be verified before their roles mean anything. The founder
+        // (owner / admin) keeps the role while it waits, marked pending: shared-authz then grants
+        // only what onboarding needs (PENDING_ORG_PERMISSIONS), never trips, money or live data.
+        if (m.organization.status !== "VERIFIED") {
+          if (role === "FLEET_OWNER" || role === "CORPORATE_ADMIN") out.push({ role, scope: "ORG", orgId: m.organization.id, pending: true });
+          continue;
+        }
         out.push({ role, scope: "ORG", orgId: m.organization.id });
       }
     }

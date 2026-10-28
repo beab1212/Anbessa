@@ -147,6 +147,7 @@ interface RoleAssignment {
   scope: ScopeType;          // "SELF" | "ORG" | "CITY" | "GLOBAL"
   orgId?: string;            // set for ORG
   cityId?: string;           // set for CITY
+  pending?: true;            // ORG only: the organisation isn't verified yet (see Role claims)
 }
 ```
 
@@ -159,19 +160,20 @@ Other JWT claims (`iat`, `exp`, `setup`, …) are not copied onto the principal.
 Tokens carry roles, not permissions, in a compact form (`RoleClaim`):
 
 ```ts
-interface RoleClaim { r: string; org?: string; city?: string; g?: true }
+interface RoleClaim { r: string; org?: string; pendingOrg?: string; city?: string; g?: true }
 ```
 
 | Claim | Assignment |
 |---|---|
 | `{ r: "RIDER" }` | `{ role: "RIDER", scope: "SELF" }` |
 | `{ r: "FLEET_OWNER", org: "o1" }` | `{ role: "FLEET_OWNER", scope: "ORG", orgId: "o1" }` |
+| `{ r: "CORPORATE_ADMIN", pendingOrg: "o2" }` | `{ role: "CORPORATE_ADMIN", scope: "ORG", orgId: "o2", pending: true }` |
 | `{ r: "DISPATCHER", city: "addis-ababa" }` | `{ role: "DISPATCHER", scope: "CITY", cityId: "addis-ababa" }` |
 | `{ r: "FINANCE_OFFICER", g: true }` | `{ role: "FINANCE_OFFICER", scope: "GLOBAL" }` |
 
 ### `toRoleClaim(assignment)`
 
-Inverse of the table above: `ORG` → `{ r, org }`, `CITY` → `{ r, city }`, `GLOBAL` → `{ r, g: true }`, otherwise `{ r }`. Used by auth-service when it builds the token payload. `parseRoleClaims(roles.map(toRoleClaim), audience)` round-trips (test "round-trips assignments through the compact claim form").
+Inverse of the table above: `ORG` → `{ r, org }` (`{ r, pendingOrg }` when `pending`), `CITY` → `{ r, city }`, `GLOBAL` → `{ r, g: true }`, otherwise `{ r }`. Used by auth-service when it builds the token payload. `parseRoleClaims(roles.map(toRoleClaim), audience)` round-trips (test "round-trips assignments through the compact claim form").
 
 ### `parseRoleClaims(raw, audience)`
 
@@ -184,9 +186,15 @@ Defensive parsing; nothing in the claim is trusted:
 1. not an array → `[]`;
 2. each item that is not a non-null object, or has no string `r`, is skipped;
 3. the role is looked up in the **current registry** (`roleInfo(r)`): unknown, archived, or belonging to the other audience → skipped. So a staff role smuggled into a `ride-app` token is dropped (test "drops staff roles smuggled into an app-audience token");
-4. scope is decided by precedence: non-empty string `org` → `ORG`; else non-empty string `city` → `CITY`; else `g === true` → `GLOBAL`; else `SELF`.
+4. scope is decided by precedence: non-empty string `pendingOrg` → `ORG` with `pending: true`; else non-empty string `org` → `ORG`; else non-empty string `city` → `CITY`; else `g === true` → `GLOBAL`; else `SELF`.
 
 Step 4 does **not** check that the scope fits the role (e.g. `{ r: "RIDER", g: true }` becomes a `GLOBAL` RIDER assignment). It doesn't matter for authorization: a RIDER's grants are all `S`, and `S` is checked against `ownerUserIds`, not the assignment's scope. The general rule: the scope letter of the *grant* decides what the scope type of the *assignment* must be (see [roles-and-permissions.md → Vocabulary](roles-and-permissions.md#vocabulary)).
+
+### Pending organisations
+
+auth-service gives the founder of a FLEET / CORPORATE organisation that isn't `VERIFIED` yet (`FLEET_OWNER` / `CORPORATE_ADMIN`) their role as `{ r, pendingOrg }`, so they can finish onboarding. `authorize()` lets such an assignment grant only `PENDING_ORG_PERMISSIONS` (`org:update`, `org:manage_members`, `document:upload`, `vehicle:register`, `vehicle:read`, `ticket:create`), only through an `O` grant, and never contributes to `citiesWith`. Everything else (trip booking and billing, on-behalf booking, payments and balances, `vehicle:authorize_driver`, live location, other people's data) waits for verification, in every service, whatever the editable matrix says.
+
+It's a separate key rather than `org` plus a flag on purpose: a reader that doesn't know it (an older build of a service, the phone app's `RoleClaim`) sees no organisation at all, so it fails closed. Tokens issued before the change carry `org` for pending founders and keep full powers until they expire (15 min). Code that reads `a.scope === "ORG" && a.orgId` directly instead of calling `can()` should skip `a.pending` assignments.
 
 Example (from the tests):
 

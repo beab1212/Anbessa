@@ -11,6 +11,7 @@ import { registerIdentityRoutes } from "./http/identity.routes.js";
 import type { RequirePrincipal } from "./http/principal.js";
 import type { IdentityService } from "./identity/service.js";
 import type { AuthzService } from "./authz/service.js";
+import type { OtpLimiter } from "./auth/otp-limits.js";
 import type { OtpInbox } from "./dev/accounts.js";
 import { registerErrorHandler } from "./middlewares/error-handler.js";
 
@@ -22,6 +23,8 @@ export interface AppDeps {
   identity: IdentityService;
   authz: AuthzService;
   requirePrincipal: RequirePrincipal;
+  /** Per-phone OTP limits; unset when AUTH_RATE_LIMIT=off (tests). */
+  otpLimits?: OtpLimiter;
   /** Set only when DEV_LOGIN=on (refused in production). */
   devInbox?: OtpInbox;
   logger?: FastifyServerOptions["loggerInstance"];
@@ -30,7 +33,7 @@ export interface AppDeps {
 export async function buildApp(deps: AppDeps) {
   const app = Fastify({
     ...(deps.logger ? { loggerInstance: deps.logger } : { logger: false }),
-    trustProxy: true, // behind Kong / the load balancer
+    trustProxy: deps.config.TRUSTED_PROXIES, // behind Kong / the load balancer: only these hops are believed
     bodyLimit: 64 * 1024,
   });
 
@@ -55,7 +58,7 @@ export async function buildApp(deps: AppDeps) {
     }
   });
 
-  mountBetterAuth(app, deps.appAuth, { prefix: "/api/auth", surface: "app", db: deps.db });
+  mountBetterAuth(app, deps.appAuth, { prefix: "/api/auth", surface: "app", db: deps.db, otpLimits: deps.otpLimits });
   mountBetterAuth(app, deps.adminAuth, { prefix: "/api/admin-auth", surface: "admin", db: deps.db });
   registerIdentityRoutes(app, {
     identity: deps.identity,

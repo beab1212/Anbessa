@@ -75,10 +75,11 @@ export function registerIdentityRoutes(
     const q = z.object({ status: z.enum(APPROVAL_STATUSES).optional(), action: z.string().max(40).optional(), limit: z.coerce.number().int().min(1).max(200).default(100) }).parse(req.query);
     return { approvals: await identity.approvals.list(await staff(req), q) };
   });
-  app.post("/api/identity/approvals/:id/approve", async (req) => {
+  app.post("/api/identity/approvals/:id/approve", async (req, reply) => {
     const { id } = z.object({ id: uuid }).parse(req.params);
     const body = z.object({ reason: z.string().trim().max(500).optional() }).parse(req.body ?? {});
-    return identity.approvals.approve(await staff(req), id, body.reason);
+    // an approved MFA reset answers with the temporary password: never cached
+    return reply.header("cache-control", "no-store").send(await identity.approvals.approve(await staff(req), id, body.reason));
   });
   app.post("/api/identity/approvals/:id/reject", async (req) => {
     const { id } = z.object({ id: uuid }).parse(req.params);
@@ -144,14 +145,15 @@ export function registerIdentityRoutes(
   // ── safety ──────────────────────────────────────────────────────────────────
   app.post("/api/identity/users/:id/suspend", async (req) => {
     const { id } = z.object({ id: uuid }).parse(req.params);
-    const body = z.object({ reason, cityId, until: z.coerce.date().optional() }).parse(req.body);
-    return identity.suspendUser(await staff(req), id, body);
+    // cityId is still accepted from older clients but ignored: the scope comes from the user's own data
+    const body = z.object({ reason, cityId: cityId.optional(), until: z.coerce.date().optional() }).parse(req.body);
+    return identity.suspendUser(await staff(req), id, { reason: body.reason, until: body.until });
   });
 
   app.post("/api/identity/users/:id/reinstate", async (req) => {
     const { id } = z.object({ id: uuid }).parse(req.params);
-    const body = z.object({ reason, cityId }).parse(req.body);
-    return identity.reinstateUser(await staff(req), id, body);
+    const body = z.object({ reason, cityId: cityId.optional() }).parse(req.body);
+    return identity.reinstateUser(await staff(req), id, { reason: body.reason });
   });
 
   // ── partner organisations ───────────────────────────────────────────────────
@@ -195,7 +197,9 @@ export function registerIdentityRoutes(
     const given = Buffer.from(header.replace(/^Bearer /i, ""));
     const expected = Buffer.from(deps.internalToken);
     if (given.length !== expected.length || !timingSafeEqual(given, expected)) throw unauthorized("invalid service credentials");
-    return String(req.headers["x-service-name"] ?? "unknown-service");
+    // what the caller says it is: the shared token doesn't tell services apart, so this is only a label
+    const claimed = String(req.headers["x-service-name"] ?? "");
+    return /^[a-z0-9-]{1,40}$/.test(claimed) ? claimed : "unknown-service";
   };
 
   app.post("/internal/drivers/:userId/role", async (req) => {

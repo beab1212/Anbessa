@@ -83,6 +83,25 @@ async function assignmentsOf(tx: Tx | Db, userId: string) {
   return toAssignments(user.role, memberships);
 }
 
+/**
+ * The cities a user belongs to, from our own data: the cities of their fleet / company
+ * organisations. Users aren't otherwise bound to a city here (a driver's city lives in
+ * fleet-service), so most riders have none.
+ */
+async function citiesOfUser(tx: Tx | Db, userId: string): Promise<string[]> {
+  const rows = await tx.member.findMany({ where: { userId, organization: { kind: { in: ["FLEET", "CORPORATE"] } } }, select: { organization: { select: { cityId: true } } } });
+  return [...new Set(rows.map((r) => r.organization.cityId))];
+}
+
+/**
+ * A city-scoped action on a user (suspend, reinstate) is checked against the TARGET's cities, never
+ * a city the caller names: the grant must cover one of them. A target with no city needs a global grant.
+ */
+function authorizeOnUser(principal: Principal, permission: Permission, targetCities: string[]) {
+  if (targetCities.some((cityId) => can(principal, permission, { cityId }))) return;
+  authorize(principal, permission); // a global grant, or the usual 403
+}
+
 const isStaffUser = (roles: RoleAssignment[]) => roles.some((a) => roleInfo(a.role)?.audience === "ride-admin");
 const superAdminsLeft = (tx: Tx | Db) => tx.user.count({ where: { role: { contains: ROLES.SUPER_ADMIN.stored }, banned: { not: true } } });
 
@@ -141,8 +160,11 @@ export function createIdentityService(deps: IdentityDeps) {
     approvePermission: "staff:manage",
     async execute(tx, req, checker) {
       const { userId } = req.payload as { userId: string };
+      // the account being reset can't approve its own reset either
+      if (checker.userId === userId) throw forbidden("another super admin must approve a reset of your own sign-in", "maker_is_checker");
       const r = await doResetMfa(tx, userId, checker.userId, req.reason);
       return {
+        // to the approver only (the maker never sees it); handed to the staff member in person
         result: { userId, temporaryPassword: r.temporaryPassword },
         after: async () => {
           await deps.sessions.revokeAllSessions(userId);
@@ -281,13 +303,14 @@ export function createIdentityService(deps: IdentityDeps) {
     },
 
     /** Safety: ban + revoke every session + denylist (workflow 16). */
-    async suspendUser(principal: Principal, userId: string, input: { reason: string; cityId: string; until?: Date }) {
+    async suspendUser(principal: Principal, userId: string, input: { reason: string; until?: Date }) {
       if (userId === principal.userId) throw forbidden("you can't suspend yourself");
       if (input.reason.trim().length < 10) throw badRequest("a reason is required (10+ characters)");
       const targetRoles = await assignmentsOf(db, userId);
-      // staff accounts are suspended by super admins; everyone else by safety officers in the city
+      // staff accounts are suspended by super admins; everyone else by safety officers of a city the
+      // user belongs to (their organisations' cities), or by a global holder
       if (isStaffUser(targetRoles)) authorize(principal, "staff:manage");
-      else authorize(principal, "user:suspend", { cityId: input.cityId });
+      else authorizeOnUser(principal, "user:suspend", await citiesOfUser(db, userId));
       if (hasRole({ ...principal, roles: targetRoles }, "SUPER_ADMIN") && (await superAdminsLeft(db)) <= 2) throw conflict("at least two super admins must remain");
       const pv = await db.$transaction(async (tx) => {
         await tx.user.update({ where: { id: userId }, data: { banned: true, banReason: input.reason, banExpires: input.until ?? null } }); // `banned` is the suspension (account_status stays ACTIVE/GUEST)
@@ -304,10 +327,10 @@ export function createIdentityService(deps: IdentityDeps) {
       return { userId, suspended: true };
     },
 
-    async reinstateUser(principal: Principal, userId: string, input: { reason: string; cityId: string }) {
+    async reinstateUser(principal: Principal, userId: string, input: { reason: string }) {
       const targetRoles = await assignmentsOf(db, userId);
       if (isStaffUser(targetRoles)) authorize(principal, "staff:manage");
-      else authorize(principal, "user:reinstate", { cityId: input.cityId });
+      else authorizeOnUser(principal, "user:reinstate", await citiesOfUser(db, userId));
       const pv = await db.$transaction(async (tx) => {
         const user = await tx.user.findUnique({ where: { id: userId } });
         if (!user) throw notFound("user");
@@ -434,7 +457,9 @@ export function createIdentityService(deps: IdentityDeps) {
 
     /**
      * A staff member lost their authenticator: new temporary password, authenticator removed (they
-     * enrol again). For a super admin this needs a second super admin (approval).
+     * enrol again). Always maker–checker: this only files the request. A different super admin
+     * approves it, and the temporary password goes to that approver alone (in the approval's
+     * answer, once), never to the person who asked, so no single admin can take over an account.
      */
     async resetMfa(principal: Principal, userId: string, reason: string) {
       authorize(principal, "staff:manage");
@@ -443,14 +468,11 @@ export function createIdentityService(deps: IdentityDeps) {
       const target = await db.user.findUnique({ where: { id: userId }, include: { accounts: { select: { providerId: true } } } });
       if (!target) throw notFound("user");
       if (!target.accounts.some((a) => a.providerId === "credential")) throw badRequest("only staff accounts have a password and authenticator");
-      if (splitRoles(target.role).includes(ROLES.SUPER_ADMIN.stored)) {
-        const req = await db.$transaction((tx) => approvals.create(tx, principal, "staff:reset_mfa", { userId }, reason));
-        return { userId, pendingApproval: req.id };
-      }
-      const r = await db.$transaction((tx) => doResetMfa(tx, userId, principal.userId, reason));
-      await deps.sessions.revokeAllSessions(userId);
-      await signals.permissionVersion(userId, r.pv);
-      return { userId, temporaryPassword: r.temporaryPassword };
+      const payload = { userId };
+      const pending = await db.approvalRequest.findFirst({ where: { action: "staff:reset_mfa", status: "PENDING", payload: { equals: payload } } });
+      if (pending) throw conflict("a reset for this account is already waiting for approval");
+      const req = await db.$transaction((tx) => approvals.create(tx, principal, "staff:reset_mfa", payload, reason));
+      return { userId, pendingApproval: req.id };
     },
 
     /**
@@ -635,7 +657,7 @@ export function createIdentityService(deps: IdentityDeps) {
       };
     },
 
-    /** Called by fleet-service when a driver is activated / suspended (workflow 02). */
+    /** Called by fleet-service when a driver is activated / suspended (workflow 02). `byService`: the caller's unverified name. */
     async setDriverRole(userId: string, active: boolean, byService: string) {
       const pv = await db.$transaction(async (tx) => {
         const user = await tx.user.findUnique({ where: { id: userId } });
@@ -649,7 +671,8 @@ export function createIdentityService(deps: IdentityDeps) {
         const v = await bumpPv(tx, userId);
         await writeOutbox(tx,
           { topic: active ? "role.granted" : "role.revoked", key: userId, payload: { userId, role: "DRIVER", byUserId: null } },
-          audit({ actorId: null, action: active ? "driver:activate" : "driver:suspend", resource: { type: "user", id: userId }, outcome: "EXECUTED", reason: `by ${byService}` }),
+          // the caller's name is its own claim (x-service-name), not an authenticated identity
+          audit({ actorId: null, action: active ? "driver:activate" : "driver:suspend", resource: { type: "user", id: userId }, outcome: "EXECUTED", reason: `internal call, claimed caller: ${byService}` }),
         );
         return v;
       });

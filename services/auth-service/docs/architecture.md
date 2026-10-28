@@ -121,7 +121,7 @@ sequenceDiagram
 
 Zod parsing happens before the principal is resolved on most routes, so a malformed request without a token answers 400, not 401.
 
-`/internal/*` routes call `internal(req)` instead of `requirePrincipal`: the `Authorization: Bearer` value must equal `INTERNAL_SERVICE_TOKEN` (constant-time compare). The `x-service-name` header is read and used only as the audit reason of the driver-role change.
+`/internal/*` routes call `internal(req)` instead of `requirePrincipal`: the `Authorization: Bearer` value must equal `INTERNAL_SERVICE_TOKEN` (constant-time compare). The `x-service-name` header is the caller's unverified claim: it's used only in the audit reason of the driver-role change, labelled "claimed caller", and never for authorization.
 
 ## Key design decisions (as implemented)
 
@@ -133,7 +133,11 @@ Zod parsing happens before the principal is resolved on most routes, so a malfor
 | Staff organisations never change through Better Auth | `hooks.ts` `assertNotStaff`, `better-auth.routes.ts` guard | Staff grants and revocations happen only in `identity/service.ts`, in one transaction |
 | Staff roles appear in tokens only after TOTP is enabled **and** the initial password is changed | `claims.ts` `selectRolesForSurface` | Until then the admin token has `roles: []` and a `setup` claim |
 | Claims are built from a fresh database read of the user, not Better Auth's cached session user | `claims.ts` | A role granted after sign-in reaches the next token |
-| Partner roles other than `FLEET_OWNER` / `CORPORATE_ADMIN` count only while the organisation is `VERIFIED`; suspended orgs and expired memberships count for nothing | `roles-codec.ts` `toAssignments` | |
+| Partner roles count only while the organisation is `VERIFIED`; suspended orgs and expired memberships count for nothing. The founder (`FLEET_OWNER` / `CORPORATE_ADMIN`) of an organisation still waiting keeps the role marked `pending` (claim `{ r, pendingOrg }`) | `roles-codec.ts` `toAssignments`, shared-authz `authorize.ts` | A pending role grants only `PENDING_ORG_PERMISSIONS` (finish onboarding): no booking or billing, payments, driver authorization or live location, in every service |
+| OTP sends and failed verifications are limited per phone number as well as per IP | `auth/otp-limits.ts`, `better-auth.routes.ts` | Many IPs can't brute-force a code or flood a number with SMS |
+| Staff MFA resets are always maker–checker; the temporary password goes to the approver only | `identity/service.ts` `resetMfa` | One super admin can't take over another staff account |
+| Suspend / reinstate are scoped by the target's organisations' cities, never a city in the request | `identity/service.ts` `authorizeOnUser` | No city → a global grant |
+| A verified organisation's display name is frozen; names are checked at creation | `hooks.ts` `checkOrganizationName` | The name goes into invitation SMS |
 | Phone-only users get a deterministic placeholder email `<digits>@phone.anbessa.invalid` | `password.ts` | Better Auth requires an email; invitations by phone use it |
 | Changing the phone number is not self-service | `better-auth.routes.ts` | `updatePhoneNumber` refused |
 | Permission matrix stored as data, edited with maker–checker | `authz/*` | Changes take effect without a release; guardrails keep super admins in control |
@@ -157,6 +161,7 @@ Shutdown (`SIGTERM`/`SIGINT`): clear the sweep interval, `app.close()`, stop the
 
 | What | Where | Lifetime / invalidation |
 |---|---|---|
+| Per-phone OTP counters | Redis, `otp:` prefix (`src/auth/otp-limits.ts`): `cool:`, `send:`, `fail:` + phone | 30 s / 1 h fixed windows. Without `REDIS_URL`, in memory |
 | Sessions and Better Auth rate-limit counters | Redis secondary storage, `ba:` prefix (`src/lib/secondary-storage.ts`). Sessions are also stored in Postgres (`storeSessionInDatabase: true`) so the directory can list them | Managed by Better Auth. Without `REDIS_URL`, sessions come from Postgres only and rate limits are in memory |
 | JWKS for verifying JWTs on `/api/identity` | in-process key set (`src/http/principal.ts` `betterAuthKeySet`), loaded from Better Auth's `getJwks()` | 5 minutes, and reloaded at once when a token carries an unknown `kid` |
 | Permission matrix | in-process registry (`shared-authz` `setAuthzSnapshot`) | Swapped right after an approved change commits; otherwise the sync above |

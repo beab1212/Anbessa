@@ -76,6 +76,10 @@ Format `resource:action`. Full list: [Permission catalogue](roles-and-permission
 
 The 13 checker permissions ([list](roles-and-permissions.md#approval-permissions)). Informational; not imported outside the lib.
 
+### `PENDING_ORG_PERMISSIONS: readonly Permission[]`
+
+What a role in a partner organisation that isn't verified yet (`RoleAssignment.pending`) may still do: `org:update`, `org:manage_members`, `document:upload`, `vehicle:register`, `vehicle:read`, `ticket:create`. Fixed in code, not part of the editable matrix; applied by `grantingAssignments` / `can` / `authorize`. See [tokens.md → Pending organisations](tokens.md#pending-organisations).
+
 ### `PERMISSION_GROUPS: { name: string; prefixes: string[] }[]`
 
 UI groups for the admin matrix editor ([table](roles-and-permissions.md#permission-groups)). Used by `apps/web`.
@@ -302,6 +306,8 @@ The principal's assignments that grant `permission` on `resource`: for each assi
 | `S` | `resource.ownerUserIds?.includes(principal.userId)` |
 | `O` | `a.scope === "ORG"` and `resource.orgId` is truthy and `a.orgId === resource.orgId` |
 | `C` | `a.scope === "GLOBAL"`; or `a.scope === "CITY"` and `resource.cityId` is truthy and `a.cityId === resource.cityId` |
+
+An assignment with `pending: true` counts only for `PENDING_ORG_PERMISSIONS` through an `O` grant; `citiesWith` ignores it.
 
 Empty array means denied. Not imported outside the lib; useful when you need to know *which* assignment granted access (e.g. for an audit record).
 

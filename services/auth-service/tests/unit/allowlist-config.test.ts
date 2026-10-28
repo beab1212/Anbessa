@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { isAllowed } from "../../src/auth/allowlist.js";
-import { loadConfig } from "../../src/config/index.js";
+import { DEV_TRUSTED_PROXIES, isIpOrCidr, loadConfig } from "../../src/config/index.js";
 
 describe("endpoint allowlist", () => {
   it.each([
@@ -38,6 +38,7 @@ describe("endpoint allowlist", () => {
 
 describe("config", () => {
   const base = {
+    NODE_ENV: "development",
     DATABASE_URL: "postgresql://x@localhost/db",
     BETTER_AUTH_SECRET: "a".repeat(64),
     AUTH_BASE_URL: "http://localhost:3001",
@@ -62,7 +63,7 @@ describe("config", () => {
         return String(e);
       }
     })();
-    for (const key of ["OTP_DELIVERY", "REDIS_URL", "KAFKA_BROKERS", "INTERNAL_SERVICE_TOKEN", "AUTH_RATE_LIMIT", "AUTH_BASE_URL", "DEV_LOGIN"]) {
+    for (const key of ["OTP_DELIVERY", "REDIS_URL", "KAFKA_BROKERS", "INTERNAL_SERVICE_TOKEN", "AUTH_RATE_LIMIT", "AUTH_BASE_URL", "DEV_LOGIN", "TRUSTED_PROXIES"]) {
       expect(err).toContain(key);
     }
   });
@@ -77,5 +78,33 @@ describe("config", () => {
     expect(() =>
       loadConfig({ ...base, DEV_LOGIN: "on", OTP_DELIVERY: "notification", NOTIFICATION_INTERNAL_URL: "http://n:3006", INTERNAL_SERVICE_TOKEN: "t".repeat(32) }),
     ).toThrow(/DEV_LOGIN/);
+  });
+
+  describe("TRUSTED_PROXIES", () => {
+    const prod = {
+      ...base, NODE_ENV: "production", AUTH_BASE_URL: "https://api.example.et", OTP_DELIVERY: "notification",
+      NOTIFICATION_INTERNAL_URL: "http://n:3006", INTERNAL_SERVICE_TOKEN: "t".repeat(32), REDIS_URL: "redis://r:6379", KAFKA_BROKERS: "k:9092",
+    };
+
+    it("defaults to loopback and private ranges outside production", () => {
+      expect(loadConfig(base).TRUSTED_PROXIES).toEqual(DEV_TRUSTED_PROXIES);
+    });
+
+    it("is required in production and parsed as a list", () => {
+      expect(() => loadConfig(prod)).toThrow(/TRUSTED_PROXIES/);
+      expect(loadConfig({ ...prod, TRUSTED_PROXIES: "10.42.0.0/16, 172.20.0.5" }).TRUSTED_PROXIES).toEqual(["10.42.0.0/16", "172.20.0.5"]);
+    });
+
+    it("refuses entries that aren't an IP or CIDR range", () => {
+      expect(() => loadConfig({ ...base, TRUSTED_PROXIES: "10.0.0.0/8,kong" })).toThrow(/kong/);
+      expect(() => loadConfig({ ...base, TRUSTED_PROXIES: "10.0.0.0/33" })).toThrow(/TRUSTED_PROXIES/);
+    });
+
+    it.each([
+      ["10.0.0.0/8", true], ["203.0.113.7", true], ["::1/128", true], ["fc00::/7", true],
+      ["10.0.0.0/", false], ["10.0.0.0/8/1", false], ["1.2.3.4/x", false], ["::/129", false], ["", false], ["localhost", false],
+    ] as const)("isIpOrCidr(%j) = %s", (value, ok) => {
+      expect(isIpOrCidr(value)).toBe(ok);
+    });
   });
 });

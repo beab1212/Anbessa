@@ -70,7 +70,7 @@ Found with `grep -r '@ride-app/shared-authz'` over `services/` and `apps/` (numb
 
 Every service listed with `TokenError` also imports `TokenCheckUnavailable` in its `src/middlewares/error-handler.ts` (mapped to 503 `auth_unavailable`).
 
-Exports not imported anywhere outside the lib (as of this writing): `APPROVAL_PERMISSIONS`, `GRANTABLE_STAFF_ROLES`, `isRoleCode`, `isKnownRole`, `grantsOf`, `grantingAssignments`, `ROLE_LABELS`, `resetAuthzSnapshot`, `RoleClaim`. Some are used inside the lib (`grantsOf` by `authorize`, `ROLE_LABELS` by `builtInSnapshot`).
+Exports not imported anywhere outside the lib (as of this writing): `APPROVAL_PERMISSIONS`, `PENDING_ORG_PERMISSIONS` (used by `authorize`), `GRANTABLE_STAFF_ROLES`, `isRoleCode`, `isKnownRole`, `grantsOf`, `grantingAssignments`, `ROLE_LABELS`, `resetAuthzSnapshot`, `RoleClaim`. Some are used inside the lib (`grantsOf` by `authorize`, `ROLE_LABELS` by `builtInSnapshot`).
 
 Every service's `package.json` lists it as `"@ride-app/shared-authz": "workspace:*"`.
 

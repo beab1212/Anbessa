@@ -14,6 +14,7 @@ import { createAuthzService } from "./authz/service.js";
 import { loadAuthzSnapshot } from "./authz/store.js";
 import { createAuthzSync } from "@ride-app/shared-authz";
 import { redisSecondaryStorage } from "./lib/secondary-storage.js";
+import { createOtpLimiter, memoryCounterStore, redisCounterStore } from "./auth/otp-limits.js";
 import { noopSignals, redisSignals, type SecuritySignals } from "./lib/signals.js";
 
 export interface ContainerOptions {
@@ -40,6 +41,8 @@ export function createContainer(config: Config, logger: Logger, opts: ContainerO
 
   const authDeps = { config, db, otp, ...(redis ? { secondaryStorage: redisSecondaryStorage(redis) } : {}) };
   const appAuth = createAppAuth(authDeps);
+  // per-phone OTP limits, shared through Redis; switched off with the rest of rate limiting (tests)
+  const otpLimits = config.AUTH_RATE_LIMIT === "on" ? createOtpLimiter(redis ? redisCounterStore(redis) : memoryCounterStore()) : undefined;
   const adminAuth = createAdminAuth(authDeps);
 
   const authz = createAuthzService({ db, logger, ...(redis ? { publisher: redis } : {}) });
@@ -64,7 +67,7 @@ export function createContainer(config: Config, logger: Logger, opts: ContainerO
   const requirePrincipal = createPrincipalResolver({ issuer: config.AUTH_ISSUER ?? config.AUTH_BASE_URL, keySet, signals });
 
   return {
-    config, db, redis, signals, appAuth, adminAuth, identity, authz, authzSync, requirePrincipal, devInbox,
+    config, db, redis, signals, appAuth, adminAuth, identity, authz, authzSync, requirePrincipal, devInbox, otpLimits,
     async close() {
       await authzSync.stop();
       await db.$disconnect();

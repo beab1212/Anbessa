@@ -1,3 +1,4 @@
+import { isIP } from "node:net";
 import { z } from "zod";
 
 const csv = z
@@ -5,9 +6,25 @@ const csv = z
   .default("")
   .transform((s) => s.split(",").map((v) => v.trim()).filter(Boolean));
 
+/**
+ * Development / test default for TRUSTED_PROXIES: loopback and the private ranges Docker and
+ * local networks use. Production must name its own (Kong's / the ingress network).
+ */
+export const DEV_TRUSTED_PROXIES = ["127.0.0.0/8", "::1/128", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7"];
+
+/** An IP address or CIDR range ("10.0.0.0/8", "2001:db8::/32", "203.0.113.7"). */
+export function isIpOrCidr(value: string): boolean {
+  const [ip, prefix, extra] = value.split("/");
+  const family = isIP(ip ?? "");
+  if (!family || extra !== undefined) return false;
+  if (prefix === undefined) return true;
+  return /^\d{1,3}$/.test(prefix) && Number(prefix) <= (family === 4 ? 32 : 128);
+}
+
 export const envSchema = z
   .object({
-    NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+    // no default: an unset NODE_ENV must not quietly turn on development behaviour
+    NODE_ENV: z.enum(["development", "test", "production"]),
     PORT: z.coerce.number().int().positive().default(3001),
     LOG_LEVEL: z.string().default("info"),
     DATABASE_URL: z.string().url(),
@@ -22,6 +39,11 @@ export const envSchema = z
     AUTH_INTERNAL_URL: z.string().url().optional(),
     APP_TRUSTED_ORIGINS: csv,
     ADMIN_TRUSTED_ORIGINS: csv,
+    // Proxies in front of us (Kong, the load balancer), as IPs or CIDR ranges. X-Forwarded-For is
+    // read from the right, skipping these, to find the client IP that rate limits key on. Without
+    // them Better Auth trusts only a single-entry header, so every proxied request would share one
+    // "unknown IP" bucket. Required in production; development defaults to DEV_TRUSTED_PROXIES.
+    TRUSTED_PROXIES: csv,
 
     REDIS_URL: z.string().url().optional(),
     KAFKA_BROKERS: z.string().optional().transform((v) => (v ? v.split(",").map((s) => s.trim()).filter(Boolean) : undefined)),
@@ -49,7 +71,10 @@ export const envSchema = z
       if (env.AUTH_RATE_LIMIT === "off") fail("AUTH_RATE_LIMIT", "rate limiting can't be disabled in production");
       if (env.DEV_LOGIN === "on") fail("DEV_LOGIN", "development sign-in is not allowed in production");
       if (!env.AUTH_BASE_URL.startsWith("https://")) fail("AUTH_BASE_URL", "must be https in production");
+      if (env.TRUSTED_PROXIES.length === 0) fail("TRUSTED_PROXIES", "required in production (the proxy network in front of auth-service, e.g. 10.0.0.0/8)");
     }
+    const badProxies = env.TRUSTED_PROXIES.filter((p) => !isIpOrCidr(p));
+    if (badProxies.length) fail("TRUSTED_PROXIES", `not an IP address or CIDR range: ${badProxies.join(", ")}`);
     if (env.DEV_LOGIN === "on" && env.OTP_DELIVERY !== "console") {
       fail("DEV_LOGIN", "development sign-in needs OTP_DELIVERY=console");
     }
@@ -64,6 +89,7 @@ export const envSchema = z
     ...env,
     AUTH_ISSUER: env.AUTH_ISSUER ?? env.AUTH_BASE_URL,
     AUTH_INTERNAL_URL: env.AUTH_INTERNAL_URL ?? `http://localhost:${env.PORT}`,
+    TRUSTED_PROXIES: env.TRUSTED_PROXIES.length ? env.TRUSTED_PROXIES : DEV_TRUSTED_PROXIES, // empty only outside production
   }));
 
 export type Config = z.infer<typeof envSchema>;

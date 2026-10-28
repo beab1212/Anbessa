@@ -39,6 +39,8 @@ How scope letters relate to scope types (from `covers()` in [`src/authorize.ts`]
 | `C` | the assignment is `GLOBAL` (covers every city), or the assignment is `CITY` and `assignment.cityId === resource.cityId` (both non-empty) |
 | `G` | always |
 
+An `ORG` assignment marked `pending` (the founder of an organisation that isn't verified yet) only counts for `PENDING_ORG_PERMISSIONS` (`org:update`, `org:manage_members`, `document:upload`, `vehicle:register`, `vehicle:read`, `ticket:create`) through an `O` grant, whatever the matrix says; see [tokens.md → Pending organisations](tokens.md#pending-organisations).
+
 ---
 
 ## Role catalogue
@@ -303,4 +305,5 @@ From [`tests/authorize.test.ts`](../tests/authorize.test.ts), for the built-in m
 - every permission in `MATRIX` is in `PERMISSIONS`;
 - `ride-admin` roles never have `S` grants; `ride-app` roles only have `S` or `O`;
 - no role holds both halves of `refund:request/approve`, `payout:prepare/approve`, `topup:record_cash/approve_cash`, `writeoff:request/approve`;
-- `SUPER_ADMIN` has none of `refund:approve`, `payout:approve`, `user:suspend`, `trip:assign`, `user:read_pii`.
+- `SUPER_ADMIN` has none of `refund:approve`, `payout:approve`, `user:suspend`, `trip:assign`, `user:read_pii`;
+- a pending `CORPORATE_ADMIN` / `FLEET_OWNER` keeps the onboarding permissions in its own organisation but gets no booking, billing, money, driver authorization or live location, even if the matrix were edited to give more; every `PENDING_ORG_PERMISSIONS` entry is an `O` grant of one of those two roles.

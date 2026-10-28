@@ -42,7 +42,8 @@ function shared(deps: AuthDeps, surface: "app" | "admin") {
       cookiePrefix: surface === "app" ? "anb" : "anb-admin",
       useSecureCookies: config.NODE_ENV === "production",
       defaultCookieAttributes: { sameSite: surface === "admin" ? "strict" : "lax", httpOnly: true },
-      ipAddress: { ipAddressHeaders: ["x-forwarded-for"] },
+      // the client IP is the rightmost X-Forwarded-For entry that isn't one of our proxies
+      ipAddress: { ipAddressHeaders: ["x-forwarded-for"], trustedProxies: config.TRUSTED_PROXIES },
     },
     user: {
       additionalFields: {

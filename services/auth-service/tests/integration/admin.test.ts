@@ -121,11 +121,16 @@ describe("directory, sessions and MFA", () => {
     expect((await r.call("GET", "/api/auth/token")).statusCode).toBe(401);
   });
 
-  it("resets a staff member's authenticator at once; a super admin's needs a second super admin", async () => {
+  it("every staff authenticator reset needs a second super admin, who alone receives the temporary password", async () => {
     const s = await createStaff(h);
     const res = await superA.identity("POST", `/api/identity/users/${s.id}/reset-mfa`, { reason: "phone with the authenticator was stolen" });
     expect(res.statusCode, res.body).toBe(200);
-    expect(res.json<{ temporaryPassword: string }>().temporaryPassword).toHaveLength(24);
+    expect(res.json()).toEqual({ userId: s.id, pendingApproval: expect.any(String) });
+    expect((await h.c.db.user.findUniqueOrThrow({ where: { id: s.id } })).mustChangePassword).not.toBe(true);
+    expect((await approve(superA, res.json<{ pendingApproval: string }>().pendingApproval)).statusCode).toBe(403); // maker ≠ checker
+    const executed = await approve(superB, res.json<{ pendingApproval: string }>().pendingApproval);
+    expect(executed.headers["cache-control"]).toBe("no-store");
+    expect(executed.json<{ temporaryPassword: string }>().temporaryPassword).toHaveLength(24);
     expect(await h.c.db.user.findUniqueOrThrow({ where: { id: s.id } })).toMatchObject({ twoFactorEnabled: false, mustChangePassword: true });
 
     const third = await createStaff(h, { role: "super_admin" });

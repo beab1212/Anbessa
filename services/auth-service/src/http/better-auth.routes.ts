@@ -1,7 +1,8 @@
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { fromNodeHeaders } from "better-auth/node";
 import type { Db } from "../db.js";
 import { isAllowed } from "../auth/allowlist.js";
+import { otpLimitKey, type OtpLimiter, type OtpRefusal } from "../auth/otp-limits.js";
 
 interface Handler {
   handler: (request: Request) => Promise<Response>;
@@ -21,7 +22,14 @@ function referencedOrganization(req: FastifyRequest): { id?: string; slug?: stri
  * Mount a Better Auth instance under `prefix`, serving only allowlisted endpoints.
  * On the app surface, organization endpoints may never target staff organizations.
  */
-export function mountBetterAuth(app: FastifyInstance, auth: Handler, opts: { prefix: string; surface: "app" | "admin"; db: Db }) {
+export function mountBetterAuth(
+  app: FastifyInstance,
+  auth: Handler,
+  opts: { prefix: string; surface: "app" | "admin"; db: Db; otpLimits?: OtpLimiter },
+) {
+  const refuse = (reply: FastifyReply, r: OtpRefusal) =>
+    reply.status(429).header("retry-after", String(r.retryAfterSeconds)).send({ error: r.code, message: r.message, retryAfterSeconds: r.retryAfterSeconds });
+
   app.route({
     method: ["GET", "POST"],
     url: `${opts.prefix}/*`,
@@ -34,6 +42,15 @@ export function mountBetterAuth(app: FastifyInstance, auth: Handler, opts: { pre
       // the phone is the identity (and the invitation address is derived from it).
       if (path === "/phone-number/verify" && (request.body as { updatePhoneNumber?: unknown } | undefined)?.updatePhoneNumber) {
         return reply.status(400).send({ error: "bad_request", message: "changing the phone number is not supported" });
+      }
+
+      // per-phone-number limits on top of Better Auth's per-IP ones (src/auth/otp-limits.ts)
+      const otpPhone = opts.otpLimits && (path === "/phone-number/send-otp" || path === "/phone-number/verify")
+        ? otpLimitKey((request.body as { phoneNumber?: unknown } | undefined)?.phoneNumber)
+        : undefined;
+      if (otpPhone) {
+        const refusal = path === "/phone-number/send-otp" ? await opts.otpLimits!.beforeSend(otpPhone) : await opts.otpLimits!.beforeVerify(otpPhone);
+        if (refusal) return refuse(reply, refusal);
       }
 
       if (opts.surface === "app" && path.startsWith("/organization/")) {
@@ -54,6 +71,7 @@ export function mountBetterAuth(app: FastifyInstance, auth: Handler, opts: { pre
         ...(request.body !== undefined && request.method !== "GET" ? { body: JSON.stringify(request.body) } : {}),
       });
       const res = await auth.handler(req);
+      if (otpPhone && path === "/phone-number/verify") await opts.otpLimits!.afterVerify(otpPhone, res.status);
 
       reply.status(res.status);
       for (const [key, value] of res.headers) {

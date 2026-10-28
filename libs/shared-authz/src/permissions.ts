@@ -48,6 +48,17 @@ export const APPROVAL_PERMISSIONS: readonly Permission[] = [
   "balance_policy:approve", "policy_override:approve", "authz:approve", "settings:approve",
 ];
 
+/**
+ * What a role held in a partner organisation that isn't verified yet may still do: finish onboarding
+ * (the company profile, its documents and vehicles, its members, a support ticket). Everything else —
+ * booking or billing trips, on-behalf booking, payments and balances, authorizing drivers, live
+ * location, other people's data — waits for verification. A fixed list in code, not part of the
+ * editable matrix: authorize() applies it to every pending assignment whatever the matrix says.
+ */
+export const PENDING_ORG_PERMISSIONS: readonly Permission[] = [
+  "org:update", "org:manage_members", "document:upload", "vehicle:register", "vehicle:read", "ticket:create",
+];
+
 /** Groups for screens that list permissions (the admin matrix editor). */
 export const PERMISSION_GROUPS: { name: string; prefixes: string[] }[] = [
   { name: "Trips", prefixes: ["trip"] },

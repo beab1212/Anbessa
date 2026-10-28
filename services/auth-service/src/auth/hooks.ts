@@ -13,6 +13,23 @@ const PARTNER_KINDS: OrgKind[] = ["FLEET", "CORPORATE"];
 const isStaffKind = (kind: unknown) => kind === "STAFF_CITY" || kind === "STAFF_HQ";
 const TIN = /^\d{10}$/;
 
+/**
+ * An organisation's display name is shown to others, notably in invitation SMS ("… invited you to
+ * join <name>"), so it must read as a company name and nothing else: letters (any script), digits,
+ * spaces and basic punctuation, at least one letter, 2–60 characters, and no web address or
+ * phone-number-like run of digits. Returns the tidied name, or why it's refused.
+ */
+export function checkOrganizationName(raw: unknown): { name: string } | { error: string } {
+  if (typeof raw !== "string") return { error: "name is required" };
+  const name = raw.normalize("NFC").replace(/\s+/g, " ").trim();
+  if (name.length < 2 || name.length > 60) return { error: "name must be 2 to 60 characters" };
+  if (!/^[\p{L}\p{M}\p{N} .,&'()-]+$/u.test(name)) return { error: "name may only contain letters, digits, spaces and . , & ' ( ) -" };
+  if (!/\p{L}/u.test(name)) return { error: "name must contain letters" };
+  if (/(?:https?|www)\b/i.test(name) || /[\p{L}\p{N}]\.[\p{L}]{2,}/u.test(name)) return { error: "name must not contain a web address" };
+  if (/(?:\d[\s().-]*){7,}/.test(name)) return { error: "name must not contain a phone number" };
+  return { name };
+}
+
 const forbid = (message: string) => new APIError("FORBIDDEN", { message });
 const bad = (message: string) => new APIError("BAD_REQUEST", { message });
 
@@ -44,12 +61,14 @@ export function createOrganizationHooks(db: Db) {
       if (!(await db.city.findUnique({ where: { id: cityId } }))) throw bad("unknown cityId");
       if (!organization.legalName || typeof organization.legalName !== "string") throw bad("legalName is required");
       if (!TIN.test(String(organization.tin ?? ""))) throw bad("tin must be 10 digits");
+      const named = checkOrganizationName(organization.name);
+      if ("error" in named) throw bad(named.error);
       // checked here, before Better Auth writes the row: the unique index would otherwise surface as a 500
       if (await db.organization.findFirst({ where: { kind, tin: String(organization.tin) }, select: { id: true } })) {
         throw bad("a company with this TIN is already registered");
       }
       // status is never client-controlled
-      return { data: { ...organization, status: "PENDING" } };
+      return { data: { ...organization, name: named.name, status: "PENDING" } };
     },
 
     async afterCreateOrganization({ organization, user }: { organization: Record<string, unknown>; user: { id: string } }) {
@@ -66,6 +85,16 @@ export function createOrganizationHooks(db: Db) {
       }
       const org = await db.organization.findUnique({ where: { id: member.organizationId } });
       assertNotStaff(org?.kind, "updates");
+      if ("name" in organization) {
+        // the same name sent back with other changes (the partner portal sends name + logo) is no change
+        if (organization.name === org?.name) return;
+        // checked at verification and shown in invitation SMS: a verified name doesn't change
+        // (there is no staff rename either; a new name means a new verification)
+        if (org?.status !== "PENDING") throw forbid("the name of a verified organization can't be changed");
+        const named = checkOrganizationName(organization.name);
+        if ("error" in named) throw bad(named.error);
+        return { data: { ...organization, name: named.name } };
+      }
     },
 
     async beforeAddMember({ member, organization }: { member: { userId: string; role: string }; organization: Record<string, unknown> }) {

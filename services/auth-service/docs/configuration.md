@@ -23,10 +23,11 @@ All configuration is environment variables, validated with Zod at start (`src/co
 | `OTP_DELIVERY` | `notification` \| `console` | `console` | must be `notification` | `console` logs codes (warning at start) |
 | `NOTIFICATION_INTERNAL_URL` | URL, optional | unset | required with `notification` | notification-service base URL |
 | `INTERNAL_SERVICE_TOKEN` | string ≥ 32, optional | unset | **required** | Accepted bearer on `/internal/*` and sent to notification-service. Unset → `/internal/*` answers 403 |
-| `AUTH_RATE_LIMIT` | `on` \| `off` | `on` | must be `on` | Better Auth rate limiting (tests turn it off) |
+| `TRUSTED_PROXIES` | comma-separated IPs / CIDR ranges | loopback + private ranges (`DEV_TRUSTED_PROXIES`: `127.0.0.0/8, ::1/128, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fc00::/7`) | **required** (Kong's / the ingress network) | Better Auth `advanced.ipAddress.trustedProxies` and Fastify `trustProxy`. The client IP is the rightmost `X-Forwarded-For` entry outside these ranges. Without it Better Auth trusts only a single-entry header and every proxied request lands in one shared rate-limit bucket. Invalid entries are refused at start |
+| `AUTH_RATE_LIMIT` | `on` \| `off` | `on` | must be `on` | Better Auth rate limiting and the per-phone OTP limits (tests turn it off) |
 | `DEV_LOGIN` | `on` \| `off` | `off` | must be `off` | Mounts `/api/dev/*` and keeps console OTPs in memory |
 
-`.env.example` sets `NODE_ENV=development`, `PORT=3001`, `LOG_LEVEL=debug`, a local `DATABASE_URL`, `REDIS_URL`, `KAFKA_BROKERS`, `AUTH_BASE_URL=http://localhost:3001`, both origin lists `http://localhost:5173`, `OTP_DELIVERY=console`, `NOTIFICATION_INTERNAL_URL=http://localhost:3006`, `DEV_LOGIN=on`, and leaves the two secrets blank. It does not list `AUTH_ISSUER`, `AUTH_INTERNAL_URL` or `AUTH_RATE_LIMIT`.
+`.env.example` sets `NODE_ENV=development`, `PORT=3001`, `LOG_LEVEL=debug`, a local `DATABASE_URL`, `REDIS_URL`, `KAFKA_BROKERS`, `AUTH_BASE_URL=http://localhost:3001`, both origin lists `http://localhost:5173`, `OTP_DELIVERY=console`, `NOTIFICATION_INTERNAL_URL=http://localhost:3006`, `DEV_LOGIN=on`, a blank `TRUSTED_PROXIES` (development default), and leaves the two secrets blank. It does not list `AUTH_ISSUER`, `AUTH_INTERNAL_URL` or `AUTH_RATE_LIMIT`.
 
 ## Cross-field rules
 
@@ -34,7 +35,8 @@ Enforced in `superRefine` (`src/config/index.ts`), covered by `tests/unit/allowl
 
 | Condition | Rule |
 |---|---|
-| `NODE_ENV=production` | `OTP_DELIVERY ≠ console`; `REDIS_URL`, `KAFKA_BROKERS`, `INTERNAL_SERVICE_TOKEN` set; `AUTH_RATE_LIMIT ≠ off`; `DEV_LOGIN ≠ on`; `AUTH_BASE_URL` starts with `https://` |
+| `NODE_ENV=production` | `OTP_DELIVERY ≠ console`; `REDIS_URL`, `KAFKA_BROKERS`, `INTERNAL_SERVICE_TOKEN` set; `AUTH_RATE_LIMIT ≠ off`; `DEV_LOGIN ≠ on`; `AUTH_BASE_URL` starts with `https://`; `TRUSTED_PROXIES` set |
+| always | every `TRUSTED_PROXIES` entry is an IP address or CIDR range |
 | `DEV_LOGIN=on` | `OTP_DELIVERY=console` |
 | `OTP_DELIVERY=notification` | `NOTIFICATION_INTERNAL_URL` and `INTERNAL_SERVICE_TOKEN` set |
 

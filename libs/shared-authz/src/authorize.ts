@@ -3,7 +3,7 @@
 
 import type { ScopeLetter } from "./matrix.js";
 import { grantsOf } from "./registry.js";
-import type { Permission } from "./permissions.js";
+import { PENDING_ORG_PERMISSIONS, type Permission } from "./permissions.js";
 import type { Principal, RoleAssignment } from "./principal.js";
 
 /** Scope attributes of the resource being acted on. Omit what doesn't apply. */
@@ -37,10 +37,18 @@ function covers(letter: ScopeLetter, a: RoleAssignment, principal: Principal, r:
   }
 }
 
+/**
+ * A role in an organisation that isn't verified yet counts only for onboarding
+ * (PENDING_ORG_PERMISSIONS), and only inside that organisation (an "O" grant).
+ */
+const pendingBlocks = (a: RoleAssignment, permission: Permission, letter: ScopeLetter | undefined) =>
+  !!a.pending && (letter !== "O" || !PENDING_ORG_PERMISSIONS.includes(permission));
+
 /** The assignments that grant `permission` on `resource` (empty = denied). */
 export function grantingAssignments(principal: Principal, permission: Permission, resource: ResourceScope = {}): RoleAssignment[] {
   return principal.roles.filter((a) => {
     const letter = grantsOf(a.role)[permission];
+    if (pendingBlocks(a, permission, letter)) return false;
     return letter !== undefined && covers(letter, a, principal, resource);
   });
 }
@@ -57,6 +65,7 @@ export function authorize(principal: Principal, permission: Permission, resource
 export function citiesWith(principal: Principal, permission: Permission): string[] | "*" {
   const cities = new Set<string>();
   for (const a of principal.roles) {
+    if (a.pending) continue; // an unverified organisation never reaches beyond itself
     const letter = grantsOf(a.role)[permission];
     if (letter === "G" || (letter === "C" && a.scope === "GLOBAL")) return "*";
     if (letter === "C" && a.scope === "CITY" && a.cityId) cities.add(a.cityId);

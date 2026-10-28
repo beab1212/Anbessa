@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  authorize, AuthorizationError, can, citiesWith, MATRIX, parseRoleClaims, PERMISSIONS,
-  ROLE_CODES, ROLES, rolesForOrgKind, toRoleClaim, type Principal,
+  authorize, AuthorizationError, builtInSnapshot, can, citiesWith, MATRIX, parseRoleClaims, PENDING_ORG_PERMISSIONS, PERMISSIONS,
+  resetAuthzSnapshot, ROLE_CODES, ROLES, rolesForOrgKind, setAuthzSnapshot, toRoleClaim, type Principal,
 } from "../src/index.js";
 
 const principal = (roles: Principal["roles"], userId = "u1", audience: Principal["audience"] = "ride-app"): Principal => ({
@@ -108,5 +108,53 @@ describe("claims", () => {
     expect(rolesForOrgKind("CORPORATE")).not.toContain("DISPATCHER");
     expect(rolesForOrgKind("STAFF_CITY")).toContain("DISPATCHER");
     expect(rolesForOrgKind("STAFF_CITY")).not.toContain("SUPER_ADMIN");
+  });
+});
+
+describe("roles in a partner organisation that isn't verified yet", () => {
+  const pendingAdmin = principal([{ role: "CORPORATE_ADMIN", scope: "ORG", orgId: "org-1", pending: true }]);
+  const pendingOwner = principal([{ role: "FLEET_OWNER", scope: "ORG", orgId: "org-2", pending: true }]);
+
+  it("keep the onboarding permissions inside their own organisation", () => {
+    expect(can(pendingAdmin, "org:update", { orgId: "org-1" })).toBe(true);
+    expect(can(pendingAdmin, "document:upload", { orgId: "org-1" })).toBe(true);
+    expect(can(pendingOwner, "vehicle:register", { orgId: "org-2" })).toBe(true);
+    expect(can(pendingAdmin, "org:update", { orgId: "org-other" })).toBe(false);
+  });
+
+  it("grant no booking, billing, money, driver authorization or live location", () => {
+    for (const perm of ["trip:create", "trip:create_on_behalf", "trip:bill_corporate", "trip:read", "payment:read", "corporate:manage_policies", "corporate:read_invoices"] as const) {
+      expect(can(pendingAdmin, perm, { orgId: "org-1" })).toBe(false);
+    }
+    for (const perm of ["vehicle:authorize_driver", "location:read_live", "driver:read", "earnings:read", "balance:read", "topup:create", "trip:read"] as const) {
+      expect(can(pendingOwner, perm, { orgId: "org-2" })).toBe(false);
+    }
+    // the same roles once verified
+    expect(can(principal([{ role: "CORPORATE_ADMIN", scope: "ORG", orgId: "org-1" }]), "trip:bill_corporate", { orgId: "org-1" })).toBe(true);
+  });
+
+  it("every onboarding permission is an org grant of FLEET_OWNER or CORPORATE_ADMIN (the list stays meaningful)", () => {
+    for (const perm of PENDING_ORG_PERMISSIONS) expect(MATRIX.FLEET_OWNER[perm] ?? MATRIX.CORPORATE_ADMIN[perm]).toBe("O");
+  });
+
+  it("stay limited even if the matrix were edited to give the role more", () => {
+    setAuthzSnapshot({ ...builtInSnapshot(), matrix: { ...builtInSnapshot().matrix, CORPORATE_ADMIN: { "org:update": "G", "trip:bill_corporate": "O" } } });
+    try {
+      expect(can(pendingAdmin, "org:update", { orgId: "org-other" })).toBe(false);
+      expect(can(pendingAdmin, "trip:bill_corporate", { orgId: "org-1" })).toBe(false);
+      expect(citiesWith(pendingAdmin, "org:update")).toEqual([]);
+    } finally {
+      resetAuthzSnapshot();
+    }
+  });
+
+  it("travel as their own claim key, so readers that don't know it see no organisation", () => {
+    const claim = toRoleClaim({ role: "CORPORATE_ADMIN", scope: "ORG", orgId: "org-1", pending: true });
+    expect(claim).toEqual({ r: "CORPORATE_ADMIN", pendingOrg: "org-1" });
+    expect(parseRoleClaims([claim], "ride-app")).toEqual([{ role: "CORPORATE_ADMIN", scope: "ORG", orgId: "org-1", pending: true }]);
+    // a claim with both keys is read as pending
+    expect(parseRoleClaims([{ r: "FLEET_OWNER", org: "o", pendingOrg: "o" }], "ride-app")[0]?.pending).toBe(true);
+    // tokens from before the change (plain `org`) still parse as before
+    expect(parseRoleClaims([{ r: "FLEET_OWNER", org: "o" }], "ride-app")).toEqual([{ role: "FLEET_OWNER", scope: "ORG", orgId: "o" }]);
   });
 });

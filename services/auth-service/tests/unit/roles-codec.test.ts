@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { can, toRoleClaim } from "@ride-app/shared-authz";
 import { joinRoles, splitRoles, toAssignments, type MembershipRow } from "../../src/auth/roles-codec.js";
 
 const org = (kind: string, status = "VERIFIED", id = "org-1", cityId = "addis-ababa") => ({ id, kind, cityId, status });
@@ -59,8 +60,23 @@ describe("toAssignments", () => {
     expect(toAssignments("", rows)).toEqual([]);
   });
 
-  it("keeps only the owner/admin of a partner organisation that isn't verified yet", () => {
+  it("keeps only the owner/admin of a partner organisation that isn't verified yet, marked pending", () => {
     const rows = [member("fleet_owner", org("FLEET", "PENDING")), member("fleet_driver", org("FLEET", "PENDING"))];
-    expect(toAssignments("", rows)).toEqual([{ role: "FLEET_OWNER", scope: "ORG", orgId: "org-1" }]);
+    expect(toAssignments("", rows)).toEqual([{ role: "FLEET_OWNER", scope: "ORG", orgId: "org-1", pending: true }]);
+  });
+
+  it("a founder of an unverified company can finish onboarding but can't book or bill rides", () => {
+    const roles = toAssignments("rider", [member("corporate_admin", org("CORPORATE", "PENDING"))]);
+    const p = { userId: "u1", audience: "ride-app" as const, roles, permissionVersion: 0, amr: [] };
+    expect(can(p, "org:update", { orgId: "org-1" })).toBe(true);
+    expect(can(p, "document:upload", { orgId: "org-1" })).toBe(true);
+    for (const perm of ["trip:bill_corporate", "trip:create_on_behalf", "trip:create", "payment:read"] as const) {
+      expect(can(p, perm, { orgId: "org-1" })).toBe(false);
+    }
+    // and the token carries it as a pending organisation
+    expect(roles.map(toRoleClaim)).toContainEqual({ r: "CORPORATE_ADMIN", pendingOrg: "org-1" });
+    // once verified the same membership is a full role
+    const verified = toAssignments("", [member("corporate_admin", org("CORPORATE"))]);
+    expect(verified).toEqual([{ role: "CORPORATE_ADMIN", scope: "ORG", orgId: "org-1" }]);
   });
 });
