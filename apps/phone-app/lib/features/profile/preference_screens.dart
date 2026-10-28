@@ -40,8 +40,9 @@ class SwitchRow extends StatelessWidget {
     return MergeSemantics(
       child: InkWell(
         onTap: onChanged == null ? null : () => onChanged!(!value),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 10),
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 60),
+          padding: const EdgeInsets.symmetric(vertical: 14),
           child: Row(
             children: [
               Expanded(
@@ -63,15 +64,29 @@ class SwitchRow extends StatelessWidget {
   }
 }
 
-/// Rows in one kit card.
+/// Rows in one kit card, with soft hairlines between them and room below the card.
 class CardColumn extends StatelessWidget {
   const CardColumn({super.key, required this.children});
   final List<Widget> children;
   @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(bottom: 12),
-        child: AppCard(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: children)),
-      );
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 20),
+      child: AppCard(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (final (i, w) in children.indexed) ...[
+              if (i > 0) Divider(height: 1, thickness: 1, color: c.border.withValues(alpha: 0.8)),
+              w,
+            ],
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class NotificationsScreen extends ConsumerWidget {
@@ -94,7 +109,7 @@ class NotificationsScreen extends ConsumerWidget {
     return AccountPage(
       title: l.notifications,
       children: [
-        Padding(padding: const EdgeInsets.fromLTRB(4, 4, 4, 12), child: Text(l.marketingTitle, style: AnbessaType.title.copyWith(color: context.colors.text))),
+        Padding(padding: const EdgeInsets.fromLTRB(4, 4, 4, 14), child: Text(l.marketingTitle, style: AnbessaType.title.copyWith(color: context.colors.text))),
         CardColumn(
           children: [
             if (marketing.isLoading && m == null)
@@ -205,7 +220,7 @@ class NavigationPrefsScreen extends ConsumerWidget {
             SwitchRow(title: l.keepAwake, value: p.keepAwake, onChanged: (v) => ref.read(navPrefsProvider.notifier).set(keepAwake: v)),
           ],
         ),
-        Padding(padding: const EdgeInsets.fromLTRB(4, 8, 4, 12), child: Text(l.navApp, style: AnbessaType.title.copyWith(color: c.text))),
+        Padding(padding: const EdgeInsets.fromLTRB(4, 8, 4, 14), child: Text(l.navApp, style: AnbessaType.title.copyWith(color: c.text))),
         OptionCard(title: l.navAsk, icon: Icons.help_outline_rounded, selected: p.ask, onTap: () => ref.read(navPrefsProvider.notifier).set(ask: true)),
         OptionCard(title: l.navGoogleMaps, icon: Icons.map_outlined, selected: !p.ask && p.app == NavApp.google, onTap: () => ref.read(navPrefsProvider.notifier).set(ask: false, app: NavApp.google)),
         OptionCard(title: l.navWaze, icon: Icons.directions_outlined, selected: !p.ask && p.app == NavApp.waze, onTap: () => ref.read(navPrefsProvider.notifier).set(ask: false, app: NavApp.waze)),

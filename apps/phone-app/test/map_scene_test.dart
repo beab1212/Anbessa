@@ -12,6 +12,7 @@ import 'package:phone_app/features/maps/anbessa_map.dart';
 import 'package:phone_app/features/maps/nearby_cars_layer.dart';
 import 'package:phone_app/features/maps/scene/map_scene.dart';
 import 'package:phone_app/features/maps/scene/scene_geojson.dart';
+import 'package:phone_app/features/maps/scene/scene_images.dart';
 import 'package:phone_app/features/maps/scene/scene_style.dart';
 import 'package:ride_app_core/ride_app_core.dart';
 
@@ -131,6 +132,61 @@ void main() {
         expect(l.layout['icon-allow-overlap'], true);
       }
       expect(layer<ml.SymbolStyleLayer>(SceneIds.nearbyCars).paint['icon-opacity'], ['get', 'opacity']);
+    });
+
+    test('3D cars: sized with the zoom, never past the image, a sensible minimum', () {
+      for (final (id, stops) in [(SceneIds.driverCar, driverCarWidthStops), (SceneIds.nearbyCars, nearbyCarWidthStops)]) {
+        final size = layer<ml.SymbolStyleLayer>(id).layout['icon-size']! as List;
+        expect(size.sublist(0, 3), [
+          'interpolate',
+          ['exponential', 1.5],
+          ['zoom'],
+        ]);
+        final values = [for (var i = 4; i < size.length; i += 2) size[i] as double];
+        expect(values, hasLength(stops.length));
+        // grows with the zoom, from at least 12 px wide, and only ever scales the image down
+        for (var i = 1; i < values.length; i++) {
+          expect(values[i], greaterThan(values[i - 1]));
+        }
+        expect(values.first * carImageWidth * look.imageScale, greaterThanOrEqualTo(12));
+        expect(values.last, lessThanOrEqualTo(1 / look.imageScale));
+        expect(layer<ml.SymbolStyleLayer>(id).layout['icon-anchor'], 'center');
+      }
+      // the followed car is never smaller than the cars around
+      for (var i = 0; i < driverCarWidthStops.length; i++) {
+        expect(driverCarWidthStops[i].$2, greaterThanOrEqualTo(nearbyCarWidthStops[i].$2));
+      }
+    });
+
+    test('a soft contact shadow lies right under each car, the same size, flat on the map', () {
+      final ids = layers.map((l) => l.id).toList();
+      for (final (shadow, car) in [(SceneIds.driverShadow, SceneIds.driverCar), (SceneIds.nearbyShadow, SceneIds.nearbyCars)]) {
+        expect(ids.indexOf(shadow), ids.indexOf(car) - 1);
+        final s = layer<ml.SymbolStyleLayer>(shadow), c = layer<ml.SymbolStyleLayer>(car);
+        expect(s.sourceId, c.sourceId);
+        expect(s.layout['icon-image'], SceneIds.imgCarShadow);
+        for (final k in ['icon-size', 'icon-rotate', 'icon-rotation-alignment', 'icon-pitch-alignment', 'icon-anchor']) {
+          expect(s.layout[k], c.layout[k], reason: k);
+        }
+      }
+      expect(layer<ml.SymbolStyleLayer>(SceneIds.nearbyShadow).paint['icon-opacity'], ['get', 'opacity']);
+      // the shadow image has room for its blur around the car's footprint
+      final car = carImage(AnbessaColors.light, 3), shadow = carShadowImage(AnbessaColors.light, 3);
+      expect(shadow.width, greaterThan(car.width + 3 * 10));
+      expect(shadow.height, greaterThan(car.height + 3 * 10));
+      // the car image is painted at its largest shown size, crisp at the device's pixel ratio
+      expect(car.width, ((carImageWidth + 2) * 3).ceil());
+    });
+
+    test('labels over cars rise with the car as it grows', () {
+      for (final id in [SceneIds.driverLabel, SceneIds.nearbyLabel]) {
+        final off = layer<ml.SymbolStyleLayer>(id).layout['icon-offset']! as List;
+        expect(off.first, 'interpolate');
+        final ys = [for (var i = 4; i < off.length; i += 2) ((off[i] as List)[1] as List)[1] as double];
+        for (var i = 1; i < ys.length; i++) {
+          expect(ys[i], lessThan(ys[i - 1]));
+        }
+      }
     });
 
     test('the car is drawn above the routes and pins', () {

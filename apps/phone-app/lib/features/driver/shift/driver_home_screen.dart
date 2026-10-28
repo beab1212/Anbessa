@@ -1,6 +1,9 @@
 // The driver's home (workflow 04): the map following their car, health chips, the balance
-// banner, a sheet with today's numbers and the car, and one slide to go online or offline. A
-// trip offer slides in over it, with its pickup and drop-off drawn on the map.
+// banner, a sheet with today's numbers and the car, and one slide to go online or offline. While
+// online with no offer and no trip, the driver sees the rider's searching look: amber radar rings
+// pulsing around their own position on the map and "Looking for trips…" with the locating dot in
+// the sheet (still rings when motion is reduced). A trip offer slides in over it, with its pickup
+// and drop-off drawn on the map.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -15,6 +18,7 @@ import '../../../core/realtime/realtime_hub.dart';
 import '../../../core/router/routes.dart';
 import '../../../core/state.dart';
 import '../../maps/anbessa_map.dart';
+import '../../rider/trip/active_trip_controller.dart';
 import '../../shell/shells.dart';
 import '../earnings/earnings_controller.dart';
 import '../earnings/earnings_summary_controller.dart';
@@ -62,8 +66,12 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> with Single
     final offer = ref.watch(offerProvider);
     final balance = ref.watch(balanceProvider).value;
     final o = offer.offer;
-    // the raw fix only matters while an offer is drawn (the car itself is animated without rebuilds)
-    final me = o == null ? null : ref.watch(lastPositionProvider);
+    final onTrip = ref.watch(activeTripProvider.select((t) => t.value?.isActive ?? false));
+    // online, nothing offered, no trip: searching (radar on the map, "Looking for trips…")
+    final searching = shift.online && o == null && offer.notice == null && !onTrip;
+    // the raw fix only matters while an offer is drawn or the radar stands on it (the car itself
+    // is animated without rebuilds)
+    final me = o == null && !searching ? null : ref.watch(lastPositionProvider);
     final rt = ref.watch(realtimeStateProvider).value ?? RealtimeState.offline;
     final bannerH = ref.watch(bannerHeightProvider);
     final today = ref.watch(earningsSummaryProvider('today')).value;
@@ -100,6 +108,14 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> with Single
             topInset: top + 56,
             sheetHeight: o == null ? _sheetHeight : null,
             bottomInset: o == null ? 0 : 420,
+            overlays: [
+              if (searching && me != null)
+                MapOverlay(
+                  point: LatLng(me.lat, me.lng),
+                  size: const Size(driverRadarSize, driverRadarSize),
+                  child: const IgnorePointer(child: RadarRings(key: ValueKey('driver-radar'), size: driverRadarSize)),
+                ),
+            ],
           ),
           // status and health
           Positioned(
@@ -170,7 +186,7 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> with Single
               builder: (context, _) => AnimatedSwitcherX(
                 child: KeyedSubtree(
                   key: ValueKey(shift.online),
-                  child: shift.online ? _online(context, shift, today) : _offline(context, shift, vehicles, chosen, today),
+                  child: shift.online ? _online(context, shift, today, searching: searching) : _offline(context, shift, vehicles, chosen, today),
                 ),
               ),
             ),
@@ -221,7 +237,7 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> with Single
               children: [
                 Text(title, style: AnbessaType.h2.copyWith(color: c.text)),
                 const SizedBox(height: 4),
-                Text(sub, maxLines: 2, overflow: TextOverflow.ellipsis, style: AnbessaType.caption.copyWith(color: c.muted)),
+                Text(sub, maxLines: 3, overflow: TextOverflow.ellipsis, style: AnbessaType.caption.copyWith(color: c.muted)),
               ],
             ),
           ),
@@ -300,21 +316,36 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> with Single
     );
   }
 
-  Widget _online(BuildContext context, ShiftState shift, EarningsSummary? today) {
+  /// Online: while [searching], "Looking for trips…" with the rider's locating dot (the
+  /// radar is on the map); otherwise (an offer or a trip is up) the plain waiting headline.
+  Widget _online(BuildContext context, ShiftState shift, EarningsSummary? today, {required bool searching}) {
     final l = context.l10n;
     final c = context.colors;
     final v = shift.vehicle;
+    final car = v == null ? null : '${v.plateNumber} · ${v.label}';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
-        _headline(
-          context,
-          title: l.waitingForOffers,
-          sub: v == null ? l.drv2OnlineLede : '${v.plateNumber} · ${v.label}',
-          online: true,
-          lead: ExcludeSemantics(child: SizedBox(width: 48, height: 48, child: RadarPulse(color: c.accent, size: 48, rings: 2))),
-        ),
+        if (searching)
+          Semantics(
+            liveRegion: true,
+            child: _headline(
+              context,
+              title: l.drv3LookingForTrips,
+              sub: car == null ? l.drv3LookingForTripsLede : '${l.drv3LookingForTripsLede}\n$car',
+              online: true,
+              lead: const LocatingDot(key: ValueKey('driver-searching'), size: 44),
+            ),
+          )
+        else
+          _headline(
+            context,
+            title: l.waitingForOffers,
+            sub: car ?? l.drv2OnlineLede,
+            online: true,
+            lead: ExcludeSemantics(child: SizedBox(width: 48, height: 48, child: RadarPulse(color: c.accent, size: 48, rings: 2))),
+          ),
         _stats(context, shift, today),
       ],
     );
@@ -334,6 +365,9 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen> with Single
     );
   }
 }
+
+/// The radar rings around the driver's position while they look for trips (the rider's size).
+const driverRadarSize = 220.0;
 
 /// Development only (Linux, FAKE_LOCATION=on): steer the fake position. "Drive to target" moves
 /// at 40 km/h towards the active trip's pickup, then drop-off.

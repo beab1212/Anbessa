@@ -74,7 +74,8 @@ class FloatingBannerStack extends StatelessWidget {
       child: _Measured(
         onHeight: onHeightChanged,
         child: AnimatedSize(
-          duration: AnbessaMotion.of(context, AnbessaMotion.slow),
+          // never zero: a zero-length AnimatedSize re-dirties its own layout (reduced motion)
+          duration: AnbessaMotion.reduced(context) ? const Duration(milliseconds: 1) : AnbessaMotion.slow,
           curve: AnbessaMotion.emphasized,
           alignment: Alignment.topCenter,
           child: Column(

@@ -1,8 +1,10 @@
-// Account (both modes), the GoRide kit's p. 148 / 152: the logo, "Account" and ⋮ on top; a profile
-// card (photo, name, phone, rating · trips; tap → Personal Info) with the driver's balance and
-// "Top up"; then one card of rows with outline icons and chevrons (mode switch, Saved Addresses,
-// Notifications, Payment Methods, Account & Security, App Appearance, Language, Emergency
-// contact, Organizations, Help & Support, the driver's own rows) ending with a red Logout.
+// Account (both modes), the GoRide kit's p. 148 / 152 in a calmer layout: the logo, "Account" and
+// ⋮ on top; a roomy profile card (photo, name, phone, rating · trips; tap → Personal Info) with
+// the driver's balance and "Top up"; then a few small cards under quiet section titles: Ride (or
+// Driving: the mode switch and the mode's own rows), Preferences (Notifications, App Appearance,
+// Language), Safety & support (Emergency contact, Help & Support) and Account (Account & Security,
+// Organizations). Rows are at least 60 px with a soft tinted 40 px icon circle; hairlines start
+// past the icon. Logout is its own quiet card at the bottom, above the version.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -78,33 +80,42 @@ class AccountScreen extends ConsumerWidget {
             ? (Icons.directions_car_outlined, l.switchToDriver, null, AppMode.driver)
             : (Icons.directions_car_outlined, l.becomeDriver, l.becomeDriverLede, AppMode.driver);
 
-    final rows = <Widget>[
-      AccountRow(icon: modeIcon, iconColor: c.accentText, title: modeTitle, subtitle: modeSub, onTap: () => ref.read(modeProvider.notifier).set(modeTarget)),
-      if (!driver) ...[
-        AccountRow(icon: Icons.location_on_outlined, title: l.accSavedAddresses, onTap: () => context.push(Routes.savedPlaces)),
-        if (scheduled) AccountRow(icon: Icons.event_outlined, title: l.scheduledRides, onTap: () => context.push(Routes.scheduled)),
-      ],
-      if (driver) ...[
-        AccountRow(icon: Icons.directions_car_outlined, title: l.vehicles, onTap: () => context.push(Routes.driverVehicles)),
-        AccountRow(icon: Icons.navigation_outlined, title: l.navigation, onTap: () => context.push(Routes.navigationPrefs)),
-        AccountRow(icon: Icons.account_balance_wallet_outlined, title: l.tabEarnings, onTap: () => context.go(Routes.driverEarnings)),
-        if (support) AccountRow(icon: Icons.backpack_outlined, title: l.lostItems, subtitle: l.driverLostItemsTileLede, onTap: () => context.push(Routes.lostItems)),
-      ],
-      AccountRow(icon: Icons.notifications_none_rounded, title: l.notifications, onTap: () => context.push(Routes.notifications)),
-      if (!driver) AccountRow(icon: Icons.credit_card_outlined, title: l.accPaymentMethods, onTap: () => context.push(Routes.paymentPrefs)),
-      AccountRow(icon: Icons.shield_outlined, title: l.accAccountSecurity, onTap: () => context.push(Routes.security)),
-      AccountRow(icon: Icons.remove_red_eye_outlined, title: l.accAppAppearance, onTap: () => context.push(Routes.appearance)),
-      AccountRow(icon: Icons.language_rounded, title: l.language, value: language, onTap: () => context.push(Routes.language)),
-      AccountRow(icon: Icons.emergency_outlined, iconColor: c.danger, title: l.emergencyContact, subtitle: ref.watch(emergencyContactProvider)?.name ?? l.notSet, onTap: () => context.push(Routes.safety)),
-      AccountRow(
-        icon: Icons.business_outlined,
-        title: l.organizations,
-        subtitle: orgs == null ? null : (orgs.orgs.isEmpty ? l.noOrganizations : orgs.orgs.map((o) => o.name).join(', ')),
-        badge: invites > 0 ? StatusPill('$invites', tone: Tone.amber) : null,
-        onTap: () => context.push(Routes.organizations),
-      ),
-      if (support) AccountRow(icon: Icons.help_outline_rounded, title: l.accHelpSupport, subtitle: l.supportTileLede, onTap: () => context.push(Routes.support)),
-      AccountRow(icon: Icons.logout_rounded, iconColor: c.danger, title: l.signOut, titleColor: c.danger, chevron: false, onTap: () => _signOut(context, ref)),
+    final modeRow = AccountRow(icon: modeIcon, tone: c.accentText, title: modeTitle, subtitle: modeSub, onTap: () => ref.read(modeProvider.notifier).set(modeTarget));
+    final sections = <(String, List<Widget>)>[
+      if (!driver)
+        (l.relaxSectionRide, [
+          modeRow,
+          AccountRow(icon: Icons.location_on_outlined, title: l.accSavedAddresses, onTap: () => context.push(Routes.savedPlaces)),
+          if (scheduled) AccountRow(icon: Icons.event_outlined, title: l.scheduledRides, onTap: () => context.push(Routes.scheduled)),
+          AccountRow(icon: Icons.credit_card_outlined, title: l.accPaymentMethods, onTap: () => context.push(Routes.paymentPrefs)),
+        ])
+      else
+        (l.relaxSectionDriving, [
+          modeRow,
+          AccountRow(icon: Icons.directions_car_outlined, title: l.vehicles, onTap: () => context.push(Routes.driverVehicles)),
+          AccountRow(icon: Icons.navigation_outlined, title: l.navigation, onTap: () => context.push(Routes.navigationPrefs)),
+          AccountRow(icon: Icons.account_balance_wallet_outlined, title: l.tabEarnings, onTap: () => context.go(Routes.driverEarnings)),
+          if (support) AccountRow(icon: Icons.backpack_outlined, title: l.lostItems, subtitle: l.driverLostItemsTileLede, onTap: () => context.push(Routes.lostItems)),
+        ]),
+      (l.relaxSectionPreferences, [
+        AccountRow(icon: Icons.notifications_none_rounded, title: l.notifications, onTap: () => context.push(Routes.notifications)),
+        AccountRow(icon: Icons.remove_red_eye_outlined, title: l.accAppAppearance, onTap: () => context.push(Routes.appearance)),
+        AccountRow(icon: Icons.language_rounded, title: l.language, value: language, onTap: () => context.push(Routes.language)),
+      ]),
+      (l.relaxSectionSafety, [
+        AccountRow(icon: Icons.emergency_outlined, tone: c.danger, title: l.emergencyContact, subtitle: ref.watch(emergencyContactProvider)?.name ?? l.notSet, onTap: () => context.push(Routes.safety)),
+        if (support) AccountRow(icon: Icons.help_outline_rounded, title: l.accHelpSupport, subtitle: l.supportTileLede, onTap: () => context.push(Routes.support)),
+      ]),
+      (l.relaxSectionAccount, [
+        AccountRow(icon: Icons.shield_outlined, title: l.accAccountSecurity, onTap: () => context.push(Routes.security)),
+        AccountRow(
+          icon: Icons.business_outlined,
+          title: l.organizations,
+          subtitle: orgs == null ? null : (orgs.orgs.isEmpty ? l.noOrganizations : orgs.orgs.map((o) => o.name).join(', ')),
+          badge: invites > 0 ? StatusPill('$invites', tone: Tone.amber) : null,
+          onTap: () => context.push(Routes.organizations),
+        ),
+      ]),
     ];
 
     return Scaffold(
@@ -132,16 +143,52 @@ class AccountScreen extends ConsumerWidget {
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(AnbessaSpace.page, 4, AnbessaSpace.page, 24),
+        padding: const EdgeInsets.fromLTRB(AnbessaSpace.page, 12, AnbessaSpace.page, 32),
         children: [
           _ProfileCard(session: session, mode: mode),
-          const SizedBox(height: 16),
+          for (final (title, rows) in sections) AccountSection(title: title, children: rows),
+          const SizedBox(height: 24),
           AppCard(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            child: Column(children: rows),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+            child: AccountRow(icon: Icons.logout_rounded, tone: c.danger, title: l.signOut, titleColor: c.danger, chevron: false, onTap: () => _signOut(context, ref)),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 24),
           Center(child: Text(version == null ? '' : l.appVersion('${version.version}+${version.build}'), style: AnbessaType.caption.copyWith(color: c.faint))),
+        ],
+      ),
+    );
+  }
+}
+
+/// A quiet section of the account page: a small muted title over a card of rows, hairlines
+/// between them starting past the icon.
+class AccountSection extends StatelessWidget {
+  const AccountSection({super.key, required this.title, required this.children});
+  final String title;
+  final List<Widget> children;
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return Padding(
+      padding: const EdgeInsets.only(top: 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 0, 4, 10),
+            child: Semantics(header: true, child: Text(title, style: AnbessaType.label.copyWith(color: c.muted, fontWeight: FontWeight.w600, letterSpacing: 0.3))),
+          ),
+          AppCard(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+            child: Column(
+              children: [
+                for (final (i, row) in children.indexed) ...[
+                  if (i > 0) Divider(height: 1, thickness: 1, indent: AccountRow.iconSize + AccountRow.gap, color: c.border.withValues(alpha: c.isDark ? 0.7 : 0.8)),
+                  row,
+                ],
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -160,10 +207,13 @@ class _MenuRow extends StatelessWidget {
   }
 }
 
-/// A row of the account card: a plain outline icon (no circle, as the kit), the title (and a grey
-/// line), a value or badge, and a chevron.
+/// A row of an account card: the icon in a soft tinted 40 px circle, the title (and a grey
+/// line), a value or badge, and a chevron; at least 60 px tall.
 class AccountRow extends StatelessWidget {
-  const AccountRow({super.key, required this.icon, required this.title, this.subtitle, this.value, this.badge, this.onTap, this.iconColor, this.titleColor, this.chevron = true});
+  const AccountRow({super.key, required this.icon, required this.title, this.subtitle, this.value, this.badge, this.onTap, this.tone, this.titleColor, this.chevron = true});
+  static const iconSize = 40.0;
+  static const gap = 14.0;
+  static const minHeight = 60.0;
   final IconData icon;
   final String title;
   final String? subtitle;
@@ -171,23 +221,35 @@ class AccountRow extends StatelessWidget {
   final String? value;
   final Widget? badge;
   final VoidCallback? onTap;
-  final Color? iconColor;
+  /// tints the icon circle (amber for the mode switch, red for emergency and logout); neutral otherwise
+  final Color? tone;
   final Color? titleColor;
   final bool chevron;
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    return ListRowTile(
-      leading: ExcludeSemantics(child: Icon(icon, size: 24, color: iconColor ?? c.text)),
-      title: title,
-      subtitle: subtitle,
-      titleColor: titleColor,
-      padding: const EdgeInsets.symmetric(vertical: 9),
-      trailing: value != null
-          ? ConstrainedBox(constraints: const BoxConstraints(maxWidth: 110), child: Text(value!, maxLines: 1, overflow: TextOverflow.ellipsis, style: AnbessaType.body2.copyWith(color: c.muted)))
-          : badge,
-      chevron: chevron,
-      onTap: onTap,
+    final fill = tone == null ? (c.isDark ? c.border.withValues(alpha: 0.7) : c.canvas) : tone!.withValues(alpha: c.isDark ? 0.18 : 0.1);
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: minHeight),
+      child: ListRowTile(
+        leading: ExcludeSemantics(
+          child: Container(
+            width: iconSize,
+            height: iconSize,
+            decoration: BoxDecoration(shape: BoxShape.circle, color: fill),
+            child: Icon(icon, size: 20, color: tone ?? c.text2),
+          ),
+        ),
+        title: title,
+        subtitle: subtitle,
+        titleColor: titleColor,
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        trailing: value != null
+            ? ConstrainedBox(constraints: const BoxConstraints(maxWidth: 110), child: Text(value!, maxLines: 1, overflow: TextOverflow.ellipsis, style: AnbessaType.body2.copyWith(color: c.muted)))
+            : badge,
+        chevron: chevron,
+        onTap: onTap,
+      ),
     );
   }
 }
@@ -209,7 +271,7 @@ class _ProfileCard extends ConsumerWidget {
     final balance = driver && session.canDrive ? ref.watch(balanceProvider).value : null;
     final caption = AnbessaType.caption.copyWith(color: c.muted);
     return AppCard(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
       child: Column(
         children: [
           Semantics(
@@ -219,23 +281,23 @@ class _ProfileCard extends ConsumerWidget {
               onTap: () => context.push(Routes.profile),
               borderRadius: BorderRadius.circular(AnbessaRadius.md),
               child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 12),
+                padding: const EdgeInsets.symmetric(vertical: 16),
                 child: Row(
                   children: [
-                    Hero(tag: meAvatarHeroTag, child: AvatarImage(src: session.profile.image, name: session.displayName, size: 50)),
-                    const SizedBox(width: 14),
+                    Hero(tag: meAvatarHeroTag, child: AvatarImage(src: session.profile.image, name: session.displayName, size: 64)),
+                    const SizedBox(width: 16),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(session.displayName, style: AnbessaType.title.copyWith(color: c.text), maxLines: 1, overflow: TextOverflow.ellipsis),
-                          const SizedBox(height: 4),
+                          Text(session.displayName, style: AnbessaType.title.copyWith(color: c.text, fontSize: 18), maxLines: 1, overflow: TextOverflow.ellipsis),
+                          const SizedBox(height: 6),
                           Row(children: [
                             ExcludeSemantics(child: Icon(Icons.phone_outlined, size: 15, color: c.muted)),
                             const SizedBox(width: 6),
                             Flexible(child: Text(formatPhone(session.profile.phone), style: caption.copyWith(fontFeatures: AnbessaType.tabular), maxLines: 1, overflow: TextOverflow.ellipsis)),
                           ]),
-                          const SizedBox(height: 4),
+                          const SizedBox(height: 6),
                           Wrap(
                             crossAxisAlignment: WrapCrossAlignment.center,
                             spacing: 6,
@@ -258,9 +320,9 @@ class _ProfileCard extends ConsumerWidget {
             ),
           ),
           if (balance != null) ...[
-            Divider(height: 1, color: c.border),
+            Divider(height: 1, color: c.border.withValues(alpha: 0.8)),
             Padding(
-              padding: const EdgeInsets.symmetric(vertical: 12),
+              padding: const EdgeInsets.symmetric(vertical: 16),
               child: Row(
                 children: [
                   CircleIcon(Icons.account_balance_wallet_outlined, size: 48, color: c.accentText),

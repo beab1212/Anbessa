@@ -117,7 +117,8 @@ class TurnBanner extends StatelessWidget {
                 ),
               ),
               AnimatedSize(
-                duration: AnbessaMotion.of(context, AnbessaMotion.base),
+                // never zero: a zero-length AnimatedSize re-dirties its own layout (reduced motion)
+                duration: AnbessaMotion.reduced(context) ? const Duration(milliseconds: 1) : AnbessaMotion.base,
                 curve: AnbessaMotion.emphasized,
                 alignment: Alignment.topLeft,
                 child: !showThen

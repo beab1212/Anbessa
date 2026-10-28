@@ -42,7 +42,8 @@ class AccountPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    Widget list = ListView(padding: const EdgeInsets.fromLTRB(AnbessaSpace.page, 4, AnbessaSpace.page, 24), children: children);
+    // relaxed: a roomy gutter, air above the first card and below the last
+    Widget list = ListView(padding: const EdgeInsets.fromLTRB(AnbessaSpace.page, 12, AnbessaSpace.page, 32), children: children);
     if (onRefresh != null) list = RefreshIndicator(onRefresh: onRefresh!, child: list);
     return Scaffold(
       backgroundColor: c.groupedPage,
@@ -54,7 +55,7 @@ class AccountPage extends StatelessWidget {
 
 /// A grey line of explanation between cards.
 class AccountLede extends StatelessWidget {
-  const AccountLede(this.text, {super.key, this.top = 0, this.bottom = 12});
+  const AccountLede(this.text, {super.key, this.top = 0, this.bottom = 20});
   final String text;
   final double top;
   final double bottom;
@@ -78,10 +79,11 @@ class OptionCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.colors;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.only(bottom: 14),
       child: SelectableCard(
         selected: selected,
         onTap: onTap,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
         child: Row(
           children: [
             leading ?? CircleIcon(icon ?? Icons.circle_outlined, color: selected ? c.onAccent : c.text, fill: selected ? c.accent : null, borderColor: selected ? c.accent : null),
@@ -132,8 +134,9 @@ class AccountSecurityScreen extends ConsumerWidget {
           child: InkWell(
             onTap: onTap,
             child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              decoration: divider ? BoxDecoration(border: Border(bottom: BorderSide(color: c.border))) : null,
+              constraints: const BoxConstraints(minHeight: 64),
+              padding: const EdgeInsets.symmetric(vertical: 18),
+              decoration: divider ? BoxDecoration(border: Border(bottom: BorderSide(color: c.border.withValues(alpha: 0.8)))) : null,
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -161,7 +164,7 @@ class AccountSecurityScreen extends ConsumerWidget {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
           child: Column(
             children: [
-              row(l.accDeviceManagement, l.accDeviceManagementLede, () => context.push(Routes.sessions)),
+              row(l.accDeviceManagement, l.accDeviceManagementLede, () => context.push(Routes.sessions), divider: deletion),
               if (deletion) row(l.deleteAccount, l.accDeleteAccountLede, () => context.push(Routes.deleteAccount), color: c.danger),
             ],
           ),
@@ -210,9 +213,9 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
             if (list == null && !snap.hasError) const SkeletonList(rows: 2),
             for (final s in list ?? const <SessionInfo>[])
               Padding(
-                padding: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.only(bottom: 14),
                 child: AppCard(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                   child: ListRowTile(
                     icon: _deviceIcon(s.userAgent),
                     title: s.userAgent ?? l.thisDevice,
@@ -281,10 +284,11 @@ class _PaymentPreferencesScreenState extends ConsumerState<PaymentPreferencesScr
         Problem(_error, describe: (e) => describeError(l, e)),
         for (final p in providers)
           Padding(
-            padding: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.only(bottom: 14),
             child: SelectableCard(
               selected: _current == p.provider,
               showCheck: false,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
               onTap: () => _choose(p.provider),
               child: Row(
                 children: [

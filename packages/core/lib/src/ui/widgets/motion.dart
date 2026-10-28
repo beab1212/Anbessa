@@ -62,19 +62,19 @@ class AnimatedSwitcherX extends StatelessWidget {
   final Duration duration;
   final Alignment alignment;
   @override
-  Widget build(BuildContext context) => AnimatedSize(
-        duration: AnbessaMotion.of(context, duration),
-        curve: AnbessaMotion.emphasized,
-        alignment: alignment,
-        child: AnimatedSwitcher(
-          duration: AnbessaMotion.of(context, duration),
-          switchInCurve: AnbessaMotion.emphasized,
-          switchOutCurve: AnbessaMotion.emphasized,
-          transitionBuilder: (w, a) => FadeTransition(opacity: a, child: SlideTransition(position: Tween(begin: const Offset(0, 0.03), end: Offset.zero).animate(a), child: w)),
-          layoutBuilder: (current, previous) => Stack(alignment: alignment, children: [...previous, ?current]),
-          child: child,
-        ),
-      );
+  Widget build(BuildContext context) {
+    final switcher = AnimatedSwitcher(
+      duration: AnbessaMotion.of(context, duration),
+      switchInCurve: AnbessaMotion.emphasized,
+      switchOutCurve: AnbessaMotion.emphasized,
+      transitionBuilder: (w, a) => FadeTransition(opacity: a, child: SlideTransition(position: Tween(begin: const Offset(0, 0.03), end: Offset.zero).animate(a), child: w)),
+      layoutBuilder: (current, previous) => Stack(alignment: alignment, children: [...previous, ?current]),
+      child: child,
+    );
+    // reduced motion: no size animation at all (a zero-length AnimatedSize re-dirties its own layout)
+    if (AnbessaMotion.reduced(context)) return switcher;
+    return AnimatedSize(duration: duration, curve: AnbessaMotion.emphasized, alignment: alignment, child: switcher);
+  }
 }
 
 /// Switches between keyed children with a shared-axis transition: the new child slides in along

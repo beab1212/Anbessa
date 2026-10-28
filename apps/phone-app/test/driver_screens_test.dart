@@ -1,4 +1,4 @@
-// The driver's home (offline and online), trip screen (guidance from the location stream
+// The driver's home (offline and online, searching with the radar on the map), trip screen (guidance from the location stream
 // without a rebuild loop, waiting at the pickup with the PIN sheet) and the offer sheet, in light
 // and dark, at 360 dp with 1.3x text.
 
@@ -21,6 +21,7 @@ import 'package:phone_app/features/driver/shift/shift_controller.dart';
 import 'package:phone_app/features/driver/trip/driver_trip_screen.dart';
 import 'package:phone_app/features/driver/offers/offer_controller.dart';
 import 'package:phone_app/features/driver/offers/offer_sheet.dart';
+import 'package:phone_app/features/maps/anbessa_map.dart';
 import 'package:phone_app/features/maps/nav/navigation_controller.dart';
 import 'package:phone_app/features/maps/nav/turn_banner.dart';
 import 'package:phone_app/features/maps/nav/voice_guide.dart';
@@ -51,6 +52,13 @@ class FixedBalance extends BalanceController {
   final Balance? value;
   @override
   Future<Balance?> build() async => value;
+}
+
+class FixedOffer extends OfferController {
+  FixedOffer(this.value);
+  final OfferState value;
+  @override
+  OfferState build() => value;
 }
 
 class FixedEarnings extends EarningsSummaryController {
@@ -157,8 +165,74 @@ void main() {
     final shift = ShiftState(session: DrivingSession(id: 's1', vehicleId: v.id, startedAt: DateTime.now().toUtc().subtract(const Duration(minutes: 42))), vehicle: v, pingsOk: 10);
     await pumpDriver(tester, const DriverHomeScreen(), shift: shift, brightness: Brightness.dark);
     expect(find.text('Slide to go offline'), findsOneWidget);
-    expect(find.text('Waiting for trips nearby…'), findsOneWidget);
+    expect(find.text('Looking for trips…'), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  group('searching for trips', () {
+    ShiftState onlineShift() {
+      final v = DriverHome.fromJson(fixture('driver_home.json')).allVehicles.first;
+      return ShiftState(session: DrivingSession(id: 's1', vehicleId: v.id, startedAt: DateTime.now().toUtc()), vehicle: v, pingsOk: 3);
+    }
+
+    Future<void> at(WidgetTester tester) async {
+      ProviderScope.containerOf(tester.element(find.byType(DriverHomeScreen))).read(lastPositionProvider.notifier).set(DevicePosition(lat: 9.0107, lng: 38.7613, at: DateTime.now()));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+    }
+
+    final radar = find.byKey(const ValueKey('driver-radar'));
+    final dot = find.byKey(const ValueKey('driver-searching'));
+
+    for (final b in Brightness.values) {
+      testWidgets('online, no offer: radar rings around the driver on the map and "Looking for trips…" (${b.name})', (tester) async {
+        await pumpDriver(tester, const DriverHomeScreen(), shift: onlineShift(), brightness: b);
+        await at(tester);
+        expect(radar, findsOneWidget);
+        expect(find.descendant(of: find.byType(AnbessaMap), matching: find.byType(RadarRings)), findsOneWidget);
+        expect(dot, findsOneWidget);
+        expect(find.text('Looking for trips…'), findsOneWidget);
+        expect(find.textContaining('Searching for riders near you'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      });
+    }
+
+    testWidgets('offline: no radar, no searching headline', (tester) async {
+      await pumpDriver(tester, const DriverHomeScreen());
+      await at(tester);
+      expect(radar, findsNothing);
+      expect(dot, findsNothing);
+      expect(find.text('Looking for trips…'), findsNothing);
+    });
+
+    testWidgets('an offer stops the search', (tester) async {
+      await pumpDriver(tester, const DriverHomeScreen(), shift: onlineShift(), overrides: [offerProvider.overrideWith(() => FixedOffer(OfferState(offer: offer())))]);
+      await at(tester);
+      expect(radar, findsNothing);
+      expect(find.text('Looking for trips…'), findsNothing);
+    });
+
+    testWidgets('on a trip there is no search', (tester) async {
+      await pumpDriver(tester, const DriverHomeScreen(), shift: onlineShift(), trip: driverTrip('matched'));
+      await at(tester);
+      expect(radar, findsNothing);
+      expect(find.text('Looking for trips…'), findsNothing);
+    });
+
+    testWidgets('reduced motion: the rings stand still', (tester) async {
+      await pumpDriver(tester, Builder(builder: (ctx) => MediaQuery(data: MediaQuery.of(ctx).copyWith(disableAnimations: true), child: const DriverHomeScreen())), shift: onlineShift());
+      await at(tester);
+      expect(radar, findsOneWidget);
+      final paint = find.descendant(of: radar, matching: find.byType(CustomPaint)).first;
+      final before = tester.widget<CustomPaint>(paint).painter! as Listenable;
+      var ticks = 0;
+      void tick() => ticks++;
+      before.addListener(tick);
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pump(const Duration(milliseconds: 500));
+      before.removeListener(tick);
+      expect(ticks, 0);
+    });
   });
 
   testWidgets('trip: on the way to the pickup shows the turn banner and the arrival slide', (tester) async {

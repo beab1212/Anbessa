@@ -68,6 +68,10 @@ class _AppSheetState extends State<AppSheet> {
     super.initState();
     widget.controller?._attach(_c, widget.snaps);
     _c.addListener(_report);
+    // the controller only notifies on changes: report the first height too, once laid out
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _report();
+    });
   }
 
   @override
@@ -100,7 +104,8 @@ class _AppSheetState extends State<AppSheet> {
       maxChildSize: max,
       snap: true,
       snapSizes: snaps.length > 2 ? snaps.sublist(1, snaps.length - 1) : null,
-      snapAnimationDuration: AnbessaMotion.of(context, AnbessaMotion.slow),
+      // reduced motion: snap in a frame (the sheet asserts on a zero duration)
+      snapAnimationDuration: AnbessaMotion.reduced(context) ? const Duration(milliseconds: 1) : AnbessaMotion.slow,
       builder: (context, scroll) => Container(
         decoration: BoxDecoration(
           color: c.surface,

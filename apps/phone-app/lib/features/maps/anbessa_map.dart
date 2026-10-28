@@ -20,6 +20,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart' show LatLng;
 import 'package:ride_app_core/ride_app_core.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../core/l10n/l10n.dart';
 import '../../core/state.dart';
 import 'callouts.dart';
@@ -427,23 +428,122 @@ class _MapModeSheet extends ConsumerWidget {
   }
 }
 
-/// The credit line for the map data, small and never wider than the map.
-class MapCredit extends StatelessWidget {
-  const MapCredit(this.text, {super.key});
-  final String text;
+/// One source of the map's data or imagery, and where its terms are.
+typedef MapAttribution = ({String label, Uri? link});
+
+const _attributionLinks = {
+  'openstreetmap': 'https://www.openstreetmap.org/copyright',
+  'openfreemap': 'https://openfreemap.org',
+  'openmaptiles': 'https://www.openmaptiles.org',
+  'esri': 'https://www.arcgis.com/home/item.html?id=10df2279f9684e4a9f6a7f08febac2a9',
+  'carto': 'https://carto.com/attributions',
+};
+
+/// The sources in an attribution line: "© OpenFreeMap © OpenMapTiles © OpenStreetMap
+/// contributors" is three, each "© …" with a link to its terms when it is one we know; a line
+/// without "©" ("Esri, Maxar, Earthstar Geographics") is one source.
+List<MapAttribution> mapAttributionsOf(String text) {
+  final parts = text.contains('©') ? text.split('©').map((s) => s.trim()).where((s) => s.isNotEmpty).map((s) => '© $s') : [text.trim()];
+  return [
+    for (final p in parts)
+      if (p.isNotEmpty)
+        (
+          label: p,
+          link: _attributionLinks.entries.where((e) => p.toLowerCase().contains(e.key)).map((e) => Uri.parse(e.value)).firstOrNull,
+        ),
+  ];
+}
+
+/// The map's credits as a small round "i" (the licences of OpenStreetMap, OpenFreeMap and the
+/// imagery ask for attribution; a strip of text over the map is not needed for it): a tap opens
+/// a sheet listing the sources with links to their terms. MapLibre's own logo and attribution
+/// button are off in the plugin (Android and iOS), so this is the only credit on the map.
+class MapInfoButton extends StatelessWidget {
+  const MapInfoButton(this.attribution, {super.key});
+  /// the attribution line of the tiles or style on screen
+  final String attribution;
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    return IgnorePointer(
-      child: Align(
-        alignment: Alignment.bottomLeft,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-          decoration: BoxDecoration(color: c.surface.withValues(alpha: 0.8), borderRadius: BorderRadius.circular(4)),
-          child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, textScaler: TextScaler.noScaling, style: TextStyle(fontSize: 9, color: c.muted)),
+    final l = context.l10n;
+    return Semantics(
+      button: true,
+      label: l.relaxMapInfo,
+      child: Tooltip(
+        message: l.relaxMapInfo,
+        child: InkResponse(
+          key: const ValueKey('map-info'),
+          onTap: () => showMapCredits(context, mapAttributionsOf(attribution)),
+          radius: 22,
+          child: Padding(
+            // a 40 px target around the 28 px circle
+            padding: const EdgeInsets.all(6),
+            child: Container(
+              width: 28,
+              height: 28,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: c.surface.withValues(alpha: 0.72),
+                border: Border.all(color: c.border.withValues(alpha: 0.6)),
+              ),
+              child: ExcludeSemantics(child: Icon(Icons.info_outline_rounded, size: 17, color: c.text2.withValues(alpha: 0.85))),
+            ),
+          ),
         ),
       ),
     );
+  }
+}
+
+/// The credits sheet: a line about the sources, then one row per source (a tap opens its terms).
+Future<void> showMapCredits(BuildContext context, List<MapAttribution> sources) {
+  final l = context.l10n;
+  return showHandleSheet<void>(
+    context,
+    title: l.relaxMapCredits,
+    builder: (ctx) {
+      final c = ctx.colors;
+      return SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(l.relaxMapCreditsLede, style: AnbessaType.body2.copyWith(color: c.muted, fontWeight: FontWeight.w400)),
+            const SizedBox(height: 8),
+            for (final s in sources)
+              InkWell(
+                key: ValueKey('map-credit-${s.label}'),
+                onTap: s.link == null ? null : () => launchUrl(s.link!, mode: LaunchMode.externalApplication),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  child: Row(
+                    children: [
+                      CircleIcon(Icons.map_outlined, size: 40, color: c.accentText),
+                      const SizedBox(width: 14),
+                      Expanded(child: Text(s.label, maxLines: 2, overflow: TextOverflow.ellipsis, style: AnbessaType.body.copyWith(color: c.text, fontWeight: FontWeight.w600))),
+                      if (s.link != null) ...[const SizedBox(width: 8), ExcludeSemantics(child: Icon(Icons.open_in_new_rounded, size: 18, color: c.muted))],
+                    ],
+                  ),
+                ),
+              ),
+            const SizedBox(height: 12),
+            PillButton(label: l.relaxMapCreditsClose, variant: PillVariant.tonal, onPressed: () => Navigator.of(ctx).pop()),
+          ],
+        ),
+      );
+    },
+  );
+}
+
+/// Where the map's "i" sits: bottom left, above the sheet, clear of the system insets.
+class MapInfoSlot extends StatelessWidget {
+  const MapInfoSlot({super.key, required this.bottom, required this.attribution});
+  final double bottom;
+  final String attribution;
+  @override
+  Widget build(BuildContext context) {
+    final pad = MediaQuery.paddingOf(context);
+    return Positioned(left: 6 + pad.left, bottom: bottom + 6, child: MapInfoButton(attribution));
   }
 }
 

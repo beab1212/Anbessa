@@ -1,10 +1,12 @@
 // The images the native layers draw, painted on a canvas with the design system's map markers
 // (ride_app_core map_markers.dart, the GoRide kit's look): the white top-down car pointing north
-// (the layer turns it with `icon-rotate`) for the followed car and the cars around the rider, the
+// (the layer turns it with `icon-rotate`) for the followed car and the cars around the rider, with
+// its contact shadow as a separate image (centred, so it stays under the car as it turns), the
 // person as an avatar in an amber ring with a tail (their photo, else their initials, else a
 // person glyph) for the pickup and for "you" on the home map, the red destination pin, the small
 // position dot and heading cone, and the labels over cars. Each is painted [scale] times larger
-// than it is shown (the device's pixel ratio, up to 3), so it stays crisp.
+// than it is shown (the device's pixel ratio, up to 3), so it stays crisp. Cars are painted at
+// their largest shown size and only ever scaled down by their zoom-dependent `icon-size`.
 
 import 'dart:async';
 import 'dart:math';
@@ -26,36 +28,65 @@ class ScenePerson {
   static const nobody = ScenePerson();
 }
 
-/// Room around a car for its soft shadow, in logical pixels.
-const _carPad = 4.0;
+/// Room around a car image, in logical pixels: a hairline for the car's antialiased edge; the
+/// shadow image needs room for its blur (three sigmas) so it never ends in a hard edge.
+const _carPad = 1.0;
+const _shadowSpread = 0.22;
 
-/// The width of the followed car and of the cars around the rider (logical pixels).
-const driverCarWidth = 24.0;
-const nearbyCarWidth = 20.0;
+/// The logical width every car image is painted at: the largest a car is shown on the map (zoom
+/// 19, see scene_style.dart's car width stops), so the layers only ever scale the images down
+/// and they stay crisp.
+const carImageWidth = 32.0;
 
 /// The avatar pin's circle (the pickup and "you") and the destination pin's, in logical pixels.
 const avatarPinDiameter = 46.0;
 const destinationPinDiameter = 36.0;
 
-SceneImage _car(double scale, double width, {required Color body, required Color glass}) {
-  final s = topDownCarSize(width);
+double get _shadowPad => carImageWidth * _shadowSpread * 1.5 + 2;
+
+/// The car image's logical size (the car plus its pad).
+Size carImageLogicalSize() {
+  final s = topDownCarSize(carImageWidth);
+  return Size(s.width + _carPad * 2, s.height + _carPad * 2);
+}
+
+SceneImage _car(double scale, {required Color body, required Color glass}) {
+  final s = topDownCarSize(carImageWidth);
   return (
     width: ((s.width + _carPad * 2) * scale).ceil(),
     height: ((s.height + _carPad * 2) * scale).ceil(),
     paint: (canvas) {
       canvas.scale(scale);
       canvas.translate(_carPad, _carPad);
-      paintTopDownCar(canvas, s, body: body, glass: glass);
+      // no shadow baked in: it would turn with the car and end at the image's edge
+      paintTopDownCar(canvas, s, body: body, glass: glass, shadow: false);
     },
   );
 }
 
 /// The followed car, white like the kit's (grey when [stale]).
 SceneImage carImage(AnbessaColors c, double scale, {bool stale = false}) =>
-    _car(scale, driverCarWidth, body: stale ? const Color(0xFFB9BCC2) : Colors.white, glass: const Color(0xFF2B2F36));
+    _car(scale, body: stale ? const Color(0xFFB9BCC2) : Colors.white, glass: const Color(0xFF2B2F36));
 
-/// A car around the rider: the same white top-down car, a little smaller.
-SceneImage nearbyCarImage(AnbessaColors c, double scale) => _car(scale, nearbyCarWidth, body: Colors.white, glass: const Color(0xFF2B2F36));
+/// A car around the rider: the same white top-down car (its layer shows it a little smaller).
+SceneImage nearbyCarImage(AnbessaColors c, double scale) => _car(scale, body: Colors.white, glass: const Color(0xFF2B2F36));
+
+/// The soft contact shadow under every car: the car's footprint blurred, centred on the same
+/// point and drawn at the same scale as the car image (its own layer, under the car), with room
+/// for the whole blur. Darker on dark maps' imagery would vanish, so it is a little stronger there.
+SceneImage carShadowImage(AnbessaColors c, double scale) {
+  final s = topDownCarSize(carImageWidth);
+  final pad = _shadowPad;
+  return (
+    width: ((s.width + pad * 2) * scale).ceil(),
+    height: ((s.height + pad * 2) * scale).ceil(),
+    paint: (canvas) {
+      canvas.scale(scale);
+      canvas.translate(pad, pad);
+      paintTopDownCarShadow(canvas, s, spread: _shadowSpread, color: c.isDark ? const Color(0x99000000) : const Color(0x59000000));
+    },
+  );
+}
 
 /// The person as a pin (the tip, at the bottom centre, is the point): their photo in an amber
 /// ring; initials on amber-soft without one; a person glyph without a name.

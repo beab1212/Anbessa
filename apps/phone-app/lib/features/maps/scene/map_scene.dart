@@ -110,6 +110,7 @@ class MapScene {
       SceneIds.imgCarDriver: carImage(c, k),
       SceneIds.imgCarStale: carImage(c, k, stale: true),
       SceneIds.imgCarNearby: nearbyCarImage(c, k),
+      SceneIds.imgCarShadow: carShadowImage(c, k),
       SceneIds.imgPinDropoff: destinationPinImage(c, k),
       SceneIds.imgMeDot: meDotImage(c, k),
       SceneIds.imgMeCone: meConeImage(c, k),

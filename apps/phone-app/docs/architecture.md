@@ -487,7 +487,7 @@ Both engines hand every camera decision to one `CameraDirector` through a `MapBi
 | `scene/map_scene.dart` | `MapScene`: owns the native GeoJSON sources, layers and images on the vector engine |
 | `scene/scene_style.dart` | the layer definitions (`sceneLayers(SceneLook)`), route colours |
 | `scene/scene_geojson.dart` | pure builders of each source's FeatureCollection, ids (`SceneIds`), `NearbyCarFrame` |
-| `scene/scene_images.dart` | the images, painted on a canvas: top-down car (amber, grey when stale), small nearby car, pickup ring and drop-off square pins, the person's dot and heading cone, label chips |
+| `scene/scene_images.dart` | the images, painted on a canvas: the white top-down car (grey when stale) and its contact shadow, the nearby car, the avatar and destination pins, the person's dot and heading cone, label chips |
 | `scene/camera_director.dart` | `CameraDirector` and `CameraPort` (what an engine gives it); pure helpers `navZoomForSpeed`, `fitZoomFor`, `lowerThirdPadding`, `followMoveDuration` |
 | `scene/map_binding.dart` | turns `AnbessaMap` parameters into director calls (when is an intent new) |
 | `scene/route_track.dart` | `RouteTrack`: a route with cumulative metres, point and bearing at a distance, projection onto a window of it |
@@ -504,16 +504,22 @@ When a style has loaded, `MapScene.attach(style, look)` registers the images onc
 | `anb-route-traversed` | `kind = traversed` | grey line (the part already driven) |
 | `anb-route-casing`, `anb-route-fill` | `kind = primary` | amber line on an ink casing |
 | `anb-route-straight` | `kind = straight` | dotted line (no road geometry) |
-| `anb-nearby-cars`, `anb-nearby-label` | nearby | small cars turned by `bearing`, `icon-opacity` from the feature's `opacity`; the label image over the `lead` car |
+| `anb-nearby-shadow`, `anb-nearby-cars`, `anb-nearby-label` | nearby | each car's soft contact shadow, then the car, turned by `bearing`, `icon-opacity` from the feature's `opacity`; the label image over the `lead` car |
 | `anb-pin` | pins | pickup ring / drop-off square, anchored at the bottom (the tip) |
 | `anb-me-cone`, `anb-me-dot` | me | heading cone (when there is a heading) and the blue dot |
-| `anb-driver-car`, `anb-driver-label` | driver | the followed car turned by `bearing`; the "4 min" label above it |
+| `anb-driver-shadow`, `anb-driver-car`, `anb-driver-label` | driver | the followed car's shadow, the car turned by `bearing`; the "4 min" label above it |
 
-Line layers use `line-cap`/`line-join: round` and zoom-interpolated widths. Symbol layers for cars use `icon-rotation-alignment: map` and `icon-pitch-alignment: map` (they lie flat on the road under tilt) and `icon-allow-overlap`. Labels over cars are images re-painted when their text changes, so they move with the car natively.
+Line layers use `line-cap`/`line-join: round` and zoom-interpolated widths. Labels over cars are images re-painted when their text changes, so they move with the car natively; their `icon-offset` grows with the zoom as the car does.
+
+**Cars in 3D.** Every car layer (and its shadow layer, with the same layout) uses `icon-rotation-alignment: map` and `icon-pitch-alignment: map`, so the car lies flat on the road plane under the 55–60° tilt and turns with the map; `icon-rotate` is the feature's `bearing`, which comes only from the `HeadingFilter` (via `MarkerAnimator` / `CarsAnimator`); `icon-anchor: center`; `icon-allow-overlap`/`icon-ignore-placement`. `icon-size` is `carIconSize`: an exponential (1.5) zoom interpolation of the shown width, `driverCarWidthStops` (15 px at z12, 16 at z15, 19 at z17, 24 at z18, 32 at z19; about twice as long) and `nearbyCarWidthStops` (13 → 28), so cars grow with the streets from a readable minimum instead of staying one screen size. The car image is painted at `carImageWidth` (32, the largest shown size) times the image scale, so the layers only scale it down and it stays crisp at the device pixel ratio. The car's shadow is a separate image (`carShadowImage`: the car's footprint, blurred, with room for the whole blur), centred under the car, so it stays under it whichever way it turns. The buildings layer sits under the routes, so cars and their shadows are always drawn over the buildings, never hidden or clipped by them.
+
+What was wrong before: the shadow was baked into the car image, offset towards the car's rear and blurred well past a 4 px pad, so it ended in a hard rectangular edge and swung around the car as it turned (very visible once tilted and enlarged); a 24 px image was magnified up to 1.2× (and more by perspective near the camera in 3D), so it was soft; the size barely followed the zoom (0.6–1.2×), so in 3D at zoom 17–18 a car was two road-widths wide, a flat sticker over the buildings; and the art's thin side windows and highlights became slivers when foreshortened. `paintTopDownCar` (core) is now a few broad shapes: a body shaded towards its sides, small mirrors, one dark cabin shape (windscreen, side and rear glass) with the roof over it, small lights.
 
 After that, `setRoutes`, `setPins`, `setDriverCar`, `setDriverLabel`, `setNearbyCars`, `setNearbyLabel` and `setMe` only replace their own source's data with `updateGeoJsonSource`: no layer is removed and re-added for a data change (the plugin's declarative `layers:` did that on every change and is not used). Updates are coalesced per source to at most one every 33 ms (the latest wins); identical data isn't sent; routes are compared by a cheap key (kind, length, first, middle and last point). A style change (theme, satellite, a custom style) calls `detach()`; the next style-loaded callback re-creates everything from the last data. Switching flat ↔ 3D on the same style only adds or removes the buildings layer.
 
-The only Flutter widgets over the vector map are the screen's `overlays` (the search pulse) and up to three `callouts` (`ml.WidgetLayer`, keyed, faded in with `FadeSlideIn`). `WidgetLayer` positions trail the native camera, so callouts are hidden while a gesture is in progress.
+The map's credits are a small round "i" (`MapInfoButton` in `anbessa_map.dart`, bottom left above the sheet) that opens a sheet of the sources with links (`mapAttributionsOf`), on both engines; there is no attribution text strip. MapLibre's native logo and attribution button are disabled by the plugin (0.3.6 sets `logoEnabled(false)`/`attributionEnabled(false)` on Android and hides `logoView`/the attribution button on iOS), so nothing else is drawn.
+
+The only Flutter widgets over the vector map are the screen's `overlays` (the search pulse, the driver's searching radar) and up to three `callouts` (`ml.WidgetLayer`, keyed, faded in with `FadeSlideIn`). `WidgetLayer` positions trail the native camera, so callouts are hidden while a gesture is in progress.
 
 ### Map modes (`map_mode.dart`, `map_styles.dart`)
 

@@ -23,12 +23,14 @@ abstract final class SceneIds {
   static const routeCasing = 'anb-route-casing';
   static const routeFill = 'anb-route-fill';
   static const routeStraight = 'anb-route-straight';
+  static const nearbyShadow = 'anb-nearby-shadow';
   static const nearbyCars = 'anb-nearby-cars';
   static const nearbyLabel = 'anb-nearby-label';
   static const pinLayer = 'anb-pin';
   static const meCone = 'anb-me-cone';
   static const meDot = 'anb-me-dot';
   static const meAvatar = 'anb-me-avatar';
+  static const driverShadow = 'anb-driver-shadow';
   static const driverCar = 'anb-driver-car';
   static const driverLabel = 'anb-driver-label';
 
@@ -36,6 +38,7 @@ abstract final class SceneIds {
   static const imgCarDriver = 'anb-car-driver';
   static const imgCarStale = 'anb-car-stale';
   static const imgCarNearby = 'anb-car-nearby';
+  static const imgCarShadow = 'anb-car-shadow';
   static const imgPinPickup = 'anb-pin-pickup';
   static const imgPinDropoff = 'anb-pin-dropoff';
   static const imgMeDot = 'anb-me-dot';

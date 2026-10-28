@@ -1844,5 +1844,16 @@
         "type": "String"
       }
     }
-  }
+  },
+  "relaxSectionRide": "Ride",
+  "relaxSectionDriving": "Driving",
+  "relaxSectionPreferences": "Preferences",
+  "relaxSectionSafety": "Safety & support",
+  "relaxSectionAccount": "Account",
+  "relaxMapInfo": "Map information",
+  "relaxMapCredits": "Map data",
+  "relaxMapCreditsLede": "The map is drawn with data and imagery from these sources.",
+  "relaxMapCreditsClose": "Close",
+  "drv3LookingForTrips": "Looking for trips…",
+  "drv3LookingForTripsLede": "Searching for riders near you. Offers appear here."
 }

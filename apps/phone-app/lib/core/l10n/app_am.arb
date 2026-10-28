@@ -1295,5 +1295,16 @@
   "accAddressDetails": "የአድራሻ ዝርዝር",
   "accAddressDetailsHint": "ለምሳሌ፦ ፎቅ፣ የቤት ቁጥር",
   "accSaveAddress": "አድራሻ አስቀምጥ",
-  "accRating": "ደረጃ"
+  "accRating": "ደረጃ",
+  "relaxSectionRide": "ጉዞ",
+  "relaxSectionDriving": "መንዳት",
+  "relaxSectionPreferences": "ምርጫዎች",
+  "relaxSectionSafety": "ደህንነት እና ድጋፍ",
+  "relaxSectionAccount": "መለያ",
+  "relaxMapInfo": "የካርታ መረጃ",
+  "relaxMapCredits": "የካርታ መረጃ ምንጮች",
+  "relaxMapCreditsLede": "ካርታው የተሰራው ከእነዚህ ምንጮች በተገኘ መረጃ እና ምስል ነው።",
+  "relaxMapCreditsClose": "ዝጋ",
+  "drv3LookingForTrips": "ጉዞ በመፈለግ ላይ…",
+  "drv3LookingForTripsLede": "በአቅራቢያዎ ያሉ ተሳፋሪዎችን በመፈለግ ላይ። ጥያቄዎች እዚህ ይታያሉ።"
 }

@@ -172,7 +172,7 @@ class _RasterMapState extends ConsumerState<RasterMap> with TickerProviderStateM
                   ]),
               ],
             ),
-            _withBottom((bottom) => Positioned(left: 6, right: 72, bottom: bottom + 4, child: MapCredit(satellite ? satelliteAttribution : tiles.attribution))),
+            _withBottom((bottom) => MapInfoSlot(bottom: bottom, attribution: satellite ? satelliteAttribution : tiles.attribution)),
             if (w.interactive)
               _withBottom(
                 (bottom) => Positioned(

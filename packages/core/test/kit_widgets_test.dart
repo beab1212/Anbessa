@@ -169,13 +169,19 @@ void main() {
   });
 
   testWidgets('markers rasterise to PNG for the map', (tester) async {
-    late Uint8List car, pin, dest;
+    late Uint8List car, bare, shadow, pin, dest;
     await tester.runAsync(() async {
       car = await markerPngBytes(topDownCarSize(24), (canvas, size) => paintTopDownCar(canvas, size), pixelRatio: 2);
+      bare = await markerPngBytes(topDownCarSize(32), (canvas, size) => paintTopDownCar(canvas, size, shadow: false), pixelRatio: 3);
+      shadow = await markerPngBytes(topDownCarSize(32), (canvas, size) => paintTopDownCarShadow(canvas, size), pixelRatio: 3);
       pin = await markerPngBytes(avatarPinSize(52), (canvas, size) => paintAvatarPin(canvas, size, ring: const Color(0xFFFFB300), initials: 'AK'), pixelRatio: 2);
       dest = await markerPngBytes(destinationPinSize(40), (canvas, size) => paintDestinationPin(canvas, size), pixelRatio: 2);
     });
-    for (final bytes in [car, pin, dest]) {
+    // the footprint the shadow is drawn from sits inside the car's box, mirrors outside it
+    final body = topDownCarBody(topDownCarSize(32));
+    expect(body.outerRect.left, greaterThan(0));
+    expect(body.outerRect.height, topDownCarSize(32).height);
+    for (final bytes in [car, bare, shadow, pin, dest]) {
       expect(bytes.sublist(1, 4), 'PNG'.codeUnits);
     }
   });

@@ -192,73 +192,78 @@ class _DestinationPainter extends CustomPainter {
 /// The logical size of a top-down car [width] wide (it points up, north).
 Size topDownCarSize(double width) => Size(width, width * 2.05);
 
-/// A car seen from above, pointing up: a rounded [body] (white by default) with mirrors, dark
-/// [glass] (windscreen, side and rear windows), a lighter roof, headlights. Rotate it on the map.
-void paintTopDownCar(Canvas canvas, Size size, {Color body = const Color(0xFFFFFFFF), Color glass = const Color(0xFF2B2F36), Color outline = const Color(0x33000000), bool shadow = true}) {
+/// The car's footprint inside a [size] box (pointing up): the body without the mirrors, its
+/// front a little narrower than its back. Shared by the car and its contact shadow.
+RRect topDownCarBody(Size size) {
   final w = size.width, h = size.height;
-  // mirrors poke out beyond the body
-  final inset = w * 0.1;
-  final bodyRect = Rect.fromLTWH(inset, 0, w - inset * 2, h);
-  final bw = bodyRect.width;
-  final shape = RRect.fromRectAndCorners(
-    bodyRect,
-    topLeft: Radius.elliptical(bw * 0.42, bw * 0.5),
-    topRight: Radius.elliptical(bw * 0.42, bw * 0.5),
-    bottomLeft: Radius.elliptical(bw * 0.3, bw * 0.3),
-    bottomRight: Radius.elliptical(bw * 0.3, bw * 0.3),
+  final inset = w * 0.09;
+  final r = Rect.fromLTWH(inset, 0, w - inset * 2, h);
+  final bw = r.width;
+  return RRect.fromRectAndCorners(
+    r,
+    topLeft: Radius.elliptical(bw * 0.38, bw * 0.42),
+    topRight: Radius.elliptical(bw * 0.38, bw * 0.42),
+    bottomLeft: Radius.elliptical(bw * 0.3, bw * 0.26),
+    bottomRight: Radius.elliptical(bw * 0.3, bw * 0.26),
   );
-  if (shadow) {
-    canvas.drawRRect(shape.shift(Offset(0, h * 0.02)), Paint()
-      ..color = const Color(0x55000000)
-      ..maskFilter = MaskFilter.blur(BlurStyle.normal, w * 0.12));
-  }
-  // mirrors
-  final mirror = Paint()..color = body;
-  canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(0, h * 0.3, inset + 2, h * 0.05), Radius.circular(w * 0.04)), mirror);
-  canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(w - inset - 2, h * 0.3, inset + 2, h * 0.05), Radius.circular(w * 0.04)), mirror);
-  canvas.drawRRect(shape, Paint()..color = body);
+}
+
+/// A soft contact shadow under a top-down car [size] big, centred on it (no offset, so it stays
+/// under the car whichever way the car turns). Blurs about [spread] beyond the body.
+void paintTopDownCarShadow(Canvas canvas, Size size, {double spread = 0.18, Color color = const Color(0x66000000)}) {
+  final body = topDownCarBody(size);
+  final sigma = size.width * spread / 2;
+  canvas.drawRRect(body.inflate(size.width * 0.02), Paint()
+    ..color = color
+    ..maskFilter = MaskFilter.blur(BlurStyle.normal, sigma));
+}
+
+/// A car seen from above, pointing up: a rounded [body] (white by default) shaded towards its
+/// sides, two small mirrors, a dark [glass] cabin (windscreen, side and rear glass in one shape)
+/// with the roof over it, and small head and tail lights. Few, broad shapes, so it stays clean
+/// when the map is tilted and the car is foreshortened. [shadow] adds a soft shadow under it
+/// (centred; the map's native layers draw their own with [paintTopDownCarShadow]).
+void paintTopDownCar(Canvas canvas, Size size, {Color body = const Color(0xFFFFFFFF), Color glass = const Color(0xFF2B2F36), Color outline = const Color(0x2E000000), bool shadow = true}) {
+  final w = size.width, h = size.height;
+  final shape = topDownCarBody(size);
+  final bodyRect = shape.outerRect;
+  final l = bodyRect.left, bw = bodyRect.width, cx = bodyRect.center.dx;
+  if (shadow) paintTopDownCarShadow(canvas, size, spread: 0.14);
+  // mirrors, just behind the windscreen's base
+  final mirror = Paint()..color = Color.lerp(body, const Color(0xFF000000), 0.22)!;
+  final my = h * 0.335, mh = h * 0.045, mw = w * 0.13;
+  canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(l - mw * 0.6, my, mw, mh), Radius.circular(mh / 2)), mirror);
+  canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(l + bw - mw * 0.4, my, mw, mh), Radius.circular(mh / 2)), mirror);
+  // the body, a touch darker at the sides (reads as a rounded shape, even tilted)
+  final edge = Color.lerp(body, const Color(0xFF000000), 0.1)!;
+  canvas.drawRRect(
+    shape,
+    Paint()
+      ..shader = LinearGradient(colors: [edge, body, body, edge], stops: const [0, 0.22, 0.78, 1]).createShader(bodyRect),
+  );
   canvas.drawRRect(shape.deflate(0.5), Paint()
     ..color = outline
     ..style = PaintingStyle.stroke
     ..strokeWidth = 1);
-  final l = bodyRect.left, cx = bodyRect.center.dx;
-  final g = Paint()..color = glass;
-  // windscreen
-  canvas.drawPath(
-    Path()
-      ..moveTo(l + bw * 0.1, h * 0.36)
-      ..quadraticBezierTo(cx, h * 0.25, l + bw * 0.9, h * 0.36)
-      ..lineTo(l + bw * 0.8, h * 0.45)
-      ..quadraticBezierTo(cx, h * 0.42, l + bw * 0.2, h * 0.45)
-      ..close(),
-    g,
-  );
-  // rear window
-  canvas.drawPath(
-    Path()
-      ..moveTo(l + bw * 0.2, h * 0.76)
-      ..quadraticBezierTo(cx, h * 0.78, l + bw * 0.8, h * 0.76)
-      ..lineTo(l + bw * 0.88, h * 0.85)
-      ..quadraticBezierTo(cx, h * 0.89, l + bw * 0.12, h * 0.85)
-      ..close(),
-    g,
-  );
-  // side windows
-  final side = Paint()..color = glass.withValues(alpha: 0.85);
-  canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTRB(l + bw * 0.06, h * 0.47, l + bw * 0.13, h * 0.74), Radius.circular(bw * 0.04)), side);
-  canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTRB(l + bw * 0.87, h * 0.47, l + bw * 0.94, h * 0.74), Radius.circular(bw * 0.04)), side);
-  // roof highlight
-  canvas.drawRRect(
-    RRect.fromRectAndRadius(Rect.fromLTRB(l + bw * 0.2, h * 0.47, l + bw * 0.8, h * 0.74), Radius.circular(bw * 0.1)),
-    Paint()..color = Color.lerp(body, const Color(0xFF000000), 0.05)!,
-  );
-  // headlights and tail lights
+  // the cabin: one dark glass shape from the windscreen to the rear window
+  final top = h * 0.29, bottom = h * 0.83;
+  final cabin = Path()
+    ..moveTo(l + bw * 0.16, top + h * 0.04)
+    ..quadraticBezierTo(cx, top - h * 0.015, l + bw * 0.84, top + h * 0.04)
+    ..lineTo(l + bw * 0.9, bottom - h * 0.06)
+    ..quadraticBezierTo(cx, bottom + h * 0.012, l + bw * 0.1, bottom - h * 0.06)
+    ..close();
+  canvas.drawPath(cabin, Paint()..color = glass);
+  // the roof over it, leaving the windscreen in front, the rear window behind, thin side glass
+  final roof = RRect.fromRectAndRadius(Rect.fromLTRB(l + bw * 0.2, h * 0.43, l + bw * 0.8, h * 0.72), Radius.circular(bw * 0.14));
+  canvas.drawRRect(roof, Paint()..color = Color.lerp(body, const Color(0xFF000000), 0.04)!);
+  // head and tail lights
   final head = Paint()..color = const Color(0xFFFFF1C2);
-  canvas.drawOval(Rect.fromCenter(center: Offset(l + bw * 0.24, h * 0.035), width: bw * 0.22, height: h * 0.025), head);
-  canvas.drawOval(Rect.fromCenter(center: Offset(l + bw * 0.76, h * 0.035), width: bw * 0.22, height: h * 0.025), head);
-  final tail = Paint()..color = const Color(0xFFE5343F);
-  canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromCenter(center: Offset(l + bw * 0.2, h * 0.975), width: bw * 0.2, height: h * 0.02), const Radius.circular(1)), tail);
-  canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromCenter(center: Offset(l + bw * 0.8, h * 0.975), width: bw * 0.2, height: h * 0.02), const Radius.circular(1)), tail);
+  canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromCenter(center: Offset(l + bw * 0.24, h * 0.03), width: bw * 0.2, height: h * 0.022), Radius.circular(h * 0.011)), head);
+  canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromCenter(center: Offset(l + bw * 0.76, h * 0.03), width: bw * 0.2, height: h * 0.022), Radius.circular(h * 0.011)), head);
+  final tail = Paint()..color = const Color(0xFFD9363E);
+  canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromCenter(center: Offset(l + bw * 0.22, h * 0.978), width: bw * 0.2, height: h * 0.018), Radius.circular(h * 0.009)), tail);
+  canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromCenter(center: Offset(l + bw * 0.78, h * 0.978), width: bw * 0.2, height: h * 0.018), Radius.circular(h * 0.009)), tail);
 }
 
 /// A top-down car, pointing up, turned by [heading] degrees clockwise.

@@ -193,7 +193,7 @@ class _SavedPlacesScreenState extends ConsumerState<SavedPlacesScreen> {
             child: RefreshIndicator(
               onRefresh: () => ref.read(savedPlacesProvider.notifier).refresh(),
               child: ListView(
-                padding: const EdgeInsets.fromLTRB(AnbessaSpace.page, 4, AnbessaSpace.page, 16),
+                padding: const EdgeInsets.fromLTRB(AnbessaSpace.page, 12, AnbessaSpace.page, 32),
                 children: [
                   Problem(_error, describe: (e) => describeError(l, e)),
                   if (places.hasError) Problem(places.error, describe: (e) => describeError(l, e), onRetry: () => ref.read(savedPlacesProvider.notifier).refresh(), retryLabel: l.retry),
@@ -231,7 +231,7 @@ class _AddressCard extends StatelessWidget {
     final c = context.colors;
     return AppCard(
       onTap: onTap,
-      padding: EdgeInsetsDirectional.fromSTEB(16, compact ? 12 : 4, actions.isEmpty ? 16 : 4, compact ? 12 : 14),
+      padding: EdgeInsetsDirectional.fromSTEB(16, compact ? 12 : 6, actions.isEmpty ? 16 : 4, compact ? 12 : 18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [

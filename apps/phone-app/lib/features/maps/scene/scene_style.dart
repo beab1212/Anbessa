@@ -6,6 +6,7 @@ import 'package:flutter/painting.dart' show Color;
 import 'package:maplibre/maplibre.dart' as ml;
 import 'package:ride_app_core/ride_app_core.dart';
 import 'scene_geojson.dart';
+import 'scene_images.dart' show carImageWidth;
 
 /// What the scene's layers depend on: the theme, imagery under them, 3D, and the image scale.
 @immutable
@@ -50,11 +51,41 @@ const _roundLine = {'line-cap': 'round', 'line-join': 'round'};
 
 List<Object> _kind(SceneRouteKind k) => ['==', ['get', 'kind'], k.name];
 
-/// Size of the symbols by zoom (images are drawn [SceneLook.imageScale] times larger).
-List<Object> _iconSize(SceneLook look, {double far = 0.6, double near = 1.0, double close = 1.2}) {
-  final s = 1 / look.imageScale;
-  return _byZoom([10, far * s, 16, near * s, 19, close * s]);
-}
+/// How wide a car is shown by zoom (logical pixels; its length is about twice that). Real
+/// cars would be a pixel or two wide at city zooms, so they are drawn larger, but they grow with
+/// the map like the streets do, from a readable minimum to about a lane's width up close, and
+/// never past [carImageWidth] (the images are only scaled down).
+const driverCarWidthStops = <(double, double)>[(12, 15), (15, 16), (17, 19), (18, 24), (19, 32)];
+const nearbyCarWidthStops = <(double, double)>[(12, 13), (15, 14), (17, 17), (18, 21), (19, 28)];
+
+/// `icon-size` for a car image: [stops] of shown widths, as a fraction of the image (painted
+/// [SceneLook.imageScale] times larger), interpolated a little faster than linear between them,
+/// as map distances grow.
+List<Object> carIconSize(SceneLook look, List<(double, double)> stops) => [
+      'interpolate',
+      ['exponential', 1.5],
+      ['zoom'],
+      for (final (z, w) in stops) ...[z, w / carImageWidth / look.imageScale],
+    ];
+
+/// The offset of a label over a car, growing with the car: (zoom, logical pixels above).
+List<Object> _labelOffset(SceneLook look, List<(double, double)> stops) => [
+      'interpolate',
+      ['linear'],
+      ['zoom'],
+      for (final (z, dy) in stops) ...[z, ['literal', [0.0, -dy * look.imageScale]]],
+    ];
+
+/// How every car lies on the map: flat on the road (pitch-aligned), turned by the bearing the
+/// heading filter settled on, never hidden by collisions.
+const _carLayout = {
+  'icon-rotate': ['get', 'bearing'],
+  'icon-rotation-alignment': 'map',
+  'icon-pitch-alignment': 'map',
+  'icon-anchor': 'center',
+  'icon-allow-overlap': true,
+  'icon-ignore-placement': true,
+};
 
 /// The scene's layers, bottom to top.
 List<ml.StyleLayer> sceneLayers(SceneLook look) {
@@ -96,18 +127,17 @@ List<ml.StyleLayer> sceneLayers(SceneLook look) {
       layout: _roundLine,
       paint: {'line-color': cssColor(rc.secondary), 'line-width': _byZoom(_straightStops), 'line-dasharray': [0.1, 2.0]},
     ),
+    // each car's contact shadow right under it, then the car
+    ml.SymbolStyleLayer(
+      id: SceneIds.nearbyShadow,
+      sourceId: SceneIds.nearby,
+      layout: {'icon-image': SceneIds.imgCarShadow, 'icon-size': carIconSize(look, nearbyCarWidthStops), ..._carLayout},
+      paint: {'icon-opacity': ['get', 'opacity']},
+    ),
     ml.SymbolStyleLayer(
       id: SceneIds.nearbyCars,
       sourceId: SceneIds.nearby,
-      layout: {
-        'icon-image': SceneIds.imgCarNearby,
-        'icon-size': _iconSize(look, far: 0.55),
-        'icon-rotate': ['get', 'bearing'],
-        'icon-rotation-alignment': 'map',
-        'icon-pitch-alignment': 'map',
-        'icon-allow-overlap': true,
-        'icon-ignore-placement': true,
-      },
+      layout: {'icon-image': SceneIds.imgCarNearby, 'icon-size': carIconSize(look, nearbyCarWidthStops), ..._carLayout},
       paint: {'icon-opacity': ['get', 'opacity']},
     ),
     ml.SymbolStyleLayer(
@@ -118,7 +148,7 @@ List<ml.StyleLayer> sceneLayers(SceneLook look) {
         'icon-image': SceneIds.imgLabelNearby,
         'icon-size': 1 / k,
         'icon-anchor': 'bottom',
-        'icon-offset': [0.0, -16.0 * k],
+        'icon-offset': _labelOffset(look, const [(15, 18), (18, 26), (19, 33)]),
         'icon-allow-overlap': true,
         'icon-ignore-placement': true,
       },
@@ -174,17 +204,14 @@ List<ml.StyleLayer> sceneLayers(SceneLook look) {
       },
     ),
     ml.SymbolStyleLayer(
+      id: SceneIds.driverShadow,
+      sourceId: SceneIds.driver,
+      layout: {'icon-image': SceneIds.imgCarShadow, 'icon-size': carIconSize(look, driverCarWidthStops), ..._carLayout},
+    ),
+    ml.SymbolStyleLayer(
       id: SceneIds.driverCar,
       sourceId: SceneIds.driver,
-      layout: {
-        'icon-image': ['get', 'icon'],
-        'icon-size': _iconSize(look),
-        'icon-rotate': ['get', 'bearing'],
-        'icon-rotation-alignment': 'map',
-        'icon-pitch-alignment': 'map',
-        'icon-allow-overlap': true,
-        'icon-ignore-placement': true,
-      },
+      layout: {'icon-image': ['get', 'icon'], 'icon-size': carIconSize(look, driverCarWidthStops), ..._carLayout},
     ),
     ml.SymbolStyleLayer(
       id: SceneIds.driverLabel,
@@ -194,7 +221,7 @@ List<ml.StyleLayer> sceneLayers(SceneLook look) {
         'icon-image': SceneIds.imgLabelDriver,
         'icon-size': 1 / k,
         'icon-anchor': 'bottom',
-        'icon-offset': [0.0, -26.0 * k],
+        'icon-offset': _labelOffset(look, const [(15, 22), (17, 26), (18, 30), (19, 38)]),
         'icon-allow-overlap': true,
         'icon-ignore-placement': true,
       },

@@ -1,7 +1,8 @@
-// The account hub in the GoRide layout: the profile card (photo, name, phone, rating · trips; the
-// driver's balance with Top up) and one card of rows, on a 360 dp phone with 1.3× text, light and
-// dark, English and Amharic; the light trip count; and the payment badge's re-check only when a
-// trip ends.
+// The account hub in the GoRide layout, relaxed: the profile card (photo, name, phone, rating ·
+// trips; the driver's balance with Top up), a few small titled cards of rows (Ride or Driving,
+// Preferences, Safety & support, Account; rows at least 60 px) and Sign out in its own card, on a
+// 360 dp phone with 1.3× text, light and dark, English and Amharic; the light trip count; and the
+// payment badge's re-check only when a trip ends.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -97,8 +98,16 @@ void main() {
         expect(find.text(l.tripsCount(3)), findsOneWidget);
         expect(find.textContaining('4.9'), findsOneWidget);
         expect(find.text(l.accountTitle), findsOneWidget);
-        for (final label in [l.accSavedAddresses, l.notifications, l.accPaymentMethods, l.accAccountSecurity]) {
+        for (final label in [l.accSavedAddresses, l.accPaymentMethods, l.notifications]) {
           expect(find.widgetWithText(AccountRow, label), findsOneWidget);
+        }
+        // the rows are grouped under quiet section titles, each in its own card
+        expect(find.widgetWithText(AccountSection, l.relaxSectionRide), findsOneWidget);
+        expect(find.widgetWithText(AccountSection, l.relaxSectionDriving), findsNothing);
+        expect(find.descendant(of: find.widgetWithText(AccountSection, l.relaxSectionRide), matching: find.text(l.accSavedAddresses)), findsOneWidget);
+        // roomy rows: at least 60 px, a 40 px tinted icon circle
+        for (final r in find.byType(AccountRow).evaluate()) {
+          expect(tester.getSize(find.byWidget(r.widget)).height, greaterThanOrEqualTo(AccountRow.minHeight));
         }
         // no balance row for riders, no quick-action circles any more
         expect(find.text(l.topUp), findsNothing);
@@ -110,8 +119,12 @@ void main() {
           expect(r.icon.fontFamily, 'MaterialIcons');
         }
         await tester.scrollUntilVisible(find.text(l.appVersion('1.0.0+7')), 300);
-        expect(find.widgetWithText(AccountRow, l.accHelpSupport), findsOneWidget);
+        expect(find.widgetWithText(AccountRow, l.accAccountSecurity), findsOneWidget);
+        expect(find.descendant(of: find.widgetWithText(AccountSection, l.relaxSectionSafety), matching: find.text(l.accHelpSupport)), findsOneWidget);
+        expect(find.descendant(of: find.widgetWithText(AccountSection, l.relaxSectionAccount), matching: find.text(l.accAccountSecurity)), findsOneWidget);
+        // Sign out is its own card, outside every section
         expect(find.text(l.signOut), findsOneWidget);
+        expect(find.ancestor(of: find.text(l.signOut), matching: find.byType(AccountSection)), findsNothing);
         expect(tester.takeException(), isNull);
       });
     }
@@ -127,6 +140,7 @@ void main() {
     expect(find.widgetWithText(AccountRow, l.accSavedAddresses), findsNothing);
     expect(find.widgetWithText(AccountRow, l.switchToRider), findsOneWidget);
     await tester.scrollUntilVisible(find.text(l.vehicles), 200);
+    expect(find.descendant(of: find.widgetWithText(AccountSection, l.relaxSectionDriving), matching: find.text(l.vehicles)), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -159,7 +173,7 @@ void main() {
 
   testWidgets('Sign out asks first in a confirmation sheet', (tester) async {
     await pumpHub(tester, backendWith());
-    await tester.ensureVisible(find.text('Sign out'));
+    await tester.scrollUntilVisible(find.text('Sign out'), 300);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Sign out'));
     await tester.pumpAndSettle();

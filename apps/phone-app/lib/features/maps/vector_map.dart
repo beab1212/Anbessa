@@ -251,9 +251,7 @@ class _VectorMapState extends ConsumerState<VectorMap> {
                 duration: AnbessaMotion.fast,
                 child: ml.WidgetLayer(markers: [for (final p in callouts) marker(p)]),
               ),
-            _withBottom(
-              (bottom) => Positioned(left: 6, right: 72, bottom: bottom + 4, child: MapCredit(vectorAttributionFor(mode))),
-            ),
+            _withBottom((bottom) => MapInfoSlot(bottom: bottom, attribution: vectorAttributionFor(mode))),
             if (w.interactive)
               _withBottom(
                 (bottom) => Positioned(
